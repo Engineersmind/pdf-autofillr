@@ -1,0 +1,7 @@
+# Azure-Specific Dependencies
+-r requirements.txt
+
+# Azure SDK
+azure-storage-blob>=12.19.0
+azure-identity>=1.15.0
+azure-functions>=1.18.0

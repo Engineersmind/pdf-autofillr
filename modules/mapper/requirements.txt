@@ -1,0 +1,36 @@
+# Core Dependencies - Platform Agnostic (No Cloud SDKs!)
+
+# PDF Processing
+PyMuPDF==1.26.5
+numpy==2.3.5
+
+# LLM Clients
+openai==2.6.0
+
+# Tokenization
+tiktoken==0.12.0
+
+# Data Processing
+pandas==2.3.3
+pydantic==2.12.3
+pydantic-settings==2.11.0
+pydantic_core==2.41.4
+
+# Utilities
+python-dotenv==1.1.1
+tenacity==9.1.2
+
+# Logging & Monitoring
+python-json-logger==4.0.0
+
+# HTTP Clients
+httpx==0.28.1
+httpcore==1.0.9
+aiohttp==3.13.1
+requests==2.32.5
+
+# Other dependencies from your current requirements
+regex==2025.9.18
+tqdm==4.67.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0

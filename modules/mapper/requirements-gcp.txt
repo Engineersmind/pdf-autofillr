@@ -1,0 +1,7 @@
+# GCP-Specific Dependencies
+-r requirements.txt
+
+# GCP SDK
+google-cloud-storage>=2.14.0
+google-cloud-logging>=3.9.0
+functions-framework>=3.5.0
