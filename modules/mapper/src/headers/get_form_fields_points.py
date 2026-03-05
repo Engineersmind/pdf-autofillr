@@ -13,8 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.core.logger import setup_logging
 from src.core.config import settings
-from src.clients.s3_client import S3Client
-from src.clients.llm_clients import LLMSelector
+# S3Client imported conditionally where needed (only for AWS mode)
+from src.clients.unified_llm_client import UnifiedLLMClient
 
 # Setup logging
 setup_logging()
@@ -239,6 +239,33 @@ async def extract_headers_with_fields(
     end_time = time.time()
     duration = round(end_time - start_time, 2)
     
+    # Calculate cumulative LLM usage stats from all chunks
+    total_chunks = len(chunk_results)
+    total_prompt_tokens = sum(r.get('llm_usage', {}).get('prompt_tokens', 0) for r in chunk_results)
+    total_completion_tokens = sum(r.get('llm_usage', {}).get('completion_tokens', 0) for r in chunk_results)
+    total_tokens = total_prompt_tokens + total_completion_tokens
+    total_cost_usd = sum(r.get('llm_usage', {}).get('cost_usd', 0.0) for r in chunk_results)
+    
+    # Get model name from first chunk if available
+    llm_model = chunk_results[0].get('llm_usage', {}).get('model', 'unknown') if chunk_results else 'unknown'
+    
+    # Calculate average cost per call and per section
+    avg_cost_per_call = total_cost_usd / total_chunks if total_chunks > 0 else 0.0
+    cost_per_section = total_cost_usd / len(all_sections) if len(all_sections) > 0 else 0.0
+    
+    # Log cumulative LLM stats
+    logger.info("=" * 80)
+    logger.info("HEADERS LLM USAGE SUMMARY")
+    logger.info(f"Model: {llm_model}")
+    logger.info(f"Total Chunks: {total_chunks}")
+    logger.info(f"Total Prompt Tokens: {total_prompt_tokens:,}")
+    logger.info(f"Total Completion Tokens: {total_completion_tokens:,}")
+    logger.info(f"Total Tokens: {total_tokens:,}")
+    logger.info(f"Total Cost: ${total_cost_usd:.6f}")
+    logger.info(f"Average Cost per Chunk: ${avg_cost_per_call:.6f}")
+    logger.info(f"Cost per Section: ${cost_per_section:.6f}")
+    logger.info("=" * 80)
+    
     result = {
         "sections": all_sections,
         "pdf_category": pdf_category,  # Include in result
@@ -247,8 +274,14 @@ async def extract_headers_with_fields(
         "fields_linked": total_fields_linked,
         "execution_time_seconds": duration,
         "llm_usage": {
-            "total_chunks": len(chunk_results),
-            "total_tokens": sum(r.get('input_tokens', 0) + r.get('output_tokens', 0) for r in chunk_results)
+            "model": llm_model,
+            "total_chunks": total_chunks,
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "total_tokens": total_tokens,
+            "total_cost_usd": total_cost_usd,
+            "avg_cost_per_chunk": avg_cost_per_call,
+            "cost_per_section": cost_per_section
         }
     }
     
@@ -520,50 +553,59 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
     # Get LLM client with headers-specific configuration
     provider = settings.headers_llm_provider
     
-    # Get model ID based on provider
+    # Get model ID based on provider (for backwards compatibility)
+    # With LiteLLM, we use model names directly
     if provider == "openai":
-        model_id = settings.headers_openai_model_id
+        model_id = settings.headers_openai_model_id or "gpt-4o"
     elif provider == "claude":
-        model_id = settings.headers_claude_model_id
+        model_id = settings.headers_claude_model_id or "claude-3-5-sonnet-20241022"
     else:
-        raise ValueError(f"Unsupported headers LLM provider: {provider}")
+        # Default to gpt-4o if provider not recognized
+        model_id = "gpt-4o"
+        logger.warning(f"Unsupported headers LLM provider: {provider}, using default: {model_id}")
     
-    logger.info(f"Using {provider} model: {model_id}")
+    logger.info(f"Using model: {model_id}")
     
-    # Create LLM client
-    llm_client = LLMSelector(provider=provider)
-    # Override model_id for headers
-    llm_client.llm.model_id = model_id
-    llm_client.llm.temperature = settings.headers_temperature
-    llm_client.llm.max_tokens = settings.headers_max_tokens
+    # Create UnifiedLLMClient
+    llm_client = UnifiedLLMClient(
+        model=model_id,
+        temperature=settings.headers_temperature,
+        max_tokens=settings.headers_max_tokens,
+        timeout=getattr(settings, 'llm_timeout', 120),
+        max_retries=getattr(settings, 'llm_max_retries', 3)
+    )
     
-    logger.info(f"LLM client configured - model_id: {llm_client.llm.model_id}, temp: {llm_client.llm.temperature}, max_tokens: {llm_client.llm.max_tokens}")
+    logger.info(f"LLM client configured - model: {model_id}, temp: {settings.headers_temperature}, max_tokens: {settings.headers_max_tokens}")
     
     max_retries = 2
     for attempt in range(max_retries):
         try:
-            # Prepare system message for structured extraction
-            system_message = {
-                "role": "system",
-                "content": "Expert PDF form analyzer. Extract hierarchy with field placeholders. Split multiple fields on same line. Handle tables (H3 columns, H4 cells) and checkboxes/radios (H3 question, H4 options). For H2 sections, generate section_context (max 10 words) that includes the key entity/role from H1 (investor, patient, entity, co-investor, spouse, etc.) combined with the H2 topic. Return minimal JSON with a single fid per section."
-            }
+            # Prepare messages for LLM
+            system_message_content = "Expert PDF form analyzer. Extract hierarchy with field placeholders. Split multiple fields on same line. Handle tables (H3 columns, H4 cells) and checkboxes/radios (H3 question, H4 options). For H2 sections, generate section_context (max 10 words) that includes the key entity/role from H1 (investor, patient, entity, co-investor, spouse, etc.) combined with the H2 topic. Return minimal JSON with a single fid per section."
+            
+            messages = [
+                {"role": "system", "content": system_message_content},
+                {"role": "user", "content": prompt}
+            ]
             
             # Run the synchronous LLM call in a thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             
             def call_llm():
-                # For OpenAI, use session messages
-                if provider == "openai":
-                    session_messages = [system_message]
-                    return llm_client.complete(prompt, session_messages=session_messages)
-                else:
-                    # For Claude, simpler approach
-                    return llm_client.complete(prompt)
+                return llm_client.complete(messages)
             
-            response = await loop.run_in_executor(None, call_llm)
+            llm_response = await loop.run_in_executor(None, call_llm)
             
-            # Parse JSON response
-            response_text = response.text if hasattr(response, 'text') else str(response)
+            # Extract response and usage
+            response_text = llm_response.content
+            usage = llm_response.usage
+            
+            # Log token usage and cost
+            logger.info(
+                f"Chunk {chunk_num} LLM call - Tokens: {usage.total_tokens} "
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
+                f"Cost: ${usage.cost_usd:.6f}"
+            )
             
             # Try to extract JSON from response (handle markdown code blocks)
             json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
@@ -580,9 +622,14 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
             chunk_sections = json.loads(json_text)
             elapsed_time = time.time() - start_time
             
-            # Extract token counts if available
-            input_tokens = getattr(response, 'input_tokens', 0)
-            output_tokens = getattr(response, 'output_tokens', 0)
+            # Get LLM usage stats from the response
+            usage_stats = {
+                'prompt_tokens': usage.prompt_tokens,
+                'completion_tokens': usage.completion_tokens,
+                'total_tokens': usage.total_tokens,
+                'cost_usd': usage.cost_usd,
+                'model': usage.model
+            }
             
             sections = chunk_sections.get('sections', [])
             pdf_category = chunk_sections.get('pdf_category')  # Extract pdf_category from first chunk
@@ -605,8 +652,9 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
                 'chunk_num': chunk_num,
                 'pages': page_range,
                 'sections': sections,
-                'input_tokens': input_tokens,
-                'output_tokens': output_tokens,
+                'input_tokens': usage.prompt_tokens,  # Legacy compatibility
+                'output_tokens': usage.completion_tokens,  # Legacy compatibility
+                'llm_usage': usage_stats,  # Full LLM usage stats
                 'time': elapsed_time
             }
             
@@ -1168,6 +1216,7 @@ def find_page_hierarchy(page: int, structural_headings: List[dict]) -> tuple:
 async def load_json_from_storage(path: str) -> dict:
     """Load JSON from S3 or local storage"""
     if path.startswith("s3://"):
+        from src.clients.s3_client import S3Client
         s3_client = S3Client()
         local_temp_path = f"/tmp/headers_temp_{path.split('/')[-1]}"
         s3_client.download_file_from_s3(path, local_temp_path)
@@ -1181,6 +1230,7 @@ async def load_json_from_storage(path: str) -> dict:
 async def save_json_to_storage(data: Any, path: str):
     """Save JSON to S3 or local storage"""
     if path.startswith("s3://"):
+        from src.clients.s3_client import S3Client
         s3_client = S3Client()
         local_temp_path = f"/tmp/headers_output_{path.split('/')[-1]}"
         with open(local_temp_path, 'w', encoding='utf-8') as f:

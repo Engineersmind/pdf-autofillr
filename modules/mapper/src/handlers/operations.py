@@ -12,6 +12,8 @@ import time
 import json
 import asyncio
 import logging
+import shutil
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 from src.core.config import get_complete_file_config, get_processing_output_config
@@ -279,10 +281,10 @@ async def handle_map_operation(
         download_from_source(input_json_path, local_input)
         logger.info("Downloaded both input files")
         
-        # Initialize mapper
-        default_llm_provider = os.getenv("LLM_CURRENT_PROVIDER", "claude")
+        # Initialize mapper - use llm_model from settings (LiteLLM format)
+        from src.core.config import settings
         mapper = SemanticMapper(
-            llm_provider=mapping_config.get("llm_provider", default_llm_provider),
+            llm_provider=mapping_config.get("llm_model", settings.llm_model),
             confidence_threshold=mapping_config.get("confidence_threshold", 0.7),
             chunking_strategy=mapping_config.get("chunking_strategy", "page")
         )
@@ -912,6 +914,14 @@ async def handle_make_embed_file_operation(
     logger.info(f"Session ID: {session_id}, Investor Type: {investor_type}")
     
     try:
+        import json
+        import os
+        import tempfile
+        
+        # Store pdf_doc_id on config for structured output paths (if output_base_path is set)
+        if hasattr(config, 'output_base_path') and config.output_base_path:
+            config.pdf_doc_id = pdf_doc_id
+        
         # Get S3 source paths for operations (NOT local paths)
         # Operations will download/upload using these S3 paths
         input_pdf_s3 = config.s3_input_pdf if hasattr(config, 's3_input_pdf') and config.s3_input_pdf else config.local_input_pdf
@@ -926,32 +936,79 @@ async def handle_make_embed_file_operation(
         
         # Debug: Check if we're using S3 paths or local paths
         if not input_pdf_s3.startswith('s3://'):
-            logger.warning(f"⚠️ Using LOCAL path instead of S3 path for PDF: {input_pdf_s3}")
-            logger.warning("This will cause 'same file' errors! Ensure config.s3_input_pdf is set in Lambda handler.")
+            logger.info(f"ℹ️  Using LOCAL path for testing: {input_pdf_s3}")
+            logger.debug("(Set config.s3_input_pdf when deploying to Lambda)")
         if not input_json_s3.startswith('s3://'):
-            logger.warning(f"⚠️ Using LOCAL path instead of S3 path for JSON: {input_json_s3}")
+            logger.info(f"ℹ️  Using LOCAL path for testing: {input_json_s3}")
+            logger.debug("(Set config.s3_input_json when deploying to Lambda)")
         
-        logger.info(f"Input PDF (S3): {input_pdf_s3}")
-        logger.info(f"Input JSON (S3): {input_json_s3}")
+        logger.info(f"Input PDF: {input_pdf_s3}")
+        logger.info(f"Input JSON: {input_json_s3}")
         
         storage_type = config.source_type
         logger.info(f"Storage type: {storage_type}")
+        
+        # Pre-generate output paths if using structured output
+        if hasattr(config, 'output_base_path') and config.output_base_path:
+            logger.info(f"Using structured output directory: {config.output_base_path}")
+            file_config = config.get_complete_file_config(input_pdf_s3, user_id=user_id, session_id=session_id)
+        else:
+            file_config = None
         
         pipeline_results = {}
         
         # Stage 1: Extract
         logger.info("\n[1/3] Starting EXTRACT stage...")
-        extract_result = await handle_extract_operation(
-            input_file=input_pdf_s3,  # Use S3 path, not local
-            user_id=user_id,
-            session_id=session_id,
-            notifier=notifier,
-            pdf_doc_id=pdf_doc_id,
-            input_json_path=input_json_s3,  # Use S3 path
-            mapping_config=mapping_config
-        )
+        
+        # Check if entry point already extracted (for hash check)
+        if hasattr(config, 'cached_extraction') and config.cached_extraction:
+            logger.info("[Cache] ✅ Using cached extraction from entry point (saves ~5s)")
+            extract_result = config.cached_extraction
+            
+            # Save to file if using structured output
+            if file_config:
+                extracted_json = file_config["extraction_output_path"]
+                os.makedirs(os.path.dirname(extracted_json), exist_ok=True)
+                with open(extracted_json, 'w') as f:
+                    json.dump(extract_result.get('extracted_data', {}), f, indent=2)
+                extract_result["output_file"] = extracted_json
+                logger.info(f"Saved cached extraction to: {extracted_json}")
+            else:
+                # Create temp file for extraction
+                temp_extract = tempfile.NamedTemporaryFile(mode='w', suffix='_extracted.json', delete=False)
+                json.dump(extract_result.get('extracted_data', {}), temp_extract, indent=2)
+                temp_extract.close()
+                extracted_json = temp_extract.name
+                extract_result["output_file"] = extracted_json
+                logger.info(f"Saved cached extraction to temp: {extracted_json}")
+        else:
+            # Run full extraction
+            extract_result = await handle_extract_operation(
+                input_file=input_pdf_s3,  # Use S3 path, not local
+                user_id=user_id,
+                session_id=session_id,
+                notifier=notifier,
+                pdf_doc_id=pdf_doc_id,
+                input_json_path=input_json_s3,  # Use S3 path
+                mapping_config=mapping_config
+            )
+            extracted_json = extract_result["output_file"]
+        
         pipeline_results["extract"] = extract_result
-        extracted_json = extract_result["output_file"]
+        
+        # Track original path BEFORE any moving (for caching)
+        original_extracted_json = extracted_json
+        
+        # If using structured output, move file to proper directory
+        if file_config:
+            expected_path = file_config["extraction"]["extracted_path"]
+            if extracted_json != expected_path:
+                logger.info(f"Moving extracted file to structured output: {expected_path}")
+                os.makedirs(os.path.dirname(expected_path), exist_ok=True)
+                shutil.move(extracted_json, expected_path)
+                extracted_json = expected_path
+                extract_result["output_file"] = expected_path
+        
         # Store both S3 and local paths
         if hasattr(config, 's3_extracted_json'):
             config.s3_extracted_json = extracted_json
@@ -972,6 +1029,13 @@ async def handle_make_embed_file_operation(
         cache_result = None
         cache_hit = False
         
+        # Get cache registry path directly from config.ini
+        cache_registry_path = settings.cache_registry_path
+        if not cache_registry_path:
+            # Fallback to default local path if not configured
+            cache_registry_path = os.path.join(settings.data_output_dir, 'cache', 'hash_registry.json')
+            logger.debug(f"No cache_registry_path in config, using default: {cache_registry_path}")
+        
         # Initialize variables for dual mapper (needed in all code paths)
         semantic_mapping_path = None
         pdf_category = None
@@ -985,39 +1049,86 @@ async def handle_make_embed_file_operation(
         
         if pdf_cache_enabled and pdf_hash:
             try:
-                logger.info("Checking hash cache for MAP optimization...")
-                cache_result = await check_hash_cache(pdf_hash)
+                logger.info(f"Checking hash cache at: {cache_registry_path}")
+                # Ensure cache directory exists (for local paths)
+                if not cache_registry_path.startswith(('s3://', 'gs://', 'azure://')):
+                    os.makedirs(os.path.dirname(cache_registry_path), exist_ok=True)
+                cache_result = await check_hash_cache(pdf_hash, cache_registry_path)
             except Exception as cache_error:
                 logger.warning(f"Cache check failed: {cache_error}. Proceeding with normal MAP operation.")
         
-        # If CACHE HIT: Use cached files and skip MAP stage (but still run EMBED)
+        # If CACHE HIT: Use cached files from config (downloaded to /tmp by entry point)
         if cache_result:
             logger.info(f"🎯 CACHE HIT! Skipping MAP stage (saves ~45s + LLM costs)")
             cache_hit = True
             
             try:
-                # Copy cached files to current user location
-                copied_files = await copy_cached_files(
-                    source_files=cache_result["reference_files"],
-                    target_user_id=user_id,
-                    target_pdf_doc_id=pdf_doc_id,
-                    extracted_json_path=extracted_json
-                )
-                
-                # Get cached mapping files
-                semantic_mapping_path = copied_files.get("mapping_json")
-                radio_groups = copied_files.get("radio_groups")
+                # Check if entry point already downloaded cached files to /tmp
+                if config.cached_mapping_json and config.cached_radio_groups:
+                    logger.info("[Cache] Using cached files downloaded by entry point:")
+                    logger.info(f"   mapping_json: {config.cached_mapping_json}")
+                    logger.info(f"   radio_groups: {config.cached_radio_groups}")
+                    
+                    semantic_mapping_path = config.cached_mapping_json
+                    radio_groups = config.cached_radio_groups
+                    
+                    # Check for dual mapper cached files
+                    has_headers = config.cached_headers_with_fields is not None
+                    has_final_fields = config.cached_final_form_fields is not None
+                    
+                    if has_headers and has_final_fields:
+                        headers_with_fields_path = config.cached_headers_with_fields
+                        final_form_fields_path = config.cached_final_form_fields
+                        logger.info(f"   headers_with_fields: {headers_with_fields_path}")
+                        logger.info(f"   final_form_fields: {final_form_fields_path}")
+                else:
+                    # Fallback: Copy cached files if entry point didn't download them
+                    logger.info("[Cache] Falling back to copy_cached_files (entry point didn't download)")
+                    
+                    # Determine target directory for copied files
+                    if hasattr(config, 'output_base_path') and config.output_base_path and hasattr(config, 'pdf_doc_id'):
+                        # Structured output: use mapping subdirectory
+                        mapping_dir = os.path.join(
+                            config.output_base_path, 
+                            "users", 
+                            str(user_id), 
+                            "pdfs", 
+                            str(config.pdf_doc_id), 
+                            "mapping"
+                        )
+                        os.makedirs(mapping_dir, exist_ok=True)
+                        target_dir = mapping_dir
+                    else:
+                        # Default: same directory as extracted_json
+                        target_dir = os.path.dirname(extracted_json)
+                    
+                    logger.info(f"Copying cached files to: {target_dir}")
+                    
+                    # Copy cached files to current user location
+                    copied_files = await copy_cached_files(
+                        source_files=cache_result["reference_files"],
+                        target_dir=target_dir
+                    )
+                    
+                    # Get cached mapping files
+                    semantic_mapping_path = copied_files.get("mapping_json")
+                    radio_groups = copied_files.get("radio_groups")
+                    
+                    # Check if this is a dual mapper cache
+                    has_headers = "headers_with_fields" in copied_files
+                    has_final_fields = "final_form_fields" in copied_files
+                    
+                    if has_headers and has_final_fields:
+                        headers_with_fields_path = copied_files["headers_with_fields"]
+                        final_form_fields_path = copied_files["final_form_fields"]
                 
                 # Check if this is a dual mapper cache
-                has_headers = "headers_with_fields" in copied_files
-                has_final_fields = "final_form_fields" in copied_files
-                
                 if use_second_mapper and has_headers and has_final_fields:
                     # Dual mapper cache hit - we have headers but still need to run RAG
                     logger.info("🎯 DUAL MAPPER: Found cached headers, but RAG predictions are ephemeral (not cached)")
                     
-                    headers_with_fields_path = copied_files["headers_with_fields"]
-                    final_form_fields_path = copied_files["final_form_fields"]
+                    # Use the paths we already set above (either from config.cached_* or copied_files)
+                    # headers_with_fields_path and final_form_fields_path are already set
                     
                     logger.info(f"✅ Using cached headers:")
                     logger.info(f"   headers_with_fields: {headers_with_fields_path}")
@@ -1132,6 +1243,7 @@ async def handle_make_embed_file_operation(
                         # Save headers to cache for next time
                         await save_hash_cache(
                             pdf_hash=pdf_hash,
+                            cache_registry_path=cache_registry_path,
                             embedded_pdf=None,
                             mapping_json=semantic_mapping_path,
                             radio_groups=radio_groups,
@@ -1157,6 +1269,7 @@ async def handle_make_embed_file_operation(
                         # Still save headers to cache even if RAG failed
                         await save_hash_cache(
                             pdf_hash=pdf_hash,
+                            cache_registry_path=cache_registry_path,
                             embedded_pdf=None,
                             mapping_json=semantic_mapping_path,
                             radio_groups=radio_groups,
@@ -1172,6 +1285,7 @@ async def handle_make_embed_file_operation(
                 else:
                     # Standard cache hit (semantic mapper only)
                     logger.info("Using cached semantic mapping")
+                    logger.info(f"semantic_mapping_path = {semantic_mapping_path}")
                     
                     # Save LLM predictions
                     llm_predictions_path = await save_llm_predictions_to_rag_bucket(
@@ -1180,14 +1294,13 @@ async def handle_make_embed_file_operation(
                         pdf_doc_id=pdf_doc_id,
                         session_id=session_id
                     )
+                    logger.info(f"LLM predictions saved to: {llm_predictions_path}")
                     
-                    # Convert semantic mapping to Java format
-                    logger.info("🔄 Converting cached semantic mapping to Java-compatible format...")
-                    mapping_json = await convert_semantic_to_java_format(
-                        semantic_mapping_path=semantic_mapping_path,
-                        user_id=user_id,
-                        pdf_doc_id=pdf_doc_id
-                    )
+                    # NOTE: Cached mapping_json is already in Java-compatible format
+                    # (it was converted when first saved to cache)
+                    # So we DON'T need to convert again - just use it directly
+                    logger.info("✅ Using cached mapping (already in Java-compatible format)")
+                    mapping_json = semantic_mapping_path  # Already Java-compatible
                 
                 logger.info(f"✅ Cache files processed. MAP stage skipped.")
                 
@@ -1230,12 +1343,22 @@ async def handle_make_embed_file_operation(
                 
                 # Import here to avoid circular dependency
                 from src.headers import get_form_fields_points
-                from src.core.config import get_headers_output_config
                 
-                # Prepare paths for headers extraction
-                headers_config = get_headers_output_config(input_pdf_s3, user_id, pdf_doc_id)
-                headers_output_path = headers_config["headers_with_fields_path"]
-                final_fields_output_path = headers_config["final_form_fields_path"]
+                # Generate proper header file paths in output/users/{user_id}/pdfs/{pdf_doc_id}/headers/
+                if file_config:
+                    # Use structured output paths
+                    base_name = Path(input_pdf_s3).stem  # e.g., "small_4page"
+                    output_base = Path(config.output_base_path) / "users" / str(user_id) / "pdfs" / str(pdf_doc_id) / "headers"
+                    os.makedirs(output_base, exist_ok=True)
+                    
+                    headers_output_path = str(output_base / f"{base_name}_user_{user_id}_session_{session_id}_headers_with_fields.json")
+                    final_fields_output_path = str(output_base / f"{base_name}_user_{user_id}_session_{session_id}_final_form_fields.json")
+                else:
+                    # Fallback to old method (for backwards compatibility)
+                    from src.core.config import get_headers_output_config
+                    headers_config = get_headers_output_config(extracted_json, user_id, pdf_doc_id)
+                    headers_output_path = headers_config["headers_with_fields_path"]
+                    final_fields_output_path = headers_config["final_form_fields_path"]
                 
                 # Store paths for caching
                 headers_with_fields_path = headers_output_path
@@ -1325,6 +1448,7 @@ async def handle_make_embed_file_operation(
                     # This allows next attempt to skip expensive header extraction
                     await save_hash_cache(
                         pdf_hash=pdf_hash,
+                        cache_registry_path=cache_registry_path,
                         embedded_pdf=None,  # DO NOT cache embedded_pdf
                         mapping_json=semantic_mapping_path,
                         radio_groups=radio_groups,
@@ -1393,6 +1517,30 @@ async def handle_make_embed_file_operation(
         if hasattr(config, 's3_mapped_json'):
             config.s3_mapped_json = mapping_json
             config.s3_radio_json = radio_groups
+        
+        # Track original paths BEFORE any moving (for caching)
+        original_mapping_json = mapping_json
+        original_radio_groups = radio_groups
+        
+        # If using structured output, move files to proper directory
+        if file_config:
+            expected_mapping_path = file_config["mapping"]["mapping_path"]
+            expected_radio_path = file_config["mapping"]["radio_groups_path"]
+            
+            if mapping_json != expected_mapping_path:
+                logger.info(f"Moving mapping file to structured output: {expected_mapping_path}")
+                os.makedirs(os.path.dirname(expected_mapping_path), exist_ok=True)
+                shutil.move(mapping_json, expected_mapping_path)
+                mapping_json = expected_mapping_path
+                pipeline_results["map"]["mapping_path"] = expected_mapping_path
+            
+            if radio_groups != expected_radio_path:
+                logger.info(f"Moving radio groups to structured output: {expected_radio_path}")
+                os.makedirs(os.path.dirname(expected_radio_path), exist_ok=True)
+                shutil.move(radio_groups, expected_radio_path)
+                radio_groups = expected_radio_path
+                pipeline_results["map"]["radio_groups_path"] = expected_radio_path
+        
         logger.info(f"✅ MAP completed: {mapping_json}")
         
         # Stage 3: Embed
@@ -1409,6 +1557,20 @@ async def handle_make_embed_file_operation(
         )
         pipeline_results["embed"] = embed_result
         embedded_pdf = embed_result["output_file"]
+        
+        # Track original path BEFORE any moving (for caching)
+        original_embedded_pdf = embedded_pdf
+        
+        # If using structured output, move file to proper directory
+        if file_config:
+            expected_embedded_path = file_config["embedding"]["embedded_pdf_path"]
+            if embedded_pdf != expected_embedded_path:
+                logger.info(f"Moving embedded PDF to structured output: {expected_embedded_path}")
+                os.makedirs(os.path.dirname(expected_embedded_path), exist_ok=True)
+                shutil.move(embedded_pdf, expected_embedded_path)
+                embedded_pdf = expected_embedded_path
+                embed_result["output_file"] = expected_embedded_path
+        
         # Store S3 path
         if hasattr(config, 's3_embedded_pdf'):
             config.s3_embedded_pdf = embedded_pdf
@@ -1418,13 +1580,21 @@ async def handle_make_embed_file_operation(
         if pdf_cache_enabled and pdf_hash and not cache_hit:
             try:
                 logger.info("💾 Saving results to hash cache for future use...")
+                
+                # Save to cache registry with current file paths
+                # Entry point will handle uploading files to cloud and updating paths
+                # IMPORTANT: Save semantic_mapping_path (raw semantic mapper output),
+                # NOT mapping_json (Java-converted). Java conversion is done on-demand.
                 await save_hash_cache(
                     pdf_hash=pdf_hash,
+                    cache_registry_path=cache_registry_path,
                     embedded_pdf=embedded_pdf,
-                    mapping_json=mapping_json,
+                    mapping_json=semantic_mapping_path,  # ← Cache semantic output, not Java-converted
                     radio_groups=radio_groups,
                     user_id=user_id,
-                    pdf_doc_id=pdf_doc_id
+                    pdf_doc_id=pdf_doc_id,
+                    headers_with_fields=headers_with_fields_path if use_second_mapper else None,
+                    final_form_fields=final_form_fields_path if use_second_mapper else None
                 )
                 logger.info("✅ Results saved to cache successfully")
             except Exception as cache_save_error:
@@ -1474,6 +1644,7 @@ async def handle_make_embed_file_operation(
                 "mapper_used": "Semantic + RAG" if use_second_mapper and not rag_api_failed else "Semantic only"
             },
             "status": "success",
+            "pipeline_results": pipeline_results,
             "timing": {
                 "total_pipeline_seconds": total_duration,
                 "stage_breakdown": pipeline_results

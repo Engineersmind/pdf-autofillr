@@ -23,6 +23,17 @@ class BaseStorageConfig(ABC):
             source_type: Type of storage (aws, azure, gcp, local)
         """
         self.source_type = source_type
+        
+        # Cache placeholders - populated by entry points after hash check
+        # These are paths to cached files downloaded to /tmp
+        self.cached_embedded_pdf: Optional[str] = None
+        self.cached_mapping_json: Optional[str] = None
+        self.cached_radio_groups: Optional[str] = None
+        self.cached_headers_with_fields: Optional[str] = None
+        self.cached_final_form_fields: Optional[str] = None
+        
+        # Cached extraction result - avoids re-extracting PDF if already done for hash check
+        self.cached_extraction: Optional[Dict] = None
     
     @abstractmethod
     def parse_path(self, file_path: str) -> Dict[str, str]:

@@ -1,0 +1,88 @@
+openapi: 3.0.3
+info:
+  title: PDF Orchestrator API
+  description: |
+    Orchestrator service for PDF upload handling and workflow coordination.
+    
+    This API provides:
+    - PDF upload endpoints
+    - Workflow orchestration
+    - Status tracking
+    
+    **TODO**: Complete this specification when Orchestrator module is implemented.
+    
+  version: 1.0.0
+  contact:
+    name: Engineersmind
+    email: team@engineersmind.com
+
+servers:
+  - url: https://api.example.com/v1/orchestrator
+    description: Production server
+  - url: http://localhost:8002
+    description: Local development server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: orchestrator
+    description: Upload and workflow orchestration
+
+paths:
+  /upload:
+    post:
+      summary: Upload PDF
+      description: |
+        Upload a PDF file and trigger processing workflow.
+        
+        **TODO**: Define request/response schemas when implemented.
+      operationId: uploadPdf
+      tags:
+        - orchestrator
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              description: "TODO: Define schema with file upload"
+      responses:
+        '200':
+          description: Upload successful
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "TODO: Define schema"
+
+  /status/{session_id}:
+    get:
+      summary: Get processing status
+      description: |
+        Get the status of a processing workflow.
+        
+        **TODO**: Define response schema when implemented.
+      operationId: getStatus
+      tags:
+        - orchestrator
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

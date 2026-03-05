@@ -1,71 +1,55 @@
 """
-PDF Hash Cache Utility
+PDF Hash Cache Utility - Platform Independent
 
-Manages caching of PDF hash -> embedded file mappings in S3.
+Manages caching of PDF hash -> embedded file mappings.
 Enables skipping expensive MAP operation when same PDF structure is encountered.
+
+Works with local file paths - platform-agnostic (no AWS/Azure/GCP dependencies).
+The entrypoint/adapter layer is responsible for downloading cache from cloud storage.
 """
 
 import json
 import time
+import os
+from pathlib import Path
 from typing import Optional, Dict
-from src.clients.s3_client import S3Client
 import logging
-from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Cache configuration from settings
-def get_pdf_cache_bucket() -> str:
-    """Get PDF cache bucket from settings, fallback to storage bucket."""
-    pdf_cache_bucket = getattr(settings, 'pdf_cache_bucket', '')
-    if not pdf_cache_bucket:
-        pdf_cache_bucket = getattr(settings, 'storage_s3_bucket', 'your-bucket-name')
-    return pdf_cache_bucket
-
-def get_pdf_cache_s3_path() -> str:
-    """Get full S3 path to cache file."""
-    cache_prefix = getattr(settings, 'pdf_cache_prefix', 'pdf_cache')
-    return f"s3://{get_pdf_cache_bucket()}/{cache_prefix}/hash_registry.json"
-
 
 async def check_hash_cache(
-    pdf_hash: str
+    pdf_hash: str,
+    cache_registry_path: str
 ) -> Optional[Dict]:
     """
     Check if this PDF hash has been processed before.
     
     Args:
         pdf_hash: SHA-256 hash of PDF structure fingerprint
+        cache_registry_path: Local path to hash_registry.json file
         
     Returns:
         Cache entry dict if found, None otherwise.
         Cache entry contains:
-        - reference_files: Dict with embedded_pdf, mapping_json, radio_groups S3 paths
+        - reference_files: Dict with embedded_pdf, mapping_json, radio_groups paths
         - usage_count: Number of times this hash has been used
         - created_at: Timestamp when first cached
         - last_used_at: Timestamp when last used
     """
-    cache_key = pdf_hash  # Just use hash as key (embedded PDF is same for all investor types)
+    cache_key = pdf_hash
     
-    logger.info(f"Checking hash cache for key: {cache_key[:32]}...")
+    logger.info(f"Checking hash cache for key: {cache_key[:32]}... at {cache_registry_path}")
     
     try:
-        # Get cache S3 path
-        cache_s3_path = get_pdf_cache_s3_path()
-        
-        # Download cache file from S3
-        s3_client = S3Client()
-        
-        if not s3_client.object_exists(cache_s3_path):
-            logger.info("Cache file does not exist yet. This is the first hash.")
+        # Check if cache registry file exists
+        if not os.path.exists(cache_registry_path):
+            logger.info("Cache registry does not exist yet. This is the first hash.")
             return None
-        
-        local_cache_path = "/tmp/hash_cache_registry.json"
-        s3_client.download_file_from_s3(cache_s3_path, local_cache_path)
         
         # Load cache data (handle empty file case)
         try:
-            with open(local_cache_path, 'r') as f:
+            with open(cache_registry_path, 'r') as f:
                 content = f.read().strip()
                 if not content:
                     logger.info("Cache file is empty. Treating as cache miss.")
@@ -88,12 +72,11 @@ async def check_hash_cache(
         entry['usage_count'] = entry.get('usage_count', 0) + 1
         entry['last_used_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         
-        # Save updated cache back to S3 (async - fire and forget style)
+        # Save updated cache back to file
         try:
             cache_data['last_updated'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-            with open(local_cache_path, 'w') as f:
+            with open(cache_registry_path, 'w') as f:
                 json.dump(cache_data, f, indent=2)
-            s3_client.upload_file_to_s3(local_cache_path, cache_s3_path)
             logger.debug("Updated cache usage statistics")
         except Exception as update_error:
             logger.warning(f"Failed to update cache statistics: {update_error}")
@@ -107,6 +90,7 @@ async def check_hash_cache(
 
 async def save_hash_cache(
     pdf_hash: str,
+    cache_registry_path: str,
     embedded_pdf: str,
     mapping_json: str,
     radio_groups: str,
@@ -123,34 +107,27 @@ async def save_hash_cache(
     
     Args:
         pdf_hash: SHA-256 hash of PDF structure fingerprint
-        embedded_pdf: S3 path to embedded PDF file
-        mapping_json: S3 path to semantic mapping JSON file
-        radio_groups: S3 path to radio groups JSON file
+        cache_registry_path: Local path to hash_registry.json file
+        embedded_pdf: Path to embedded PDF file
+        mapping_json: Path to semantic mapping JSON file
+        radio_groups: Path to radio groups JSON file
         user_id: User ID who first processed this PDF
         pdf_doc_id: PDF document ID
         pdf_category: Optional PDF category classification dict
-        rag_predictions: Optional S3 path to RAG predictions JSON file (dual mapper)
-        combined_mapping: Optional S3 path to combined mapping JSON file (dual mapper)
-        headers_with_fields: Optional S3 path to headers_with_fields.json (dual mapper)
-        final_form_fields: Optional S3 path to final_form_fields.json (dual mapper)
+        rag_predictions: Optional path to RAG predictions JSON file (dual mapper)
+        combined_mapping: Optional path to combined mapping JSON file (dual mapper)
+        headers_with_fields: Optional path to headers_with_fields.json (dual mapper)
+        final_form_fields: Optional path to final_form_fields.json (dual mapper)
     """
-    cache_key = pdf_hash  # Just use hash as key
+    cache_key = pdf_hash
     
     logger.info(f"Saving hash cache entry for key: {cache_key[:32]}...")
     
     try:
-        # Get cache S3 path
-        cache_s3_path = get_pdf_cache_s3_path()
-        
-        s3_client = S3Client()
-        
         # Load existing cache or create new one
-        local_cache_path = "/tmp/hash_cache_registry.json"
-        
-        if s3_client.object_exists(cache_s3_path):
+        if os.path.exists(cache_registry_path):
             try:
-                s3_client.download_file_from_s3(cache_s3_path, local_cache_path)
-                with open(local_cache_path, 'r') as f:
+                with open(cache_registry_path, 'r') as f:
                     content = f.read().strip()
                     if content:
                         cache_data = json.loads(content)
@@ -257,11 +234,12 @@ async def save_hash_cache(
         cache_data['total_entries'] = len(entries)
         cache_data['last_updated'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         
-        # Save back to S3
-        with open(local_cache_path, 'w') as f:
-            json.dump(cache_data, f, indent=2)
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(cache_registry_path), exist_ok=True)
         
-        s3_client.upload_file_to_s3(local_cache_path, cache_s3_path)
+        # Save back to file
+        with open(cache_registry_path, 'w') as f:
+            json.dump(cache_data, f, indent=2)
         
         logger.info(f"Successfully saved cache entry. Total entries: {cache_data['total_entries']}")
         
@@ -271,200 +249,228 @@ async def save_hash_cache(
 
 async def copy_cached_files(
     source_files: Dict[str, str],
-    target_user_id: int,
-    target_pdf_doc_id: int,
-    extracted_json_path: str
+    target_dir: str
 ) -> Dict[str, str]:
     """
-    Copy cached S3 files to new location for current user.
-    Uses proper naming convention from get_processing_output_config.
+    Copy cached files to new location - Platform Independent.
     
     Args:
-        source_files: Dict with keys: embedded_pdf, mapping_json, radio_groups (S3 paths)
-        target_user_id: Target user ID
-        target_pdf_doc_id: Target PDF document ID
-        extracted_json_path: Path to extracted JSON (used to determine naming pattern)
+        source_files: Dict with keys: embedded_pdf, mapping_json, radio_groups (local paths)
+        target_dir: Target directory where files should be copied
         
     Returns:
-        Dict with new S3 paths for copied files
+        Dict with new paths for copied files
     """
-    logger.info(f"Copying cached files for user_id={target_user_id}, pdf_doc_id={target_pdf_doc_id}")
+    import shutil
     
-    # Use get_processing_output_config to get proper file paths
-    from src.core.config import get_processing_output_config
+    logger.info(f"Copying cached files to {target_dir}")
     
-    processing_config = get_processing_output_config(
-        extracted_json_path,
-        user_id=target_user_id,
-        session_id=None  # No session for make_embed_file operation
-    )
+    # Ensure target directory exists
+    os.makedirs(target_dir, exist_ok=True)
     
-    s3_client = S3Client()
     target_paths = {}
     
-    # Map file types to processing_config keys
-    file_mapping = {
-        "embedded_pdf": None,  # Will be derived from processing config
-        "mapping_json": "mapping_path",
-        "radio_groups": "radio_groups_path",
-        "rag_predictions": None,  # Will be derived (dual mapper)
-        "combined_mapping": None,  # Will be derived (dual mapper)
-        "headers_with_fields": None,  # Will be derived (dual mapper)
-        "final_form_fields": None  # Will be derived (dual mapper)
-    }
-    
-    for file_type, source_path in source_files.items():
-        if not source_path:  # Skip if None (e.g., RAG not available)
-            continue
+    try:
+        for file_key, source_path in source_files.items():
+            if not source_path or not os.path.exists(source_path):
+                logger.warning(f"Source file not found for {file_key}: {source_path}")
+                continue
             
-        try:
-            # Get target path from processing config
-            if file_type == "embedded_pdf":
-                # Embedded PDF path: base_name_user_{user_id}_embedded.pdf
-                if extracted_json_path.startswith("s3://"):
-                    s3_parts = extracted_json_path.split('/')
-                    bucket = s3_parts[2]
-                    key_parts = '/'.join(s3_parts[3:])
-                    
-                    # Remove _extracted.json and get base name
-                    if key_parts.endswith('_extracted.json'):
-                        base_key = key_parts[:-15]
-                    elif key_parts.endswith('.json'):
-                        base_key = key_parts[:-5]
-                        if base_key.endswith('_extracted'):
-                            base_key = base_key[:-10]
-                    else:
-                        base_key = key_parts.replace('_extracted', '')
-                    
-                    target_path = f"s3://{bucket}/{base_key}_user_{target_user_id}_embedded.pdf"
-                else:
-                    # Local path
-                    import os
-                    base_path = extracted_json_path.replace('_extracted.json', '')
-                    target_path = f"{base_path}_user_{target_user_id}_embedded.pdf"
-            elif file_type == "rag_predictions":
-                # RAG predictions path: base_name_rag_predictions.json
-                if extracted_json_path.startswith("s3://"):
-                    s3_parts = extracted_json_path.split('/')
-                    bucket = s3_parts[2]
-                    key_parts = '/'.join(s3_parts[3:])
-                    
-                    if key_parts.endswith('_extracted.json'):
-                        base_key = key_parts[:-15]
-                    else:
-                        base_key = key_parts.replace('_extracted.json', '')
-                    
-                    target_path = f"s3://{bucket}/{base_key}_rag_predictions.json"
-                else:
-                    base_path = extracted_json_path.replace('_extracted.json', '')
-                    target_path = f"{base_path}_rag_predictions.json"
-            elif file_type == "combined_mapping":
-                # Combined mapping path: base_name_final_mapping_json_combined.json
-                if extracted_json_path.startswith("s3://"):
-                    s3_parts = extracted_json_path.split('/')
-                    bucket = s3_parts[2]
-                    key_parts = '/'.join(s3_parts[3:])
-                    
-                    if key_parts.endswith('_extracted.json'):
-                        base_key = key_parts[:-15]
-                    else:
-                        base_key = key_parts.replace('_extracted.json', '')
-                    
-                    target_path = f"s3://{bucket}/{base_key}_final_mapping_json_combined.json"
-                else:
-                    base_path = extracted_json_path.replace('_extracted.json', '')
-                    target_path = f"{base_path}_final_mapping_json_combined.json"
-            elif file_type == "headers_with_fields":
-                # Headers with fields path: base_name_headers_with_fields.json
-                if extracted_json_path.startswith("s3://"):
-                    s3_parts = extracted_json_path.split('/')
-                    bucket = s3_parts[2]
-                    key_parts = '/'.join(s3_parts[3:])
-                    
-                    if key_parts.endswith('_extracted.json'):
-                        base_key = key_parts[:-15]
-                    else:
-                        base_key = key_parts.replace('_extracted.json', '')
-                    
-                    target_path = f"s3://{bucket}/{base_key}_headers_with_fields.json"
-                else:
-                    base_path = extracted_json_path.replace('_extracted.json', '')
-                    target_path = f"{base_path}_headers_with_fields.json"
-            elif file_type == "final_form_fields":
-                # Final form fields path: base_name_final_form_fields.json
-                if extracted_json_path.startswith("s3://"):
-                    s3_parts = extracted_json_path.split('/')
-                    bucket = s3_parts[2]
-                    key_parts = '/'.join(s3_parts[3:])
-                    
-                    if key_parts.endswith('_extracted.json'):
-                        base_key = key_parts[:-15]
-                    else:
-                        base_key = key_parts.replace('_extracted.json', '')
-                    
-                    target_path = f"s3://{bucket}/{base_key}_final_form_fields.json"
-                else:
-                    base_path = extracted_json_path.replace('_extracted.json', '')
-                    target_path = f"{base_path}_final_form_fields.json"
-            else:
-                # Use processing config for mapping and radio_groups
-                config_key = file_mapping[file_type]
-                target_path = processing_config[config_key]
+            # Get filename and copy to target directory
+            filename = os.path.basename(source_path)
+            target_path = os.path.join(target_dir, filename)
             
-            # Copy S3 object using server-side copy (no download needed!)
-            s3_client.copy_object(source_path, target_path)
-            target_paths[file_type] = target_path
+            # Skip copy if source and target are the same
+            if os.path.abspath(source_path) == os.path.abspath(target_path):
+                logger.info(f"Skipped {file_key}: already at target location {target_path}")
+                target_paths[file_key] = target_path
+                continue
             
-            logger.info(f"Copied {file_type}: {source_path.split('/')[-1]} -> {target_path}")
-            
-        except Exception as copy_error:
-            logger.error(f"Failed to copy {file_type}: {copy_error}")
-            raise
-    
-    logger.info(f"Successfully copied {len(target_paths)} cached files")
-    return target_paths
+            shutil.copy2(source_path, target_path)
+            target_paths[file_key] = target_path
+            logger.info(f"Copied {file_key}: {source_path} -> {target_path}")
+        
+        return target_paths
+        
+    except Exception as e:
+        logger.error(f"Failed to copy cached files: {e}")
+        raise
 
 
-async def get_cache_stats() -> Dict:
+async def get_cache_stats(cache_registry_path: str) -> Dict:
     """
-    Get cache statistics (for monitoring/debugging).
+    Get statistics about the hash cache.
     
+    Args:
+        cache_registry_path: Local path to hash_registry.json file
+        
     Returns:
-        Dict with cache statistics: total_entries, cache_size_kb, etc.
+        Dict with cache statistics
     """
     try:
-        # Get cache S3 path
-        cache_s3_path = get_pdf_cache_s3_path()
-        
-        s3_client = S3Client()
-        
-        if not s3_client.object_exists(cache_s3_path):
+        if not os.path.exists(cache_registry_path):
             return {
                 "total_entries": 0,
-                "cache_exists": False
+                "cache_file_exists": False
             }
         
-        local_cache_path = "/tmp/hash_cache_registry.json"
-        s3_client.download_file_from_s3(cache_s3_path, local_cache_path)
+        with open(cache_registry_path, 'r') as f:
+            content = f.read().strip()
+            if not content:
+                return {
+                    "total_entries": 0,
+                    "cache_file_exists": True,
+                    "cache_file_empty": True
+                }
+            cache_data = json.loads(content)
         
-        with open(local_cache_path, 'r') as f:
-            cache_data = json.load(f)
+        entries = cache_data.get('entries', {})
         
-        import os
-        cache_size_kb = os.path.getsize(local_cache_path) / 1024
+        # Calculate additional stats
+        total_usage = sum(entry.get('usage_count', 0) for entry in entries.values())
+        avg_usage = total_usage / len(entries) if entries else 0
         
         return {
-            "total_entries": cache_data.get('total_entries', 0),
-            "cache_exists": True,
-            "cache_size_kb": round(cache_size_kb, 2),
-            "last_updated": cache_data.get('last_updated'),
-            "version": cache_data.get('version')
+            "total_entries": len(entries),
+            "total_cache_hits": total_usage,
+            "avg_cache_hits_per_entry": round(avg_usage, 2),
+            "last_updated": cache_data.get('last_updated', 'N/A'),
+            "cache_file_exists": True
         }
         
     except Exception as e:
-        logger.warning(f"Failed to get cache stats: {e}")
+        logger.error(f"Failed to get cache stats: {e}")
         return {
-            "total_entries": 0,
-            "cache_exists": False,
             "error": str(e)
         }
+
+
+async def populate_cached_files_to_config(
+    pdf_hash: str,
+    cache_registry_path: str,
+    config,
+    download_to_tmp: bool = True
+) -> bool:
+    """
+    Check cache and populate config with cached file paths.
+    
+    This function is called by entry points (Lambda/Local handlers) BEFORE
+    running the main operation. It:
+    1. Checks if PDF hash exists in cache
+    2. If found, downloads cached files to /tmp
+    3. Populates config.cached_* placeholders with /tmp paths
+    
+    Args:
+        pdf_hash: SHA-256 hash of PDF structure fingerprint
+        cache_registry_path: Path to hash_registry.json
+        config: Storage config object (AWS/Azure/GCP/Local)
+        download_to_tmp: If True, download to /tmp; else use original paths
+        
+    Returns:
+        True if cache hit and files populated, False otherwise
+    """
+    logger.info(f"[Cache] Checking cache for PDF hash: {pdf_hash[:32]}...")
+    
+    # Check cache
+    cache_result = await check_hash_cache(pdf_hash, cache_registry_path)
+    
+    if not cache_result:
+        logger.info("[Cache] No cache hit - will run full pipeline")
+        return False
+    
+    logger.info(f"[Cache] Cache HIT! Usage count: {cache_result.get('usage_count', 0)}")
+    
+    # Get reference files from cache
+    ref_files = cache_result.get('reference_files', {})
+    
+    if not ref_files:
+        logger.warning("[Cache] Cache entry exists but has no reference_files")
+        return False
+    
+    try:
+        # Download files to /tmp and populate config
+        import tempfile
+        import uuid
+        from .storage_helper import download_from_source
+        
+        tmp_dir = os.path.join(tempfile.gettempdir(), f"pdf_cache_{uuid.uuid4().hex[:8]}")
+        os.makedirs(tmp_dir, exist_ok=True)
+        
+        logger.info(f"[Cache] Downloading cached files to: {tmp_dir}")
+        
+        # Download embedded PDF
+        if ref_files.get('embedded_pdf'):
+            tmp_path = os.path.join(tmp_dir, "cached_embedded.pdf")
+            try:
+                downloaded_path = download_from_source(ref_files['embedded_pdf'], tmp_path)
+                if downloaded_path and os.path.exists(downloaded_path):
+                    config.cached_embedded_pdf = downloaded_path
+                    logger.info(f"[Cache] ✓ Downloaded embedded_pdf to {downloaded_path}")
+                else:
+                    logger.warning(f"[Cache] Failed to download embedded_pdf")
+            except Exception as e:
+                logger.warning(f"[Cache] Error downloading embedded_pdf: {e}")
+        
+        # Download mapping JSON
+        if ref_files.get('mapping_json'):
+            tmp_path = os.path.join(tmp_dir, "cached_mapping.json")
+            try:
+                downloaded_path = download_from_source(ref_files['mapping_json'], tmp_path)
+                if downloaded_path and os.path.exists(downloaded_path):
+                    config.cached_mapping_json = downloaded_path
+                    logger.info(f"[Cache] ✓ Downloaded mapping_json to {downloaded_path}")
+                else:
+                    logger.warning(f"[Cache] Failed to download mapping_json")
+            except Exception as e:
+                logger.warning(f"[Cache] Error downloading mapping_json: {e}")
+        
+        # Download radio groups
+        if ref_files.get('radio_groups'):
+            tmp_path = os.path.join(tmp_dir, "cached_radio_groups.json")
+            try:
+                downloaded_path = download_from_source(ref_files['radio_groups'], tmp_path)
+                if downloaded_path and os.path.exists(downloaded_path):
+                    config.cached_radio_groups = downloaded_path
+                    logger.info(f"[Cache] ✓ Downloaded radio_groups to {downloaded_path}")
+                else:
+                    logger.warning(f"[Cache] Failed to download radio_groups")
+            except Exception as e:
+                logger.warning(f"[Cache] Error downloading radio_groups: {e}")
+        
+        # Download headers with fields
+        if ref_files.get('headers_with_fields'):
+            tmp_path = os.path.join(tmp_dir, "cached_headers_with_fields.json")
+            try:
+                downloaded_path = download_from_source(ref_files['headers_with_fields'], tmp_path)
+                if downloaded_path and os.path.exists(downloaded_path):
+                    config.cached_headers_with_fields = downloaded_path
+                    logger.info(f"[Cache] ✓ Downloaded headers_with_fields to {downloaded_path}")
+                else:
+                    logger.warning(f"[Cache] Failed to download headers_with_fields")
+            except Exception as e:
+                logger.warning(f"[Cache] Error downloading headers_with_fields: {e}")
+        
+        # Download final form fields
+        if ref_files.get('final_form_fields'):
+            tmp_path = os.path.join(tmp_dir, "cached_final_form_fields.json")
+            try:
+                downloaded_path = download_from_source(ref_files['final_form_fields'], tmp_path)
+                if downloaded_path and os.path.exists(downloaded_path):
+                    config.cached_final_form_fields = downloaded_path
+                    logger.info(f"[Cache] ✓ Downloaded final_form_fields to {downloaded_path}")
+                else:
+                    logger.warning(f"[Cache] Failed to download final_form_fields")
+            except Exception as e:
+                logger.warning(f"[Cache] Error downloading final_form_fields: {e}")
+        
+        # Verify we got at least the essential files
+        if config.cached_mapping_json and config.cached_radio_groups:
+            logger.info("[Cache] Successfully populated config with cached files")
+            return True
+        else:
+            logger.warning("[Cache] Failed to download essential cached files (mapping_json, radio_groups)")
+            return False
+            
+    except Exception as e:
+        logger.error(f"[Cache] Error downloading cached files: {e}", exc_info=True)
+        return False

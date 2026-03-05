@@ -63,14 +63,28 @@ class SemanticMapper:
             self.include_field_name_variants = semantic_config["include_field_name_variants"]
             self.include_description = semantic_config["include_description"]
         
-        # Initialize LLM
-        from src.clients.llm_clients import LLMSelector
-        LLM = LLMSelector(provider=llm_name)
-        self.llm = LLM.llm
-        self.max_threads = settings.llm_max_threads  # Get from config instead of LLM object
+        # Initialize LLM with UnifiedLLMClient (LiteLLM)
+        from src.clients.unified_llm_client import UnifiedLLMClient
+        
+        # Get LLM config from settings
+        llm_model = llm_name  # Model name in LiteLLM format
+        llm_temperature = getattr(settings, 'llm_temperature', 0.0)
+        llm_max_tokens = getattr(settings, 'llm_max_tokens', 4096)
+        llm_timeout = getattr(settings, 'llm_timeout', 120)
+        llm_max_retries = getattr(settings, 'llm_max_retries', 3)
+        
+        self.llm = UnifiedLLMClient(
+            model=llm_model,
+            temperature=llm_temperature,
+            max_tokens=llm_max_tokens,
+            timeout=llm_timeout,
+            max_retries=llm_max_retries
+        )
+        self.max_threads = settings.llm_max_threads
 
-        logger.info(f"Initialized SemanticMapper with LLM: {llm_name}, max_threads: {self.max_threads}")
-        logger.info(f"Config - confidence_threshold: {self.confidence_threshold}, include_description: {self.include_description}")
+        logger.info(f"Initialized SemanticMapper with LLM: {llm_model}, max_threads: {self.max_threads}")
+        logger.info(f"Config - temperature: {llm_temperature}, confidence_threshold: {self.confidence_threshold}")
+        logger.info(f"LLM Config - max_tokens: {llm_max_tokens}, timeout: {llm_timeout}s, max_retries: {llm_max_retries}")
 
         # Initialize tokenizer
         self.tokenizer = tiktoken.encoding_for_model("gpt-3.5-turbo")
@@ -655,10 +669,15 @@ Guidelines:
     Output:
     """
         raw_response = llm.complete(prompt)
-        if hasattr(raw_response, "text"):
+        
+        # Extract content from LLMResponse object
+        if hasattr(raw_response, "content"):
+            text = raw_response.content
+        elif hasattr(raw_response, "text"):
             text = raw_response.text
         else:
-            text = raw_response
+            text = str(raw_response)
+        
         cleaned_json = re.sub(r"^```json\n?|```$", "", text.strip(), flags=re.MULTILINE)
         parsed = json.loads(cleaned_json)
         return parsed
@@ -765,17 +784,29 @@ Guidelines:
             try:
                 # STAGE 3: Send to LLM
                 llm_start = time.time()
-                response = await asyncio.to_thread(self.llm.complete, prompt)
+                
+                # Use UnifiedLLMClient - returns LLMResponse with usage tracking
+                messages = [{"role": "user", "content": prompt}]
+                llm_response = await asyncio.to_thread(self.llm.complete, messages)
+                
                 llm_time = time.time() - llm_start
                 timing_info["llm_call_time"] = llm_time
                 
-                raw_response = response.text if hasattr(response, 'text') else response
-                output_tokens = len(self.tokenizer.encode(raw_response))
-                total_tokens = input_tokens + output_tokens
+                # Extract response content and usage
+                raw_response = llm_response.content
+                usage = llm_response.usage
                 
                 logger.info(f"[{chunk_key}] LLM call completed in {llm_time:.2f}s")
-                logger.info(f"[{chunk_key}] Tokens - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}")
-                logger.info(f"[{chunk_key}] Processing speed: {input_tokens/llm_time:.1f} input tokens/sec, {output_tokens/llm_time:.1f} output tokens/sec")
+                logger.info(
+                    f"[{chunk_key}] Tokens - Input: {usage.prompt_tokens}, "
+                    f"Output: {usage.completion_tokens}, Total: {usage.total_tokens}"
+                )
+                logger.info(f"[{chunk_key}] Cost: ${usage.cost_usd:.6f}")
+                logger.info(
+                    f"[{chunk_key}] Processing speed: "
+                    f"{usage.prompt_tokens/llm_time:.1f} input tokens/sec, "
+                    f"{usage.completion_tokens/llm_time:.1f} output tokens/sec"
+                )
 
                 # Log raw response for debugging
                 logger.debug(f"[{chunk_key}] Raw LLM response: {raw_response[:200]}..." if len(raw_response) > 200 else f"[{chunk_key}] Raw LLM response: {raw_response}")
@@ -975,9 +1006,22 @@ Guidelines:
                 
                 # Execute radio grouping
                 grouper = GroupByLLM(extracted_data, **groupby_kwargs)
-                radio_groups = grouper.group()
+                radio_groups_result = grouper.group()
                 
-                # Save radio groups using local storage
+                # Extract just the groups (without llm_usage metadata)
+                radio_groups = radio_groups_result.get("groups", {})
+                
+                # Log LLM usage stats for radio grouping
+                if "llm_usage" in radio_groups_result:
+                    usage = radio_groups_result["llm_usage"]
+                    logger.info(
+                        f"🔘 Radio grouping LLM usage - Model: {usage.get('model')}, "
+                        f"Calls: {usage.get('total_calls')}, "
+                        f"Tokens: {usage.get('total_tokens')}, "
+                        f"Cost: ${usage.get('total_cost_usd', 0):.6f}"
+                    )
+                
+                # Save radio groups using local storage (only the groups, no metadata)
                 radio_storage_config = {
                     "type": "local",
                     "path": radio_path
@@ -1142,6 +1186,20 @@ Guidelines:
             logger.info(f"   🧵 Max threads used: {self.max_threads}")
             logger.info(f"   📁 Output: {mapping_path}")
             
+            # Log LLM usage statistics
+            llm_stats = self.llm.get_cumulative_stats()
+            logger.info(f"")
+            logger.info(f"💰 LLM USAGE STATISTICS:")
+            logger.info(f"   🤖 Model: {llm_stats['model']}")
+            logger.info(f"   📞 Total LLM calls: {llm_stats['total_calls']}")
+            logger.info(f"   📊 Tokens - Prompt: {llm_stats['total_prompt_tokens']:,}, Completion: {llm_stats['total_completion_tokens']:,}, Total: {llm_stats['total_tokens']:,}")
+            logger.info(f"   💵 Total cost: ${llm_stats['total_cost_usd']:.6f}")
+            if llm_stats['total_calls'] > 0:
+                logger.info(f"   💰 Avg cost per call: ${llm_stats['total_cost_usd']/llm_stats['total_calls']:.6f}")
+            if total_fields_mapped > 0:
+                logger.info(f"   💎 Cost per field mapped: ${llm_stats['total_cost_usd']/total_fields_mapped:.6f}")
+            logger.info(f"")
+            
             # Return detailed statistics with local paths for operations
             return {
                 "mapping_path": local_mapping_path,
@@ -1170,6 +1228,16 @@ Guidelines:
                         "chunk_processing": round(stage_timings['chunk_processing'], 2),
                         "result_saving": round(stage_timings['result_saving'], 2)
                     }
+                },
+                "llm_usage": {
+                    "model": llm_stats['model'],
+                    "total_calls": llm_stats['total_calls'],
+                    "total_prompt_tokens": llm_stats['total_prompt_tokens'],
+                    "total_completion_tokens": llm_stats['total_completion_tokens'],
+                    "total_tokens": llm_stats['total_tokens'],
+                    "total_cost_usd": round(llm_stats['total_cost_usd'], 6),
+                    "avg_cost_per_call": round(llm_stats['total_cost_usd']/llm_stats['total_calls'], 6) if llm_stats['total_calls'] > 0 else 0,
+                    "cost_per_field": round(llm_stats['total_cost_usd']/total_fields_mapped, 6) if total_fields_mapped > 0 else 0
                 }
             }
             

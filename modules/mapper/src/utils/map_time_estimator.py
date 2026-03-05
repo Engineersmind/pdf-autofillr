@@ -2,7 +2,6 @@ import math
 import os
 from typing import Any, Dict
 
-from src.clients.s3_client import S3Client
 from src.core.config import get_chunking_config, settings
 
 DEFAULT_CLAUDE_STAGE_SECONDS = 44.0
@@ -16,6 +15,8 @@ def _load_json(path: str) -> Dict[str, Any]:
         raise ValueError("JSON path is required")
 
     if path.startswith("s3://"):
+        # Lazy import - only load S3Client when actually needed for S3 paths
+        from src.clients.s3_client import S3Client
         client = S3Client()
         return client.load_json_from_s3(path)
 

@@ -1,0 +1,3 @@
+# NO dependencies!
+# This is a pure interface package with zero external dependencies.
+# All implementations are in specific modules (mapper, rag, orchestrator, etc.)

@@ -1,0 +1,88 @@
+openapi: 3.0.3
+info:
+  title: PDF Chatbot API
+  description: |
+    Chatbot service for conversational PDF form filling interface.
+    
+    This API provides:
+    - Conversational interface for data extraction
+    - State management
+    - Natural language understanding
+    
+    **TODO**: Complete this specification when Chatbot module is implemented.
+    
+  version: 1.0.0
+  contact:
+    name: Engineersmind
+    email: team@engineersmind.com
+
+servers:
+  - url: https://api.example.com/v1/chatbot
+    description: Production server
+  - url: http://localhost:8003
+    description: Local development server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: chatbot
+    description: Conversational interface operations
+
+paths:
+  /chat:
+    post:
+      summary: Send chat message
+      description: |
+        Send a message to the chatbot and get a response.
+        
+        **TODO**: Define request/response schemas when implemented.
+      operationId: sendMessage
+      tags:
+        - chatbot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "TODO: Define schema"
+      responses:
+        '200':
+          description: Response generated
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "TODO: Define schema"
+
+  /session:
+    post:
+      summary: Create chat session
+      description: |
+        Create a new chatbot session.
+        
+        **TODO**: Define request/response schemas when implemented.
+      operationId: createSession
+      tags:
+        - chatbot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

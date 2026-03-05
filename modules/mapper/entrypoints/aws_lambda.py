@@ -420,7 +420,62 @@ async def route_operation(event: dict, operation: str, notifier):
             except Exception as e:
                 logger.warning(f"Failed to download global JSON: {e}")
         
-        return await handle_make_embed_file_operation(
+        # ========== CACHE SETUP: Download hash_registry.json from S3 ==========
+        from src.core.config import settings
+        from src.utils.hash_cache import populate_cached_files_to_config
+        from src.utils.storage_helper import upload_to_source
+        
+        local_cache_registry = None
+        s3_cache_registry_path = None
+        
+        if settings.pdf_cache_enabled:
+            try:
+                # Get S3 path for hash_registry.json from settings
+                s3_cache_registry_path = settings.cache_registry_path
+                
+                if s3_cache_registry_path and s3_cache_registry_path.startswith('s3://'):
+                    local_cache_registry = "/tmp/hash_registry.json"
+                    
+                    try:
+                        download_from_source(s3_cache_registry_path, local_cache_registry)
+                        logger.info(f"[Cache] ✓ Downloaded hash_registry.json from S3 to /tmp")
+                    except Exception as e:
+                        logger.info(f"[Cache] hash_registry.json doesn't exist in S3 yet (first run): {e}")
+                        # Will be created after operation completes
+                    
+                    # Quick extraction to get PDF hash (needed for cache lookup)
+                    logger.info("[Cache] Running quick extraction to get PDF hash...")
+                    from src.extractors.detailed_fitz import DetailedFitzExtractor
+                    extractor = DetailedFitzExtractor(config={})  # Pass empty config for quick extraction
+                    quick_extract = await extractor.extract_to_json(local_pdf_path, output_file=None)
+                    pdf_hash = quick_extract.get('pdf_hash')
+                    
+                    if pdf_hash:
+                        logger.info(f"[Cache] PDF hash: {pdf_hash[:32]}...")
+                        
+                        # Store extraction result on config to avoid re-extracting
+                        config.cached_extraction = quick_extract
+                        
+                        # Check cache and populate config.cached_* fields
+                        cache_hit = await populate_cached_files_to_config(
+                            pdf_hash=pdf_hash,
+                            cache_registry_path=local_cache_registry,
+                            config=config
+                        )
+                        
+                        if cache_hit:
+                            logger.info("[Cache] ✅ Config populated with cached files from /tmp")
+                        else:
+                            logger.info("[Cache] Cache miss - will run full pipeline")
+                    else:
+                        logger.warning("[Cache] Could not generate PDF hash from extraction")
+                else:
+                    logger.info("[Cache] cache_registry_path is not an S3 path, skipping cache download")
+            except Exception as cache_err:
+                logger.warning(f"[Cache] Error setting up cache: {cache_err}")
+        
+        # ========== RUN OPERATION ==========
+        result = await handle_make_embed_file_operation(
             config=config,
             user_id=user_id,
             pdf_doc_id=pdf_doc_id,
@@ -430,6 +485,19 @@ async def route_operation(event: dict, operation: str, notifier):
             use_second_mapper=event.get('use_second_mapper', False),
             notifier=notifier
         )
+        
+        # ========== CACHE CLEANUP: Upload hash_registry.json back to S3 ==========
+        if settings.pdf_cache_enabled and local_cache_registry and s3_cache_registry_path:
+            try:
+                if os.path.exists(local_cache_registry):
+                    upload_to_source(local_cache_registry, s3_cache_registry_path)
+                    logger.info(f"[Cache] ✓ Uploaded hash_registry.json back to S3")
+                else:
+                    logger.warning(f"[Cache] Local cache registry not found at {local_cache_registry}")
+            except Exception as upload_err:
+                logger.error(f"[Cache] Failed to upload hash_registry.json to S3: {upload_err}")
+        
+        return result
     
     elif operation == 'make_form_fields_data_points':
         # Validate parameters - uses user_id + pdf_doc_id (fetches S3 URL internally)

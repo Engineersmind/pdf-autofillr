@@ -1,0 +1,338 @@
+openapi: 3.0.3
+info:
+  title: PDF Mapper API
+  description: |
+    Platform-agnostic PDF field extraction, mapping, embedding, and filling API.
+    
+    This API provides endpoints for:
+    - Extracting form fields from PDFs
+    - Mapping fields using semantic LLM, RAG, or headers
+    - Embedding metadata into PDFs
+    - Filling PDF forms with data
+    
+  version: 1.0.0
+  contact:
+    name: Engineersmind
+    email: team@engineersmind.com
+    url: https://github.com/Engineersmind/pdf-autofillr
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.example.com/v1
+    description: Production server
+  - url: https://staging-api.example.com/v1
+    description: Staging server
+  - url: http://localhost:8000
+    description: Local development server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: mapper
+    description: PDF field extraction, mapping, embedding, and filling operations
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Check if the API is healthy and running
+      operationId: healthCheck
+      tags:
+        - system
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  service:
+                    type: string
+                    example: pdf-mapper
+
+  /extract:
+    post:
+      summary: Extract fields from PDF
+      description: Extract form fields and their properties from a PDF document
+      operationId: extractFields
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractRequest'
+      responses:
+        '200':
+          description: Successfully extracted fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /map:
+    post:
+      summary: Map PDF fields
+      description: Map extracted PDF fields to a target schema using semantic LLM, RAG, headers, or ensemble
+      operationId: mapFields
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapRequest'
+      responses:
+        '200':
+          description: Successfully mapped fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+  /embed:
+    post:
+      summary: Embed metadata into PDF
+      description: Embed mapping metadata into a PDF document
+      operationId: embedMetadata
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbedRequest'
+      responses:
+        '200':
+          description: Successfully embedded metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+  /fill:
+    post:
+      summary: Fill PDF form with data
+      description: Fill a PDF form with provided data
+      operationId: fillPdf
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FillRequest'
+      responses:
+        '200':
+          description: Successfully filled PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+  /make-embed-file:
+    post:
+      summary: Extract, Map, and Embed in one operation
+      description: Complete pipeline - extract fields, map them, and embed metadata into PDF
+      operationId: makeEmbedFile
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeEmbedFileRequest'
+      responses:
+        '200':
+          description: Successfully created embed file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+  /check-embed-file:
+    post:
+      summary: Check if PDF has embedded metadata
+      description: Verify whether a PDF contains embedded mapping metadata
+      operationId: checkEmbedFile
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckEmbedFileRequest'
+      responses:
+        '200':
+          description: Embed status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+  /run-all:
+    post:
+      summary: Run complete pipeline
+      description: Execute the full pipeline - extract, map, embed, and fill
+      operationId: runAll
+      tags:
+        - mapper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperationRequest'
+      responses:
+        '200':
+          description: Pipeline completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+  schemas:
+    OperationRequest:
+      type: object
+      required:
+        - pdf_path
+      properties:
+        pdf_path:
+          type: string
+          description: Path to the PDF file (S3 key, Azure blob, or local path)
+          example: "s3://my-bucket/documents/form.pdf"
+        session_id:
+          type: string
+          format: uuid
+          description: Optional session ID for tracking
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    ExtractRequest:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+
+    MapRequest:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+        - type: object
+          properties:
+            mapper_type:
+              type: string
+              enum: [semantic, rag, headers, ensemble]
+              default: ensemble
+              description: Type of mapper to use
+
+    EmbedRequest:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+
+    FillRequest:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              additionalProperties: true
+              description: Data to fill into the PDF form
+              example:
+                first_name: "John"
+                last_name: "Doe"
+                email: "john@example.com"
+
+    MakeEmbedFileRequest:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+
+    CheckEmbedFileRequest:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+
+    OperationResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          description: Whether the operation was successful
+        data:
+          type: object
+          additionalProperties: true
+          description: Operation result data
+        error:
+          type: string
+          description: Error message if operation failed
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        type:
+          type: string
+          description: Error type/code

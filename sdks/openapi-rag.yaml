@@ -1,0 +1,89 @@
+openapi: 3.0.3
+info:
+  title: PDF RAG API
+  description: |
+    RAG (Retrieval-Augmented Generation) service for PDF field mapping predictions and feedback.
+    
+    This API provides:
+    - RAG-based field mapping predictions
+    - Feedback collection for continuous improvement
+    - Vector search and similarity matching
+    
+    **TODO**: Complete this specification when RAG module is implemented.
+    
+  version: 1.0.0
+  contact:
+    name: Engineersmind
+    email: team@engineersmind.com
+
+servers:
+  - url: https://api.example.com/v1/rag
+    description: Production server
+  - url: http://localhost:8001
+    description: Local development server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: rag
+    description: RAG operations for predictions and feedback
+
+paths:
+  /predict:
+    post:
+      summary: Get RAG predictions
+      description: |
+        Get field mapping predictions using RAG (vector similarity search).
+        
+        **TODO**: Define request/response schemas when implemented.
+      operationId: getRagPredictions
+      tags:
+        - rag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "TODO: Define schema"
+      responses:
+        '200':
+          description: Predictions retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "TODO: Define schema"
+
+  /feedback:
+    post:
+      summary: Submit feedback
+      description: |
+        Submit feedback on mapping results for continuous improvement.
+        
+        **TODO**: Define request/response schemas when implemented.
+      operationId: submitFeedback
+      tags:
+        - rag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "TODO: Define schema"
+      responses:
+        '200':
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

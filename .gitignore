@@ -1,0 +1,15 @@
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/*.so
+**/*.egg
+**/*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.coverage
+
+rough_docs/
+data/
+.vscode

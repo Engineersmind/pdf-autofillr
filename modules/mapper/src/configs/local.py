@@ -137,7 +137,8 @@ class LocalStorageConfig(BaseStorageConfig):
         """
         Generate complete file configuration for local processing.
         
-        Returns config with all pipeline paths in the same directory as input.
+        Returns config with all pipeline paths in the same directory as input,
+        or in output_base_path if set with proper user/pdf directory structure.
         """
         parsed = self.parse_path(input_path)
         
@@ -147,11 +148,42 @@ class LocalStorageConfig(BaseStorageConfig):
             session_suffix = f"_user{user_id}_session{session_id}"
         
         # Base paths
-        directory = parsed["directory"]
         filename = parsed["filename"]
         base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
         
-        # Generate all pipeline paths in same directory
+        # Check if output_base_path is set (for tests or custom directory structure)
+        if hasattr(self, 'output_base_path') and self.output_base_path and user_id is not None:
+            # Create structured output: output_base_path/users/{user_id}/pdfs/{pdf_doc_id}/
+            pdf_doc_id = getattr(self, 'pdf_doc_id', session_id or 1)
+            user_dir = os.path.join(self.output_base_path, "users", str(user_id))
+            pdf_dir = os.path.join(user_dir, "pdfs", str(pdf_doc_id))
+            
+            # Create subdirectories for each stage
+            extraction_dir = os.path.join(pdf_dir, "extraction")
+            mapping_dir = os.path.join(pdf_dir, "mapping")
+            embedding_dir = os.path.join(pdf_dir, "embedding")
+            filling_dir = os.path.join(pdf_dir, "filling")
+            
+            # Create directories
+            os.makedirs(extraction_dir, exist_ok=True)
+            os.makedirs(mapping_dir, exist_ok=True)
+            os.makedirs(embedding_dir, exist_ok=True)
+            os.makedirs(filling_dir, exist_ok=True)
+            
+            # Set output directories for structured layout
+            extraction_output_dir = extraction_dir
+            mapping_output_dir = mapping_dir
+            embedding_output_dir = embedding_dir
+            filling_output_dir = filling_dir
+        else:
+            # Default: all in same directory as input
+            directory = parsed["directory"]
+            extraction_output_dir = directory
+            mapping_output_dir = directory
+            embedding_output_dir = directory
+            filling_output_dir = directory
+        
+        # Generate all pipeline paths
         config = {
             "source_type": "local",
             "input_path": parsed["path"],
@@ -160,24 +192,24 @@ class LocalStorageConfig(BaseStorageConfig):
             
             # Extraction stage outputs
             "extraction": {
-                "extracted_path": os.path.join(directory, f"{base_name}{session_suffix}_extracted.json"),
-                "radio_groups_path": os.path.join(directory, f"{base_name}{session_suffix}_radio_groups.json")
+                "extracted_path": os.path.join(extraction_output_dir, f"{base_name}{session_suffix}_extracted.json"),
+                "radio_groups_path": os.path.join(extraction_output_dir, f"{base_name}{session_suffix}_radio_groups.json")
             },
             
             # Mapping stage outputs
             "mapping": {
-                "mapping_path": os.path.join(directory, f"{base_name}{session_suffix}_mapped_fields.json"),
-                "radio_groups_path": os.path.join(directory, f"{base_name}{session_suffix}_radio_groups.json")
+                "mapping_path": os.path.join(mapping_output_dir, f"{base_name}{session_suffix}_mapped_fields.json"),
+                "radio_groups_path": os.path.join(mapping_output_dir, f"{base_name}{session_suffix}_radio_groups.json")
             },
             
             # Embedding stage output
             "embedding": {
-                "embedded_pdf_path": os.path.join(directory, f"{base_name}{session_suffix}_embedded.pdf")
+                "embedded_pdf_path": os.path.join(embedding_output_dir, f"{base_name}{session_suffix}_embedded.pdf")
             },
             
             # Filling stage output
             "filling": {
-                "filled_pdf_path": os.path.join(directory, f"{base_name}{session_suffix}_filled.pdf")
+                "filled_pdf_path": os.path.join(filling_output_dir, f"{base_name}{session_suffix}_filled.pdf")
             }
         }
         

@@ -12,6 +12,12 @@ class GroupByLLM(BaseGrouper):
         self.threshold = self.params.get("threshold", 2)
         self.llm = self.params.get("llm", None)
         self.keys_data = self.params.get("keys_data", {})
+        
+        # Initialize cumulative LLM usage tracking
+        self.total_llm_calls = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_cost_usd = 0.0
 
     def get_context_lines(self):
         radio_gids = set()
@@ -89,12 +95,20 @@ class GroupByLLM(BaseGrouper):
             if not self.llm:
                 raise ValueError("LLM is not initialized")
             
-            raw_response = self.llm.complete(prompt)
+            # Use UnifiedLLMClient - returns LLMResponse with usage tracking
+            messages = [{"role": "user", "content": prompt}]
+            llm_response = self.llm.complete(messages)
             
-            if not raw_response or not hasattr(raw_response, 'text'):
-                raise ValueError("LLM returned empty or invalid response")
+            # Extract response and track cumulative usage
+            usage = llm_response.usage
+            self.total_llm_calls += 1
+            self.total_prompt_tokens += usage.prompt_tokens
+            self.total_completion_tokens += usage.completion_tokens
+            self.total_cost_usd += usage.cost_usd
             
-            cleaned_json = re.sub(r"^```json\n?|```$", "", raw_response.text.strip(), flags=re.MULTILINE)
+            logger.info(f"Field grouping LLM call - Tokens: {usage.total_tokens} (prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), Cost: ${usage.cost_usd:.6f}")
+            
+            cleaned_json = re.sub(r"^```json\n?|```$", "", llm_response.content.strip(), flags=re.MULTILINE)
             
             if not cleaned_json.strip():
                 raise ValueError("LLM response is empty after cleaning")
@@ -121,7 +135,7 @@ class GroupByLLM(BaseGrouper):
         Perform field grouping
         
         Returns:
-            dict: Grouped fields
+            dict: Grouped fields with LLM usage stats
             
         Raises:
             RuntimeError: If grouping fails
@@ -132,12 +146,48 @@ class GroupByLLM(BaseGrouper):
             
             if not lines:
                 logger.warning(f"No {self.field_type} fields found to group")
-                return {}
+                return {"groups": {}, "llm_usage": self._get_llm_usage_stats()}
             
             # Step 2: Use LLM to group fields from text
             groups = self.group_fields_from_text(lines)
-            return groups
+            
+            # Step 3: Log cumulative LLM stats
+            self._log_cumulative_stats()
+            
+            return {
+                "groups": groups,
+                "llm_usage": self._get_llm_usage_stats()
+            }
             
         except Exception as e:
             logger.error(f"Field grouping failed: {str(e)}", exc_info=True)
             raise RuntimeError(f"Failed to group {self.field_type} fields: {str(e)}") from e
+    
+    def _get_llm_usage_stats(self):
+        """Get cumulative LLM usage statistics"""
+        total_tokens = self.total_prompt_tokens + self.total_completion_tokens
+        avg_cost_per_call = self.total_cost_usd / self.total_llm_calls if self.total_llm_calls > 0 else 0.0
+        
+        return {
+            "model": self.llm.model if self.llm else "unknown",
+            "total_calls": self.total_llm_calls,
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_completion_tokens": self.total_completion_tokens,
+            "total_tokens": total_tokens,
+            "total_cost_usd": self.total_cost_usd,
+            "avg_cost_per_call": avg_cost_per_call
+        }
+    
+    def _log_cumulative_stats(self):
+        """Log cumulative LLM usage statistics"""
+        stats = self._get_llm_usage_stats()
+        logger.info("=" * 80)
+        logger.info("FIELD GROUPING LLM USAGE SUMMARY")
+        logger.info(f"Model: {stats['model']}")
+        logger.info(f"Total Calls: {stats['total_calls']}")
+        logger.info(f"Total Prompt Tokens: {stats['total_prompt_tokens']:,}")
+        logger.info(f"Total Completion Tokens: {stats['total_completion_tokens']:,}")
+        logger.info(f"Total Tokens: {stats['total_tokens']:,}")
+        logger.info(f"Total Cost: ${stats['total_cost_usd']:.6f}")
+        logger.info(f"Average Cost per Call: ${stats['avg_cost_per_call']:.6f}")
+        logger.info("=" * 80)

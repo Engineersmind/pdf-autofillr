@@ -1,20 +1,72 @@
 
 import os
+import configparser
+from pathlib import Path
 from typing import Dict, Any
 from pydantic_settings import BaseSettings
 
+# Load config.ini
+config_ini = configparser.ConfigParser()
+config_ini_path = Path(__file__).parent.parent.parent / "config.ini"
+if config_ini_path.exists():
+    config_ini.read(config_ini_path)
+else:
+    # Fallback: try to find config.ini in current directory
+    config_ini.read("config.ini")
+
+def get_ini_value(section: str, key: str, fallback=None):
+    """Helper to safely get value from config.ini"""
+    try:
+        if fallback is None:
+            return config_ini.get(section, key)
+        return config_ini.get(section, key, fallback=fallback)
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        return fallback
+
+def get_ini_int(section: str, key: str, fallback: int):
+    """Helper to safely get int value from config.ini"""
+    try:
+        return config_ini.getint(section, key, fallback=fallback)
+    except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+        return fallback
+
+def get_ini_float(section: str, key: str, fallback: float):
+    """Helper to safely get float value from config.ini"""
+    try:
+        return config_ini.getfloat(section, key, fallback=fallback)
+    except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+        return fallback
+
+def get_ini_bool(section: str, key: str, fallback: bool):
+    """Helper to safely get boolean value from config.ini"""
+    try:
+        return config_ini.getboolean(section, key, fallback=fallback)
+    except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+        return fallback
+
+def get_source_type() -> str:
+    """Get the source_type from [general] section to determine which config section to use"""
+    return get_ini_value("general", "source_type", "local")
+
 class Settings(BaseSettings):
-    # LLM Configuration
+    # LLM Configuration (Legacy - kept for backwards compatibility)
     llm_current_provider: str = "claude"
     llm_max_threads: int = 10
     
-    # Claude/Bedrock Configuration
+    # LiteLLM Configuration (loaded from config.ini [mapping] section)
+    llm_model: str = get_ini_value("mapping", "llm_model", "gpt-4o")
+    llm_temperature: float = get_ini_float("mapping", "llm_temperature", 0.0)
+    llm_max_tokens: int = get_ini_int("mapping", "llm_max_tokens", 4096)
+    llm_timeout: int = get_ini_int("mapping", "llm_timeout", 120)
+    llm_max_retries: int = get_ini_int("mapping", "llm_max_retries", 3)
+    
+    # Claude/Bedrock Configuration (Legacy)
     claude_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
     claude_region: str = "us-east-1"
     claude_temperature: float = 0.1
     claude_max_tokens: int = 20000
     
-    # OpenAI Configuration
+    # OpenAI Configuration (Legacy)
     openai_model_id: str = "gpt-4"
     openai_api_key: str = ""
     openai_temperature: float = 0.1
@@ -107,14 +159,18 @@ class Settings(BaseSettings):
     pdf_cache_bucket: str = ""  # S3 bucket for cache storage (defaults to storage_s3_bucket if empty)
     pdf_cache_prefix: str = "pdf-registry"  # S3 prefix for cache files
     
-    # Headers Extraction Configuration
-    headers_llm_provider: str = "openai"  # LLM provider for header extraction (openai, claude)
-    headers_openai_model_id: str = "gpt-4.1"  # OpenAI model for header extraction
-    headers_claude_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"  # Claude model for header extraction
-    headers_chunk_size: int = 9  # Number of pages to process in each chunk (same as mapper)
-    headers_max_workers: int = 10  # Max parallel workers for chunk processing (same as llm_max_threads)
-    headers_temperature: float = 0.1  # Temperature for LLM calls
-    headers_max_tokens: int = 32000  # Max tokens for header extraction
+    # Cache registry path - read from config.ini based on source_type
+    # Will use [local], [aws], [azure], or [gcp] section based on source_type in [general]
+    cache_registry_path: str = get_ini_value(get_source_type(), "cache_registry_path", "")
+    
+    # Headers Extraction Configuration (loaded from config.ini [headers] section)
+    headers_llm_provider: str = get_ini_value("headers", "headers_llm_provider", "claude")
+    headers_openai_model_id: str = get_ini_value("headers", "headers_openai_model_id", "gpt-4o")
+    headers_claude_model_id: str = get_ini_value("headers", "headers_claude_model_id", "claude-3-5-sonnet-20241022")
+    headers_chunk_size: int = get_ini_int("headers", "headers_chunk_size", 5)
+    headers_max_workers: int = get_ini_int("headers", "headers_max_workers", 3)
+    headers_temperature: float = get_ini_float("headers", "headers_temperature", 0.0)
+    headers_max_tokens: int = get_ini_int("headers", "headers_max_tokens", 8192)
     
     # RAG API Configuration (for second mapper)
     rag_api_url: str = "https://eko6lfz3yx4dk4aai7o5dwk4vi0qkwzj.lambda-url.us-east-1.on.aws"  # RAG API endpoint
@@ -125,6 +181,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         env_prefix = ""
+        extra = "allow"  # Allow extra fields from .env that aren't defined in Settings
 
 settings = Settings()
 
