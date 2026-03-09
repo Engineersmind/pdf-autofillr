@@ -1,0 +1,132 @@
+# PDF Autofiller - Mapper Configuration Template
+# ==============================================
+# Copy this file to config.ini and update with your settings
+
+[general]
+# Storage type: local, aws, azure, or gcp
+source_type = local
+
+# Enable PDF hash caching (recommended)
+pdf_cache_enabled = true
+
+# RAG API URL (optional - leave empty to disable second mapper)
+rag_api_url = 
+
+
+[mapping]
+# LLM Model Configuration
+# Examples:
+#   - gpt-4o (OpenAI)
+#   - claude-3-5-sonnet-20241022 (Anthropic)
+#   - bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0 (AWS Bedrock)
+#   - azure/gpt-4 (Azure OpenAI)
+llm_model = gpt-4o
+
+# LLM Settings
+llm_temperature = 0.05
+llm_max_tokens = 8192
+llm_max_retries = 3
+
+# Mapping Settings
+confidence_threshold = 0.7
+chunking_strategy = page
+
+# Use RAG second mapper (requires rag_api_url above)
+use_second_mapper = false
+
+
+[local]
+# Local Development Configuration
+# Update these paths to match your environment
+
+# Cache directory
+cache_registry_path = /path/to/your/cache/hash_registry.json
+
+# Output directory
+output_base_path = /path/to/your/output
+
+# Test files (optional)
+local_input_pdf = /path/to/test/input.pdf
+local_input_json = /path/to/test/input.json
+local_global_json = /path/to/form_keys.json
+
+# RAG data directory (optional)
+rag_data_dir = /path/to/rag-data
+
+# Temp directory
+temp_local_dir = /tmp
+
+
+[aws]
+# AWS S3 Configuration (when source_type = aws)
+cache_registry_path = s3://your-bucket/pdf-autofiller/cache/hash_registry.json
+output_base_path = s3://your-bucket/pdf-autofiller
+rag_bucket_name = rag-bucket-pdf-filler
+temp_local_dir = /tmp
+
+
+[azure]
+# Azure Blob Storage Configuration (when source_type = azure)
+cache_registry_path = azure://your-container/pdf-autofiller/cache/hash_registry.json
+output_base_path = azure://your-container/pdf-autofiller
+rag_container_name = rag-container-pdf-filler
+temp_local_dir = /tmp
+
+
+[gcp]
+# Google Cloud Storage Configuration (when source_type = gcp)
+cache_registry_path = gs://your-bucket/pdf-autofiller/cache/hash_registry.json
+output_base_path = gs://your-bucket/pdf-autofiller
+rag_bucket_name = rag-bucket-pdf-filler
+temp_local_dir = /tmp
+
+
+[paths]
+# Path Templates (auto-generated from settings above)
+# These use variables: {user_id}, {pdf_doc_id}, {filename}
+
+extraction_template = {output_base_path}/users/{user_id}/pdfs/{pdf_doc_id}/extraction/{filename}_extracted.json
+mapping_template = {output_base_path}/users/{user_id}/pdfs/{pdf_doc_id}/mapping/{filename}_mapped.json
+embedded_pdf_template = {output_base_path}/users/{user_id}/pdfs/{pdf_doc_id}/embedding/{filename}_embedded.pdf
+filled_pdf_template = {output_base_path}/users/{user_id}/pdfs/{pdf_doc_id}/filling/{filename}_filled.pdf
+
+
+[headers]
+# Headers Extraction (for document structure)
+headers_llm_provider = openai
+headers_openai_model_id = gpt-4o
+headers_temperature = 0.1
+headers_max_tokens = 32000
+headers_chunk_size = 5
+headers_max_workers = 8
+
+
+[extraction]
+# Field Extraction Settings
+widget_line_distance_threshold = 10
+rounding = 1
+
+
+[logging]
+# Logging Configuration
+log_level = INFO
+log_format = %(asctime)s - %(name)s - %(levelname)s - %(message)s
+extractor_debug = false
+mapper_debug = false
+
+
+[performance]
+# Performance Settings
+async_enabled = true
+max_concurrent_operations = 5
+llm_timeout = 300
+rag_timeout = 180
+api_retry_attempts = 3
+
+
+[notifications]
+# Microsoft Teams Notifications (optional)
+teams_notifications_enabled = false
+teams_webhook_url = 
+notification_level = WARNING
+include_metadata = true
