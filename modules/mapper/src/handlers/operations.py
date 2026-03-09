@@ -1147,37 +1147,58 @@ async def handle_make_embed_file_operation(
                         session_id=session_id
                     )
                     
-                    # Call RAG API (not cached, regenerate)
-                    logger.info("📞 Calling RAG API for fresh predictions...")
-                    try:
-                        rag_predictions_path = await call_rag_api(
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            headers_file_path=final_form_fields_path,
-                            extracted_json_path=extracted_json,
-                            pdf_hash=pdf_hash,
-                            session_id=session_id
-                        )
+                    # Check if RAG API is configured
+                    from src.core.config import settings
+                    rag_api_url = getattr(settings, 'rag_api_url', None)
+                    
+                    if not rag_api_url or rag_api_url.strip() == "":
+                        # RAG API not configured - use semantic only
+                        logger.warning("⚠️  RAG API not configured (rag_api_url is empty)")
+                        logger.info("📋 Using cached semantic mapping only (RAG integration disabled)")
                         
-                        logger.info(f"✅ RAG predictions received: {rag_predictions_path}")
+                        rag_api_failed = True
+                        rag_failure_reason = "RAG API not configured in settings"
                         
-                        # Combine mappings
-                        mapping_json, combined_mapping_path = await combine_mappings(
-                            semantic_mapping_path=semantic_mapping_path,
-                            rag_predictions_path=rag_predictions_path,
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            session_id=session_id
-                        )
-                        
-                        logger.info(f"✅ Combined mapping created from cached semantic + fresh RAG")
-                        
-                    except Exception as rag_error:
-                        logger.error(f"❌ RAG API call failed: {rag_error}")
-                        logger.info("Converting cached semantic mapping to Java format...")
+                        # Convert cached semantic mapping to Java format
                         mapping_json = await convert_semantic_to_java_format(
                             semantic_mapping_path=semantic_mapping_path,
                             user_id=user_id,
+                            pdf_doc_id=pdf_doc_id
+                        )
+                    else:
+                        # Call RAG API (not cached, regenerate)
+                        logger.info("📞 Calling RAG API for fresh predictions...")
+                        logger.info(f"   RAG API URL: {rag_api_url}")
+                        
+                        try:
+                            rag_predictions_path = await call_rag_api(
+                                user_id=user_id,
+                                pdf_doc_id=pdf_doc_id,
+                                headers_file_path=final_form_fields_path,
+                                extracted_json_path=extracted_json,
+                                pdf_hash=pdf_hash,
+                                session_id=session_id
+                            )
+                            
+                            logger.info(f"✅ RAG predictions received: {rag_predictions_path}")
+                            
+                            # Combine mappings
+                            mapping_json, combined_mapping_path = await combine_mappings(
+                                semantic_mapping_path=semantic_mapping_path,
+                                rag_predictions_path=rag_predictions_path,
+                                user_id=user_id,
+                                pdf_doc_id=pdf_doc_id,
+                                session_id=session_id
+                            )
+                            
+                            logger.info(f"✅ Combined mapping created from cached semantic + fresh RAG")
+                            
+                        except Exception as rag_error:
+                            logger.error(f"❌ RAG API call failed: {rag_error}")
+                            logger.info("Converting cached semantic mapping to Java format...")
+                            mapping_json = await convert_semantic_to_java_format(
+                                semantic_mapping_path=semantic_mapping_path,
+                                user_id=user_id,
                             pdf_doc_id=pdf_doc_id
                         )
                 elif use_second_mapper and not has_headers:
@@ -1215,56 +1236,77 @@ async def handle_make_embed_file_operation(
                     if pdf_category:
                         logger.info(f"📋 PDF Category: {pdf_category}")
                     
-                    # Call RAG API
-                    logger.info("📞 Calling RAG API for fresh predictions...")
-                    try:
-                        rag_predictions_path = await call_rag_api(
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            headers_file_path=final_fields_output_path,
-                            extracted_json_path=extracted_json,
-                            pdf_hash=pdf_hash,
-                            session_id=session_id
-                        )
+                    # Check if RAG API is configured
+                    from src.core.config import settings
+                    rag_api_url = getattr(settings, 'rag_api_url', None)
+                    
+                    if not rag_api_url or rag_api_url.strip() == "":
+                        # RAG API not configured - use semantic only
+                        logger.warning("⚠️  RAG API not configured (rag_api_url is empty)")
+                        logger.info("📋 Using cached semantic mapping only (RAG integration disabled)")
                         
-                        logger.info(f"✅ RAG predictions received: {rag_predictions_path}")
+                        rag_api_failed = True
+                        rag_failure_reason = "RAG API not configured in settings"
                         
-                        # Combine mappings
-                        mapping_json, combined_mapping_path = await combine_mappings(
-                            semantic_mapping_path=semantic_mapping_path,
-                            rag_predictions_path=rag_predictions_path,
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            session_id=session_id
-                        )
-                        
-                        logger.info(f"✅ Combined mapping created from cached semantic + fresh RAG")
-                        
-                        # Save headers to cache for next time
-                        await save_hash_cache(
-                            pdf_hash=pdf_hash,
-                            cache_registry_path=cache_registry_path,
-                            embedded_pdf=None,
-                            mapping_json=semantic_mapping_path,
-                            radio_groups=radio_groups,
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            pdf_category=pdf_category,
-                            headers_with_fields=headers_with_fields_path,
-                            final_form_fields=final_form_fields_path,
-                            rag_predictions=None,
-                            combined_mapping=None
-                        )
-                        logger.info("✅ Updated cache with headers (RAG predictions NOT cached)")
-                        
-                    except Exception as rag_error:
-                        logger.error(f"❌ RAG API call failed: {rag_error}")
-                        logger.info("Converting cached semantic mapping to Java format...")
+                        # Convert cached semantic mapping to Java format
                         mapping_json = await convert_semantic_to_java_format(
                             semantic_mapping_path=semantic_mapping_path,
                             user_id=user_id,
                             pdf_doc_id=pdf_doc_id
                         )
+                    else:
+                        # Call RAG API
+                        logger.info("📞 Calling RAG API for fresh predictions...")
+                        logger.info(f"   RAG API URL: {rag_api_url}")
+                        
+                        try:
+                            rag_predictions_path = await call_rag_api(
+                                user_id=user_id,
+                                pdf_doc_id=pdf_doc_id,
+                                headers_file_path=final_fields_output_path,
+                                extracted_json_path=extracted_json,
+                                pdf_hash=pdf_hash,
+                                session_id=session_id
+                            )
+                            
+                            logger.info(f"✅ RAG predictions received: {rag_predictions_path}")
+                            
+                            # Combine mappings
+                            mapping_json, combined_mapping_path = await combine_mappings(
+                                semantic_mapping_path=semantic_mapping_path,
+                                rag_predictions_path=rag_predictions_path,
+                                user_id=user_id,
+                                pdf_doc_id=pdf_doc_id,
+                                session_id=session_id
+                            )
+                        
+                            logger.info(f"✅ Combined mapping created from cached semantic + fresh RAG")
+                        
+                            # Save headers to cache for next time
+                            await save_hash_cache(
+                                pdf_hash=pdf_hash,
+                                cache_registry_path=cache_registry_path,
+                                embedded_pdf=None,
+                                mapping_json=semantic_mapping_path,
+                                radio_groups=radio_groups,
+                                user_id=user_id,
+                                pdf_doc_id=pdf_doc_id,
+                                pdf_category=pdf_category,
+                                headers_with_fields=headers_with_fields_path,
+                                final_form_fields=final_form_fields_path,
+                                rag_predictions=None,
+                                combined_mapping=None
+                            )
+                            logger.info("✅ Updated cache with headers (RAG predictions NOT cached)")
+                            
+                        except Exception as rag_error:
+                            logger.error(f"❌ RAG API call failed: {rag_error}")
+                            logger.info("Converting cached semantic mapping to Java format...")
+                            mapping_json = await convert_semantic_to_java_format(
+                                semantic_mapping_path=semantic_mapping_path,
+                                user_id=user_id,
+                                pdf_doc_id=pdf_doc_id
+                            )
                         
                         # Still save headers to cache even if RAG failed
                         await save_hash_cache(
@@ -1344,21 +1386,16 @@ async def handle_make_embed_file_operation(
                 # Import here to avoid circular dependency
                 from src.headers import get_form_fields_points
                 
-                # Generate proper header file paths in output/users/{user_id}/pdfs/{pdf_doc_id}/headers/
-                if file_config:
-                    # Use structured output paths
-                    base_name = Path(input_pdf_s3).stem  # e.g., "small_4page"
-                    output_base = Path(config.output_base_path) / "users" / str(user_id) / "pdfs" / str(pdf_doc_id) / "headers"
-                    os.makedirs(output_base, exist_ok=True)
-                    
-                    headers_output_path = str(output_base / f"{base_name}_user_{user_id}_session_{session_id}_headers_with_fields.json")
-                    final_fields_output_path = str(output_base / f"{base_name}_user_{user_id}_session_{session_id}_final_form_fields.json")
+                # Get header file paths from file_config (pre-generated by entry point)
+                if file_config and "headers" in file_config:
+                    headers_output_path = file_config["headers"]["headers_with_fields_path"]
+                    final_fields_output_path = file_config["headers"]["final_form_fields_path"]
+                    logger.info(f"Using header paths from config:")
+                    logger.info(f"  headers_with_fields: {headers_output_path}")
+                    logger.info(f"  final_form_fields: {final_fields_output_path}")
                 else:
-                    # Fallback to old method (for backwards compatibility)
-                    from src.core.config import get_headers_output_config
-                    headers_config = get_headers_output_config(extracted_json, user_id, pdf_doc_id)
-                    headers_output_path = headers_config["headers_with_fields_path"]
-                    final_fields_output_path = headers_config["final_form_fields_path"]
+                    # Fallback: Config doesn't have header paths (shouldn't happen with new code)
+                    raise ValueError("file_config missing 'headers' section. Entry point must call get_complete_file_config first.")
                 
                 # Store paths for caching
                 headers_with_fields_path = headers_output_path
@@ -1406,38 +1443,59 @@ async def handle_make_embed_file_operation(
                     session_id=session_id
                 )
                 
-                # Call RAG API to get predictions
-                logger.info("📞 Calling RAG API for predictions...")
+                # Check if RAG API is configured before calling
+                from src.core.config import settings
+                rag_api_url = getattr(settings, 'rag_api_url', None)
                 
-                # Try RAG API call, but save headers to cache even if it fails
-                try:
-                    rag_predictions_path = await call_rag_api(
-                        user_id=user_id,
-                        pdf_doc_id=pdf_doc_id,
-                        headers_file_path=final_fields_output_path,
-                        extracted_json_path=extracted_json,
-                        pdf_hash=pdf_hash,
-                        session_id=session_id
-                    )
+                if not rag_api_url or rag_api_url.strip() == "":
+                    # RAG API not configured - skip it gracefully
+                    logger.warning("⚠️  RAG API not configured (rag_api_url is empty)")
+                    logger.info("📋 Using semantic mapper only (RAG integration disabled)")
                     
-                    logger.info(f"✅ RAG predictions received: {rag_predictions_path}")
+                    rag_api_failed = True
+                    rag_failure_reason = "RAG API not configured in settings"
                     
-                    # Combine both mappings - returns (java_mapping, detailed_predictions)
-                    logger.info("🔄 Combining semantic + RAG mappings...")
-                    mapping_json, combined_mapping_path = await combine_mappings(
+                    # Convert semantic mapping to Java format
+                    logger.info("🔄 Converting semantic mapping to Java-compatible format...")
+                    mapping_json = await convert_semantic_to_java_format(
                         semantic_mapping_path=semantic_mapping_path,
-                        rag_predictions_path=rag_predictions_path,
                         user_id=user_id,
-                        pdf_doc_id=pdf_doc_id,
-                        session_id=session_id
+                        pdf_doc_id=pdf_doc_id
                     )
+                else:
+                    # RAG API is configured - try calling it
+                    logger.info("📞 Calling RAG API for predictions...")
+                    logger.info(f"   RAG API URL: {rag_api_url}")
                     
-                    logger.info(f"✅ Combined mapping created:")
-                    logger.info(f"   📋 Java mapping: {mapping_json}")
-                    logger.info(f"   📊 Detailed predictions: {combined_mapping_path}")
-                    
-                except Exception as rag_error:
-                    logger.error(f"❌ RAG API call failed: {rag_error}")
+                    # Try RAG API call, but save headers to cache even if it fails
+                    try:
+                        rag_predictions_path = await call_rag_api(
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            headers_file_path=final_fields_output_path,
+                            extracted_json_path=extracted_json,
+                            pdf_hash=pdf_hash,
+                            session_id=session_id
+                        )
+                        
+                        logger.info(f"✅ RAG predictions received: {rag_predictions_path}")
+                        
+                        # Combine both mappings - returns (java_mapping, detailed_predictions)
+                        logger.info("🔄 Combining semantic + RAG mappings...")
+                        mapping_json, combined_mapping_path = await combine_mappings(
+                            semantic_mapping_path=semantic_mapping_path,
+                            rag_predictions_path=rag_predictions_path,
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            session_id=session_id
+                        )
+                        
+                        logger.info(f"✅ Combined mapping created:")
+                        logger.info(f"   📋 Java mapping: {mapping_json}")
+                        logger.info(f"   📊 Detailed predictions: {combined_mapping_path}")
+                        
+                    except Exception as rag_error:
+                        logger.error(f"❌ RAG API call failed: {rag_error}")
                     logger.info("💾 Saving headers to cache for next attempt (RAG will be retried)")
                     
                     # Track RAG API failure
@@ -2061,6 +2119,8 @@ async def call_rag_api(
     # Generate session ID if not provided
     if not session_id:
         session_id = f"session_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+    logger.info(f"========================================================================")
     
     logger.info(f"Preparing to call RAG API with session_id={session_id}")
     

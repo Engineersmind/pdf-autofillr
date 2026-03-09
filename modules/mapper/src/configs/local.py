@@ -163,18 +163,21 @@ class LocalStorageConfig(BaseStorageConfig):
             mapping_dir = os.path.join(pdf_dir, "mapping")
             embedding_dir = os.path.join(pdf_dir, "embedding")
             filling_dir = os.path.join(pdf_dir, "filling")
+            headers_dir = os.path.join(pdf_dir, "headers")  # For dual mapper
             
             # Create directories
             os.makedirs(extraction_dir, exist_ok=True)
             os.makedirs(mapping_dir, exist_ok=True)
             os.makedirs(embedding_dir, exist_ok=True)
             os.makedirs(filling_dir, exist_ok=True)
+            os.makedirs(headers_dir, exist_ok=True)
             
             # Set output directories for structured layout
             extraction_output_dir = extraction_dir
             mapping_output_dir = mapping_dir
             embedding_output_dir = embedding_dir
             filling_output_dir = filling_dir
+            headers_output_dir = headers_dir
         else:
             # Default: all in same directory as input
             directory = parsed["directory"]
@@ -182,6 +185,7 @@ class LocalStorageConfig(BaseStorageConfig):
             mapping_output_dir = directory
             embedding_output_dir = directory
             filling_output_dir = directory
+            headers_output_dir = directory
         
         # Generate all pipeline paths
         config = {
@@ -210,6 +214,12 @@ class LocalStorageConfig(BaseStorageConfig):
             # Filling stage output
             "filling": {
                 "filled_pdf_path": os.path.join(filling_output_dir, f"{base_name}{session_suffix}_filled.pdf")
+            },
+            
+            # Headers stage (for dual mapper / RAG)
+            "headers": {
+                "headers_with_fields_path": os.path.join(headers_output_dir, f"{base_name}{session_suffix}_headers_with_fields.json"),
+                "final_form_fields_path": os.path.join(headers_output_dir, f"{base_name}{session_suffix}_final_form_fields.json")
             }
         }
         

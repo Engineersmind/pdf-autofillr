@@ -16,12 +16,19 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "httpx>=0.26.0",
+        "requests>=2.31.0",
+        "rich>=13.0.0",  # For beautiful CLI output
     ],
     extras_require={
         "dev": [
             "pytest>=7.4.0",
             "black>=23.12.0",
             "mypy>=1.8.0",
+        ],
+    },
+    entry_points={
+        "console_scripts": [
+            "pdf-autofiller=pdf_autofiller.cli:main",
         ],
     },
     classifiers=[
