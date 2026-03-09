@@ -173,8 +173,9 @@ class Settings(BaseSettings):
     headers_max_tokens: int = get_ini_int("headers", "headers_max_tokens", 8192)
     
     # RAG API Configuration (for second mapper)
-    rag_api_url: str = "https://eko6lfz3yx4dk4aai7o5dwk4vi0qkwzj.lambda-url.us-east-1.on.aws"  # RAG API endpoint
-    rag_api_key: str = ""  # RAG API key for authentication
+    # Read from config.ini, default to empty (disabled) for local testing
+    rag_api_url: str = get_ini_value("general", "rag_api_url", "")  # RAG API endpoint
+    rag_api_key: str = get_ini_value("general", "rag_api_key", "")  # RAG API key for authentication
     rag_bucket_name: str = "rag-bucket-pdf-filler"  # S3 bucket for RAG predictions
 
     class Config:

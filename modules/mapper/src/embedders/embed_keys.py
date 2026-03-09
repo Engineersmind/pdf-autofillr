@@ -101,8 +101,8 @@ async def run_embed_java_stage(
         )
         
         # Log successful execution
-        if result.stdout:
-            logger.info(f"[📝] Java output: {result.stdout.strip()}")
+        # if result.stdout:
+        #     logger.info(f"[📝] Java output: {result.stdout.strip()}")
             
         # Verify output file was created
         if not os.path.exists(rebuilt_pdf):
