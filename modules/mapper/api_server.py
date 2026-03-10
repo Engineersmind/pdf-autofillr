@@ -7,7 +7,7 @@ This provides HTTP API endpoints for the mapper module operations.
 """
 
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import asyncio
@@ -123,7 +123,8 @@ async def root():
             "make_embed_file": "/mapper/make-embed-file",
             "fill_pdf": "/mapper/fill-pdf",
             "check_embed": "/mapper/check-embed-file",
-            "run_all": "/mapper/run-all"
+            "run_all": "/mapper/run-all",
+            "download": "/download/{file_path}"
         }
     }
 
@@ -359,6 +360,70 @@ async def run_all(request: RunAllRequest):
         
     except Exception as e:
         logger.error(f"Run all failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/download/{file_path:path}")
+async def download_file(file_path: str):
+    """
+    Download file from local storage
+    
+    This endpoint allows SDK clients to download generated files (PDFs, JSONs)
+    from the local storage. Useful for local deployment scenarios where the
+    SDK is on a different machine than the mapper.
+    
+    Security: File path is validated to prevent directory traversal attacks.
+    
+    Args:
+        file_path: Path to file (relative or absolute)
+    
+    Returns:
+        File content as download
+    
+    Example:
+        GET /download/output/filled_1234.pdf
+        GET /download//absolute/path/to/file.json
+    """
+    try:
+        logger.info(f"API: Download request for {file_path}")
+        
+        # Convert to Path object
+        path = Path(file_path)
+        
+        # If relative path, make it absolute from current directory
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        
+        # Resolve to absolute path (handles .., symlinks, etc.)
+        path = path.resolve()
+        
+        # Security check: Ensure file exists and is actually a file
+        if not path.exists():
+            logger.error(f"File not found: {path}")
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        
+        if not path.is_file():
+            logger.error(f"Not a file: {path}")
+            raise HTTPException(status_code=400, detail=f"Not a file: {file_path}")
+        
+        # Optional: Add whitelist of allowed directories for extra security
+        # allowed_dirs = [Path("/path/to/output"), Path("/path/to/temp")]
+        # if not any(path.is_relative_to(allowed_dir) for allowed_dir in allowed_dirs):
+        #     raise HTTPException(status_code=403, detail="Access denied")
+        
+        logger.info(f"Serving file: {path}")
+        
+        # Return file with appropriate headers
+        return FileResponse(
+            path=str(path),
+            filename=path.name,
+            media_type='application/octet-stream'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

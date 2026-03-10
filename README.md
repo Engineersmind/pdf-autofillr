@@ -793,5 +793,5 @@ pdf-autofiller fill embedded.pdf data.json
 
 ---
 
-Made with ❤️ by [Engineersmind](https://github.com/Engineersmind)
+
 

@@ -24,6 +24,7 @@ from src.utils.storage_helper import (
     create_storage_config,
     get_storage_type
 )
+from src.handlers.file_handlers import create_file_handlers
 from src.extractors.detailed_fitz import DetailedFitzExtractor
 from src.mappers.semantic_mapper import SemanticMapper
 from src.embedders.embed_keys import run_embed_java_stage
@@ -65,7 +66,7 @@ async def safe_notify(notifier, operation_name: str, *args, **kwargs) -> bool:
 
 
 async def handle_extract_operation(
-    input_file: str,
+    config,  # Storage config (first parameter)
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
     notifier: Optional[Any] = None,
@@ -78,7 +79,7 @@ async def handle_extract_operation(
     Extract form fields from PDF - works with ANY storage backend.
     
     Args:
-        input_file: Input PDF path (s3://, gs://, azure://, or /local/path)
+        config: Storage config with pre-configured paths
         user_id: Optional user ID for tracking
         session_id: Optional session ID for tracking
         notifier: Optional notification system
@@ -91,13 +92,11 @@ async def handle_extract_operation(
         Operation result with output file path
     """
     start_time = time.time()
-    storage_type = get_storage_type(input_file)
     
     logger.info("=" * 60)
     logger.info("EXTRACT OPERATION")
     logger.info("=" * 60)
-    logger.info(f"Input file: {input_file}")
-    logger.info(f"Storage type: {storage_type}")
+    logger.info(f"Storage type: {config.source_type}")
     logger.info(f"User ID: {user_id}, Session ID: {session_id}")
     
     user_input_details = {
@@ -108,14 +107,15 @@ async def handle_extract_operation(
     }
     
     try:
-        # Get complete file config (auto-detects storage)
-        file_config = get_complete_file_config(input_file, user_id, session_id)
-        logger.info(f"Generated config for storage: {file_config['source_type']}")
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
         
-        # Download PDF to local (works with any storage)
-        local_pdf = f"/tmp/input_{os.path.basename(input_file)}"
-        download_from_source(input_file, local_pdf)
-        logger.info(f"Downloaded to: {local_pdf}")
+        # Get input PDF (already downloaded by entrypoint)
+        local_pdf = input_handler.get_input('input_pdf')
+        if not local_pdf:
+            raise FileNotFoundError("Input PDF not available")
+        
+        logger.info(f"Input PDF: {local_pdf}")
         
         # Initialize extractor
         extractor_config = {
@@ -124,28 +124,23 @@ async def handle_extract_operation(
         }
         extractor = DetailedFitzExtractor(extractor_config)
         
-        # Create LOCAL storage config for output (extractor saves to /tmp/)
-        extraction_output_path = file_config["extraction"]["extracted_path"]
-        # Generate local filename based on output path
-        local_output = f"/tmp/{os.path.basename(extraction_output_path)}"
+        # Extract to configured path
+        extraction_output_path = config.local_extracted_json
         storage_config = {
             "type": "local",
-            "path": local_output
+            "path": extraction_output_path
         }
         
         # Extract from PDF
         result = extractor.extract(
-            pdf_path=local_pdf,  # Local file path
-            storage_config=storage_config  # Local storage
+            pdf_path=local_pdf,
+            storage_config=storage_config
         )
         
-        # Upload result to S3/destination (skip if source and dest are the same)
-        local_output = result.get("local_path", local_output)
-        if local_output != extraction_output_path:
-            upload_to_source(local_output, extraction_output_path)
-            logger.info(f"Uploaded to: {extraction_output_path}")
-        else:
-            logger.info(f"Output already at destination: {extraction_output_path}")
+        # Save output immediately to source storage
+        saved_path = output_handler.save_output(extraction_output_path, 'extracted_json')
+        if saved_path:
+            logger.info(f"✅ Saved extraction to: {saved_path}")
         
         # Get PDF hash
         pdf_hash = result.get('pdf_hash')
@@ -176,11 +171,11 @@ async def handle_extract_operation(
                 stage=PipelineStage.EXTRACT,
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
-                input_files={"pdf": input_file},
+                input_files={"pdf": local_pdf},
                 output_files={"extracted_json": extraction_output_path},
                 user_input_details=user_input_details,
                 metadata={
-                    "storage_type": storage_type,
+                    "storage_type": config.source_type,
                     "extractor_config": extractor_config,
                     "fields_extracted": len(result.get("fields", [])) if isinstance(result, dict) else None,
                     "pre_map_time_estimate": pre_map_time_estimate
@@ -192,9 +187,8 @@ async def handle_extract_operation(
         
         response = {
             "operation": "extract",
-            "input_file": input_file,
             "output_file": extraction_output_path,
-            "storage_type": storage_type,
+            "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration,
             "pdf_hash": pdf_hash
@@ -219,7 +213,7 @@ async def handle_extract_operation(
                 error_message=str(e),
                 level=NotificationLevel.CRITICAL,
                 user_input_details=user_input_details,
-                metadata={"storage_type": storage_type, "error_type": type(e).__name__}
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
             )
         
         logger.error(f"❌ Extraction failed after {duration}s: {str(e)}")
@@ -227,8 +221,7 @@ async def handle_extract_operation(
 
 
 async def handle_map_operation(
-    extracted_json_path: str,
-    input_json_path: str,
+    config,  # Storage config (first parameter)
     mapping_config: dict,
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
@@ -241,8 +234,7 @@ async def handle_map_operation(
     Semantic mapping operation - works with ANY storage backend.
     
     Args:
-        extracted_json_path: Extracted JSON path (s3://, gs://, azure://, or local)
-        input_json_path: Input keys JSON path (s3://, gs://, azure://, or local)
+        config: Storage config with pre-configured paths
         mapping_config: Mapping configuration
         user_id: Optional user ID
         session_id: Optional session ID
@@ -255,14 +247,13 @@ async def handle_map_operation(
         Operation result with output files
     """
     start_time = time.time()
-    storage_type = get_storage_type(extracted_json_path)
     
     logger.info("=" * 60)
     logger.info("MAP OPERATION")
     logger.info("=" * 60)
-    logger.info(f"Extracted JSON: {extracted_json_path}")
-    logger.info(f"Input JSON: {input_json_path}")
-    logger.info(f"Storage type: {storage_type}")
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+    logger.info(f"Investor Type: {investor_type}")
     
     user_input_details = {
         "user_id": user_id,
@@ -273,13 +264,18 @@ async def handle_map_operation(
     }
     
     try:
-        # Download both files (works with any storage) - use actual filenames
-        local_extracted = f"/tmp/{os.path.basename(extracted_json_path)}"
-        local_input = f"/tmp/{os.path.basename(input_json_path)}"
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
         
-        download_from_source(extracted_json_path, local_extracted)
-        download_from_source(input_json_path, local_input)
-        logger.info("Downloaded both input files")
+        # Get input files (already downloaded by entrypoint)
+        local_extracted = input_handler.get_input('extracted_json')
+        local_input = input_handler.get_input('input_json')
+        
+        if not local_extracted or not local_input:
+            raise FileNotFoundError("Required input files not available")
+        
+        logger.info(f"Extracted JSON: {local_extracted}")
+        logger.info(f"Input JSON: {local_input}")
         
         # Initialize mapper - use llm_model from settings (LiteLLM format)
         from src.core.config import settings
@@ -289,19 +285,24 @@ async def handle_map_operation(
             chunking_strategy=mapping_config.get("chunking_strategy", "page")
         )
         
-        # Generate output paths (these will be S3 paths)
-        processing_config = get_processing_output_config(
-            extracted_json_path,
-            user_id=user_id,
-            session_id=session_id
-        )
+        # Use configured output paths
+        local_mapping = config.local_mapped_json
+        local_radio = config.local_radio_json
         
-        # Create LOCAL storage config for output (mapper saves to /tmp/)
-        local_mapping = f"/tmp/{os.path.basename(processing_config['mapping_path'])}"
-        local_radio = f"/tmp/{os.path.basename(processing_config['radio_groups_path'])}"
+        # Debug: Check if paths are set
+        if not local_mapping or not local_radio:
+            logger.error(f"❌ Config paths not set!")
+            logger.error(f"   local_mapped_json: {local_mapping}")
+            logger.error(f"   local_radio_json: {local_radio}")
+            raise ValueError(f"Config missing paths: local_mapped_json={local_mapping}, local_radio_json={local_radio}")
+        
+        logger.info(f"Output paths configured:")
+        logger.info(f"   Mapping: {local_mapping}")
+        logger.info(f"   Radio groups: {local_radio}")
+        
         storage_config = {
-            "output_path": local_mapping,  # LOCAL path
-            "radio_groups": local_radio     # LOCAL path
+            "output_path": local_mapping,
+            "radio_groups": local_radio
         }
         
         # Perform mapping
@@ -313,18 +314,58 @@ async def handle_map_operation(
             investor_type=investor_type
         )
         
-        # Upload results (works with any storage) - skip if source and dest are the same
-        if mapping_result["mapping_path"] != processing_config["mapping_path"]:
-            upload_to_source(mapping_result["mapping_path"], processing_config["mapping_path"])
-            logger.info(f"Uploaded mapping to: {processing_config['mapping_path']}")
+        # The semantic mapper outputs dictionary format with wrapper: {"user_id": ..., "predictions": {...}}
+        # Save this as semantic_mapping.json for reference/debugging/caching
+        semantic_path = local_mapping.replace("_mapped_fields.json", "_semantic_mapping.json")
+        logger.info(f"💾 Saving semantic mapper output (for cache): {semantic_path}")
+        shutil.copy2(local_mapping, semantic_path)
+        
+        # Now convert to Java-compatible format for the embedder
+        # Java embedder needs array format without wrapper: {"field_id": ["field_name", "", confidence]}
+        logger.info("🔄 Converting semantic mapping to Java-compatible format...")
+        with open(local_mapping, 'r') as f:
+            semantic_data = json.load(f)
+        
+        # Strip wrapper if present
+        if isinstance(semantic_data, dict) and "predictions" in semantic_data:
+            semantic_mappings = semantic_data["predictions"]
         else:
-            logger.info(f"Mapping already at destination: {processing_config['mapping_path']}")
-            
-        if mapping_result["radio_groups_path"] != processing_config["radio_groups_path"]:
-            upload_to_source(mapping_result["radio_groups_path"], processing_config["radio_groups_path"])
-            logger.info(f"Uploaded radio groups to: {processing_config['radio_groups_path']}")
-        else:
-            logger.info(f"Radio groups already at destination: {processing_config['radio_groups_path']}")
+            semantic_mappings = semantic_data
+        
+        # Convert to Java array format
+        java_mapping = {}
+        for field_id, mapping_data in semantic_mappings.items():
+            if isinstance(mapping_data, dict):
+                field_name = mapping_data.get("predicted_field_name")
+                confidence = mapping_data.get("confidence", 0.0)
+                java_mapping[field_id] = [field_name, "", confidence] if field_name else [None, None, 0]
+            elif isinstance(mapping_data, list) and len(mapping_data) >= 3:
+                field_name = mapping_data[0]
+                confidence = mapping_data[2]
+                java_mapping[field_id] = [field_name, "", confidence] if field_name else [None, None, 0]
+            elif mapping_data is None:
+                java_mapping[field_id] = [None, None, 0]
+            else:
+                logger.warning(f"Field {field_id} has unexpected format: {mapping_data}")
+                java_mapping[field_id] = [None, None, 0]
+        
+        # Save Java format to mapped_fields.json (for embedder)
+        with open(local_mapping, 'w') as f:
+            json.dump(java_mapping, f, indent=2, ensure_ascii=False)
+        logger.info(f"✅ Converted {len(java_mapping)} fields to Java format → {local_mapping}")
+        
+        # Save outputs immediately to source storage
+        # IMPORTANT: Save semantic mapping first (for cache), then Java format (for embedder)
+        saved_semantic = output_handler.save_output(semantic_path, 'semantic_mapping_json')
+        saved_mapping = output_handler.save_output(local_mapping, 'mapped_json')
+        saved_radio = output_handler.save_output(local_radio, 'radio_json')
+        
+        if saved_semantic:
+            logger.info(f"✅ Saved semantic mapping (for cache): {saved_semantic}")
+        if saved_mapping:
+            logger.info(f"✅ Saved Java mapping (for embedder): {saved_mapping}")
+        if saved_radio:
+            logger.info(f"✅ Saved radio groups to: {saved_radio}")
         
         end_time = time.time()
         duration = round(end_time - start_time, 2)
@@ -340,18 +381,18 @@ async def handle_map_operation(
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
                 input_files={
-                    "extracted_json": extracted_json_path,
-                    "input_keys": input_json_path
+                    "extracted_json": local_extracted,
+                    "input_keys": local_input
                 },
                 output_files={
-                    "mapping": processing_config["mapping_path"],
-                    "radio_groups": processing_config["radio_groups_path"]
+                    "mapping": local_mapping,
+                    "radio_groups": local_radio
                 },
                 user_input_details=user_input_details,
                 performance_metrics={
                     "total_fields_mapped": field_stats.get("total_fields_mapped", 0),
                     "high_confidence_count": field_stats.get("high_confidence_count", 0),
-                    "storage_type": storage_type
+                    "storage_type": config.source_type
                 }
             )
         
@@ -361,11 +402,14 @@ async def handle_map_operation(
         return {
             "operation": "map",
             "mapping_result": {
-                "mapping_path": processing_config["mapping_path"],
-                "radio_groups_path": processing_config["radio_groups_path"],
-                "field_statistics": field_stats
+                "mapping_path": local_mapping,  # Local processing path
+                "radio_groups_path": local_radio,  # Local processing path
+                "field_statistics": field_stats,
+                # ADD: Destination paths for cache registration
+                "dest_mapping_path": saved_mapping,  # Where file was saved (persistent)
+                "dest_radio_groups_path": saved_radio  # Where file was saved (persistent)
             },
-            "storage_type": storage_type,
+            "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration
         }
@@ -382,7 +426,8 @@ async def handle_map_operation(
                 execution_time=duration,
                 error_message=str(e),
                 level=NotificationLevel.CRITICAL,
-                user_input_details=user_input_details
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
             )
         
         logger.error(f"❌ Mapping failed after {duration}s: {str(e)}")
@@ -390,10 +435,7 @@ async def handle_map_operation(
 
 
 async def handle_embed_operation(
-    original_pdf_path: str,
-    extracted_json_path: str,
-    mapping_json_path: str,
-    radio_groups_path: str,
+    config,  # Storage config (first parameter)
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
     notifier: Optional[Any] = None,
@@ -404,10 +446,7 @@ async def handle_embed_operation(
     Works with ANY storage backend.
     
     Args:
-        original_pdf_path: Original PDF path (s3://, gs://, azure://, or local)
-        extracted_json_path: Extracted JSON path
-        mapping_json_path: Mapping JSON path
-        radio_groups_path: Radio groups JSON path
+        config: Storage config with pre-configured paths
         user_id: Optional user ID
         session_id: Optional session ID
         notifier: Optional notification system
@@ -417,13 +456,12 @@ async def handle_embed_operation(
         Operation result with embedded PDF path
     """
     start_time = time.time()
-    storage_type = get_storage_type(original_pdf_path)
     
     logger.info("=" * 60)
     logger.info("EMBED OPERATION")
     logger.info("=" * 60)
-    logger.info(f"Original PDF: {original_pdf_path}")
-    logger.info(f"Storage type: {storage_type}")
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
     
     user_input_details = {
         "user_id": user_id,
@@ -432,24 +470,34 @@ async def handle_embed_operation(
     }
     
     try:
-        # Download all required files (works with any storage) - use actual filenames
-        local_pdf = f"/tmp/{os.path.basename(original_pdf_path)}"
-        local_extracted = f"/tmp/{os.path.basename(extracted_json_path)}"
-        local_mapping = f"/tmp/{os.path.basename(mapping_json_path)}"
-        local_radio = f"/tmp/{os.path.basename(radio_groups_path)}"
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
         
-        download_from_source(original_pdf_path, local_pdf)
-        download_from_source(extracted_json_path, local_extracted)
-        download_from_source(mapping_json_path, local_mapping)
-        download_from_source(radio_groups_path, local_radio)
-        logger.info("Downloaded all 4 input files")
+        # Get input files
+        # PDF and extracted JSON can be downloaded if needed
+        local_pdf = input_handler.get_input('input_pdf')
+        local_extracted = input_handler.get_input('extracted_json')
         
-        # Get output path (S3)
-        file_config = get_complete_file_config(original_pdf_path, user_id, session_id)
-        embedded_output_path = file_config["embedding"]["embedded_pdf_path"]
+        # Mapped JSON and radio groups were created in THIS pipeline run,
+        # so they're already at the config paths (not downloaded)
+        local_mapping = config.local_mapped_json
+        local_radio = config.local_radio_json
         
-        # Create LOCAL storage config (embedder creates file in /tmp/)
-        local_embedded = f"/tmp/{os.path.basename(embedded_output_path)}"
+        if not all([local_pdf, local_extracted, local_mapping, local_radio]):
+            missing = []
+            if not local_pdf: missing.append("PDF")
+            if not local_extracted: missing.append("extracted JSON")
+            if not local_mapping: missing.append("mapping JSON")
+            if not local_radio: missing.append("radio groups")
+            raise FileNotFoundError(f"Required input files not available: {', '.join(missing)}")
+        
+        logger.info(f"Input PDF: {local_pdf}")
+        logger.info(f"Extracted JSON: {local_extracted}")
+        logger.info(f"Mapping JSON: {local_mapping}")
+        logger.info(f"Radio groups: {local_radio}")
+        
+        # Use configured output path
+        local_embedded = config.local_embedded_pdf
         storage_config = {
             "type": "local",
             "path": local_embedded
@@ -464,12 +512,21 @@ async def handle_embed_operation(
             storage_config=storage_config
         )
         
-        # Upload result (works with any storage) - skip if source and dest are the same
-        if embedded_pdf != embedded_output_path:
-            upload_to_source(embedded_pdf, embedded_output_path)
-            logger.info(f"Uploaded embedded PDF to: {embedded_output_path}")
+        # Save output immediately to source storage
+        # Use the ACTUAL output path from Java embedder, not the config path
+        logger.info(f"🔍 DEBUG: About to save embedded PDF:")
+        logger.info(f"   embedded_pdf (actual output): {embedded_pdf}")
+        logger.info(f"   config.dest_embedded_pdf: {config.dest_embedded_pdf}")
+        
+        saved_path = output_handler.save_output(embedded_pdf, 'embedded_pdf')
+        
+        logger.info(f"🔍 DEBUG: Save result:")
+        logger.info(f"   saved_path: {saved_path}")
+        
+        if saved_path:
+            logger.info(f"✅ Saved embedded PDF to: {saved_path}")
         else:
-            logger.info(f"Embedded PDF already at destination: {embedded_output_path}")
+            logger.error(f"❌ Failed to save embedded PDF!")
         
         end_time = time.time()
         duration = round(end_time - start_time, 2)
@@ -482,14 +539,14 @@ async def handle_embed_operation(
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
                 input_files={
-                    "pdf": original_pdf_path,
-                    "extracted": extracted_json_path,
-                    "mapping": mapping_json_path,
-                    "radio_groups": radio_groups_path
+                    "pdf": local_pdf,
+                    "extracted": local_extracted,
+                    "mapping": local_mapping,
+                    "radio_groups": local_radio
                 },
-                output_files={"embedded_pdf": embedded_output_path},
+                output_files={"embedded_pdf": local_embedded},
                 user_input_details=user_input_details,
-                metadata={"storage_type": storage_type}
+                metadata={"storage_type": config.source_type}
             )
         
         logger.info(f"✅ Embedding completed in {duration}s")
@@ -497,8 +554,9 @@ async def handle_embed_operation(
         
         return {
             "operation": "embed",
-            "output_file": embedded_output_path,
-            "storage_type": storage_type,
+            "output_file": embedded_pdf,  # Actual output path from Java embedder
+            "dest_output_file": saved_path,  # Destination path for cache registration
+            "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration
         }
@@ -515,7 +573,8 @@ async def handle_embed_operation(
                 execution_time=duration,
                 error_message=str(e),
                 level=NotificationLevel.CRITICAL,
-                user_input_details=user_input_details
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
             )
         
         logger.error(f"❌ Embedding failed after {duration}s: {str(e)}")
@@ -523,8 +582,7 @@ async def handle_embed_operation(
 
 
 async def handle_fill_operation(
-    embedded_pdf_path: str,
-    input_json_path: str,
+    config,  # Storage config (first parameter)
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
     notifier: Optional[Any] = None,
@@ -536,8 +594,7 @@ async def handle_fill_operation(
     Works with ANY storage backend.
     
     Args:
-        embedded_pdf_path: Embedded PDF path (s3://, gs://, azure://, or local)
-        input_json_path: Input JSON with user data
+        config: Storage config with pre-configured paths
         user_id: Optional user ID
         session_id: Optional session ID
         notifier: Optional notification system
@@ -548,14 +605,12 @@ async def handle_fill_operation(
         Operation result with filled PDF path
     """
     start_time = time.time()
-    storage_type = get_storage_type(embedded_pdf_path)
     
     logger.info("=" * 60)
     logger.info("FILL OPERATION")
     logger.info("=" * 60)
-    logger.info(f"Embedded PDF: {embedded_pdf_path}")
-    logger.info(f"Input JSON: {input_json_path}")
-    logger.info(f"Storage type: {storage_type}")
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
     
     user_input_details = {
         "user_id": user_id,
@@ -565,20 +620,21 @@ async def handle_fill_operation(
     }
     
     try:
-        # Download both files (works with any storage) - use actual filenames
-        local_embedded = f"/tmp/{os.path.basename(embedded_pdf_path)}"
-        local_input = f"/tmp/{os.path.basename(input_json_path)}"
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
         
-        download_from_source(embedded_pdf_path, local_embedded)
-        download_from_source(input_json_path, local_input)
-        logger.info("Downloaded embedded PDF and input JSON")
+        # Get input files (already downloaded by entrypoint)
+        local_embedded = input_handler.get_input('embedded_pdf')
+        local_input = input_handler.get_input('input_json')
         
-        # Get output path (S3)
-        file_config = get_complete_file_config(embedded_pdf_path, user_id, session_id)
-        filled_output_path = file_config["filling"]["filled_pdf_path"]
+        if not local_embedded or not local_input:
+            raise FileNotFoundError("Required input files not available")
         
-        # Create LOCAL storage config (filler creates file in /tmp/)
-        local_filled = f"/tmp/{os.path.basename(filled_output_path)}"
+        logger.info(f"Embedded PDF: {local_embedded}")
+        logger.info(f"Input JSON: {local_input}")
+        
+        # Use configured output path
+        local_filled = config.local_filled_pdf
         storage_config = {
             "type": "local",
             "path": local_filled
@@ -591,20 +647,18 @@ async def handle_fill_operation(
             storage_config=storage_config
         )
         
-        # Upload result (works with any storage) - skip if source and dest are the same
-        if filled_pdf != filled_output_path:
-            upload_to_source(filled_pdf, filled_output_path)
-            logger.info(f"Uploaded filled PDF to: {filled_output_path}")
-        else:
-            logger.info(f"Filled PDF already at destination: {filled_output_path}")
+        # Save output immediately to source storage
+        saved_path = output_handler.save_output(local_filled, 'filled_pdf')
+        if saved_path:
+            logger.info(f"✅ Saved filled PDF to: {saved_path}")
         
         # Generate presigned URL for S3 files
         filled_presigned_url = None
-        if storage_type == "aws" and filled_output_path.startswith("s3://"):
+        if config.source_type == "aws" and hasattr(config, 's3_filled_pdf'):
             try:
                 from src.clients.s3_client import S3Client
                 s3_client = S3Client()
-                filled_presigned_url = s3_client.generate_presigned_url(filled_output_path, expires_in=3600)
+                filled_presigned_url = s3_client.generate_presigned_url(saved_path, expires_in=3600)
                 logger.info("✅ Generated presigned URL for filled PDF (expires in 1 hour)")
             except Exception as presign_error:
                 logger.warning(f"Failed to generate presigned URL for filled PDF: {presign_error}")
@@ -620,12 +674,12 @@ async def handle_fill_operation(
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
                 input_files={
-                    "embedded_pdf": embedded_pdf_path,
-                    "input_json": input_json_path
+                    "embedded_pdf": local_embedded,
+                    "input_json": local_input
                 },
-                output_files={"filled_pdf": filled_output_path},
+                output_files={"filled_pdf": local_filled},
                 user_input_details=user_input_details,
-                metadata={"storage_type": storage_type}
+                metadata={"storage_type": config.source_type}
             )
         
         logger.info(f"✅ Filling completed in {duration}s")
@@ -633,8 +687,8 @@ async def handle_fill_operation(
         
         result = {
             "operation": "fill",
-            "output_file": filled_output_path,
-            "storage_type": storage_type,
+            "output_file": local_filled,
+            "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration
         }
@@ -658,7 +712,8 @@ async def handle_fill_operation(
                 execution_time=duration,
                 error_message=str(e),
                 level=NotificationLevel.CRITICAL,
-                user_input_details=user_input_details
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
             )
         
         logger.error(f"❌ Filling failed after {duration}s: {str(e)}")
@@ -724,8 +779,7 @@ async def handle_run_all_operation(
         # Stage 2: Map
         logger.info("\n[2/4] Starting MAP stage...")
         map_result = await handle_map_operation(
-            extracted_json_path=extracted_json,
-            input_json_path=input_json,
+            config=config,  # Pass config instead of file paths
             mapping_config=mapping_config,
             user_id=user_id,
             session_id=session_id,
@@ -741,10 +795,7 @@ async def handle_run_all_operation(
         # Stage 3: Embed
         logger.info("\n[3/4] Starting EMBED stage...")
         embed_result = await handle_embed_operation(
-            original_pdf_path=input_pdf,
-            extracted_json_path=extracted_json,
-            mapping_json_path=mapping_json,
-            radio_groups_path=radio_groups,
+            config=config,  # Pass config instead of file paths
             user_id=user_id,
             session_id=session_id,
             notifier=notifier,
@@ -927,7 +978,7 @@ async def handle_make_embed_file_operation(
         input_pdf_s3 = config.s3_input_pdf if hasattr(config, 's3_input_pdf') and config.s3_input_pdf else config.local_input_pdf
         input_json_s3 = (config.s3_global_json if hasattr(config, 's3_global_json') and config.s3_global_json 
                         else config.s3_input_json if hasattr(config, 's3_input_json') and config.s3_input_json
-                        else config.local_global_json or config.local_input_json)
+                        else getattr(config, 'local_global_json', None) or config.local_input_json)
         
         if not input_pdf_s3:
             raise ValueError("config.s3_input_pdf or local_input_pdf not set")
@@ -948,8 +999,14 @@ async def handle_make_embed_file_operation(
         storage_type = config.source_type
         logger.info(f"Storage type: {storage_type}")
         
-        # Pre-generate output paths if using structured output
-        if hasattr(config, 'output_base_path') and config.output_base_path:
+        # For local storage, use pre-configured paths from LocalStorageConfig
+        # For cloud storage, we still need file_config for path generation
+        if storage_type == 'local':
+            # Local deployment: entrypoint already set all paths in config.local_*
+            logger.info("Using pre-configured local paths from LocalStorageConfig")
+            file_config = None
+        elif hasattr(config, 'output_base_path') and config.output_base_path:
+            # Cloud deployment: generate structured output paths
             logger.info(f"Using structured output directory: {config.output_base_path}")
             file_config = config.get_complete_file_config(input_pdf_s3, user_id=user_id, session_id=session_id)
         else:
@@ -965,8 +1022,17 @@ async def handle_make_embed_file_operation(
             logger.info("[Cache] ✅ Using cached extraction from entry point (saves ~5s)")
             extract_result = config.cached_extraction
             
-            # Save to file if using structured output
-            if file_config:
+            # Save to file using configured path
+            if storage_type == 'local' and hasattr(config, 'local_extracted_json'):
+                # Local: use pre-configured path
+                extracted_json = config.local_extracted_json
+                os.makedirs(os.path.dirname(extracted_json), exist_ok=True)
+                with open(extracted_json, 'w') as f:
+                    json.dump(extract_result.get('extracted_data', {}), f, indent=2)
+                extract_result["output_file"] = extracted_json
+                logger.info(f"Saved cached extraction to: {extracted_json}")
+            elif file_config:
+                # Cloud: use generated structured output path
                 extracted_json = file_config["extraction_output_path"]
                 os.makedirs(os.path.dirname(extracted_json), exist_ok=True)
                 with open(extracted_json, 'w') as f:
@@ -974,7 +1040,7 @@ async def handle_make_embed_file_operation(
                 extract_result["output_file"] = extracted_json
                 logger.info(f"Saved cached extraction to: {extracted_json}")
             else:
-                # Create temp file for extraction
+                # Fallback: Create temp file for extraction
                 temp_extract = tempfile.NamedTemporaryFile(mode='w', suffix='_extracted.json', delete=False)
                 json.dump(extract_result.get('extracted_data', {}), temp_extract, indent=2)
                 temp_extract.close()
@@ -984,12 +1050,13 @@ async def handle_make_embed_file_operation(
         else:
             # Run full extraction
             extract_result = await handle_extract_operation(
-                input_file=input_pdf_s3,  # Use S3 path, not local
+                config=config,  # Pass config instead of file paths
                 user_id=user_id,
                 session_id=session_id,
                 notifier=notifier,
                 pdf_doc_id=pdf_doc_id,
-                input_json_path=input_json_s3,  # Use S3 path
+                input_json_doc_id=None,
+                input_json_path=input_json_s3,  # Still pass for pre-map estimation
                 mapping_config=mapping_config
             )
             extracted_json = extract_result["output_file"]
@@ -999,8 +1066,8 @@ async def handle_make_embed_file_operation(
         # Track original path BEFORE any moving (for caching)
         original_extracted_json = extracted_json
         
-        # If using structured output, move file to proper directory
-        if file_config:
+        # If using structured output, move file to proper directory (cloud only)
+        if file_config and storage_type != 'local':
             expected_path = file_config["extraction"]["extracted_path"]
             if extracted_json != expected_path:
                 logger.info(f"Moving extracted file to structured output: {expected_path}")
@@ -1047,6 +1114,11 @@ async def handle_make_embed_file_operation(
         rag_api_failed = False
         rag_failure_reason = None
         
+        # Initialize destination path variables for cache registration
+        dest_semantic_mapping = None
+        dest_radio_groups = None
+        dest_embedded_pdf = None
+        
         if pdf_cache_enabled and pdf_hash:
             try:
                 logger.info(f"Checking hash cache at: {cache_registry_path}")
@@ -1071,6 +1143,10 @@ async def handle_make_embed_file_operation(
                     
                     semantic_mapping_path = config.cached_mapping_json
                     radio_groups = config.cached_radio_groups
+                    
+                    # Update config paths so embed operation can find them
+                    config.local_mapped_json = semantic_mapping_path
+                    config.local_radio_json = radio_groups
                     
                     # Check for dual mapper cached files
                     has_headers = config.cached_headers_with_fields is not None
@@ -1113,6 +1189,10 @@ async def handle_make_embed_file_operation(
                     # Get cached mapping files
                     semantic_mapping_path = copied_files.get("mapping_json")
                     radio_groups = copied_files.get("radio_groups")
+                    
+                    # Update config paths so embed operation can find them
+                    config.local_mapped_json = semantic_mapping_path
+                    config.local_radio_json = radio_groups
                     
                     # Check if this is a dual mapper cache
                     has_headers = "headers_with_fields" in copied_files
@@ -1329,7 +1409,40 @@ async def handle_make_embed_file_operation(
                     logger.info("Using cached semantic mapping")
                     logger.info(f"semantic_mapping_path = {semantic_mapping_path}")
                     
-                    # Save LLM predictions
+                    # Cached file has wrapper format, but save_llm_predictions needs clean format
+                    # Convert to Java format first (strips wrapper and converts to array format)
+                    logger.info("🔄 Converting cached semantic mapping to Java format...")
+                    with open(semantic_mapping_path, 'r') as f:
+                        cached_data = json.load(f)
+                    
+                    # Strip wrapper if present
+                    if isinstance(cached_data, dict) and "predictions" in cached_data:
+                        cached_mappings = cached_data["predictions"]
+                    else:
+                        cached_mappings = cached_data
+                    
+                    # Convert to Java array format and save to same path
+                    java_mapping = {}
+                    for field_id, mapping_data in cached_mappings.items():
+                        if isinstance(mapping_data, dict):
+                            field_name = mapping_data.get("predicted_field_name")
+                            confidence = mapping_data.get("confidence", 0.0)
+                            java_mapping[field_id] = [field_name, "", confidence] if field_name else [None, None, 0]
+                        elif isinstance(mapping_data, list) and len(mapping_data) >= 3:
+                            field_name = mapping_data[0]
+                            confidence = mapping_data[2]
+                            java_mapping[field_id] = [field_name, "", confidence] if field_name else [None, None, 0]
+                        elif mapping_data is None:
+                            java_mapping[field_id] = [None, None, 0]
+                        else:
+                            java_mapping[field_id] = [None, None, 0]
+                    
+                    # Overwrite with Java format
+                    with open(semantic_mapping_path, 'w') as f:
+                        json.dump(java_mapping, f, indent=2, ensure_ascii=False)
+                    logger.info(f"✅ Converted cached mapping to Java format ({len(java_mapping)} fields)")
+                    
+                    # Now save LLM predictions (already in Java format)
                     llm_predictions_path = await save_llm_predictions_to_rag_bucket(
                         semantic_mapping_path=semantic_mapping_path,
                         user_id=user_id,
@@ -1345,6 +1458,18 @@ async def handle_make_embed_file_operation(
                     mapping_json = semantic_mapping_path  # Already Java-compatible
                 
                 logger.info(f"✅ Cache files processed. MAP stage skipped.")
+                
+                # Save cached files to destination storage immediately
+                input_handler, output_handler = create_file_handlers(config)
+                
+                logger.info("💾 Saving cached MAP outputs to destination storage...")
+                saved_mapping = output_handler.save_output(mapping_json, 'mapped_json')
+                saved_radio = output_handler.save_output(radio_groups, 'radio_json')
+                
+                if saved_mapping:
+                    logger.info(f"✅ Saved cached mapping to: {saved_mapping}")
+                if saved_radio:
+                    logger.info(f"✅ Saved cached radio groups to: {saved_radio}")
                 
                 # Create placeholder result for cached MAP stage
                 pipeline_results["map"] = {
@@ -1386,8 +1511,16 @@ async def handle_make_embed_file_operation(
                 # Import here to avoid circular dependency
                 from src.headers import get_form_fields_points
                 
-                # Get header file paths from file_config (pre-generated by entry point)
-                if file_config and "headers" in file_config:
+                # Get header file paths from config
+                if storage_type == 'local' and hasattr(config, 'local_headers_with_fields'):
+                    # Local: use pre-configured paths from LocalStorageConfig
+                    headers_output_path = config.local_headers_with_fields
+                    final_fields_output_path = config.local_final_form_fields
+                    logger.info(f"Using pre-configured local header paths:")
+                    logger.info(f"  headers_with_fields: {headers_output_path}")
+                    logger.info(f"  final_form_fields: {final_fields_output_path}")
+                elif file_config and "headers" in file_config:
+                    # Cloud: use generated structured output paths
                     headers_output_path = file_config["headers"]["headers_with_fields_path"]
                     final_fields_output_path = file_config["headers"]["final_form_fields_path"]
                     logger.info(f"Using header paths from config:")
@@ -1395,7 +1528,7 @@ async def handle_make_embed_file_operation(
                     logger.info(f"  final_form_fields: {final_fields_output_path}")
                 else:
                     # Fallback: Config doesn't have header paths (shouldn't happen with new code)
-                    raise ValueError("file_config missing 'headers' section. Entry point must call get_complete_file_config first.")
+                    raise ValueError("Missing header paths configuration. Entry point must configure paths first.")
                 
                 # Store paths for caching
                 headers_with_fields_path = headers_output_path
@@ -1403,8 +1536,7 @@ async def handle_make_embed_file_operation(
                 
                 # Run both mappers in parallel
                 semantic_task = handle_map_operation(
-                    extracted_json_path=extracted_json,
-                    input_json_path=input_json_s3,
+                    config=config,  # Pass config instead of file paths
                     mapping_config=mapping_config,
                     user_id=user_id,
                     session_id=session_id,
@@ -1531,8 +1663,7 @@ async def handle_make_embed_file_operation(
             else:
                 # Original flow: Semantic mapper only
                 map_result = await handle_map_operation(
-                    extracted_json_path=extracted_json,
-                    input_json_path=input_json_s3,
+                    config=config,  # Pass config instead of file paths
                     mapping_config=mapping_config,
                     user_id=user_id,
                     session_id=session_id,
@@ -1542,6 +1673,10 @@ async def handle_make_embed_file_operation(
                 )
                 semantic_mapping_path = map_result["mapping_result"]["mapping_path"]
                 radio_groups = map_result["mapping_result"]["radio_groups_path"]
+                
+                # Extract DESTINATION paths for cache registration (where files were saved)
+                dest_semantic_mapping = map_result["mapping_result"].get("dest_mapping_path")
+                dest_radio_groups = map_result["mapping_result"].get("dest_radio_groups_path")
                 
                 # Save LLM predictions (even in single mapper mode, source-agnostic)
                 llm_predictions_path = await save_llm_predictions_to_rag_bucket(
@@ -1580,8 +1715,8 @@ async def handle_make_embed_file_operation(
         original_mapping_json = mapping_json
         original_radio_groups = radio_groups
         
-        # If using structured output, move files to proper directory
-        if file_config:
+        # If using structured output, move files to proper directory (cloud only, local paths already correct)
+        if file_config and storage_type != 'local':
             expected_mapping_path = file_config["mapping"]["mapping_path"]
             expected_radio_path = file_config["mapping"]["radio_groups_path"]
             
@@ -1604,10 +1739,7 @@ async def handle_make_embed_file_operation(
         # Stage 3: Embed
         logger.info("\n[3/3] Starting EMBED stage...")
         embed_result = await handle_embed_operation(
-            original_pdf_path=input_pdf_s3,  # Use S3 path
-            extracted_json_path=extracted_json,
-            mapping_json_path=mapping_json,
-            radio_groups_path=radio_groups,
+            config=config,  # Pass config instead of file paths
             user_id=user_id,
             session_id=session_id,
             notifier=notifier,
@@ -1616,11 +1748,19 @@ async def handle_make_embed_file_operation(
         pipeline_results["embed"] = embed_result
         embedded_pdf = embed_result["output_file"]
         
+        # Extract DESTINATION path for cache registration (where file was saved)
+        dest_embedded_pdf = embed_result.get("dest_output_file")
+        
+        logger.info(f"🔍 DEBUG: Extracted destination paths for cache:")
+        logger.info(f"   dest_embedded_pdf: {dest_embedded_pdf}")
+        logger.info(f"   dest_semantic_mapping: {dest_semantic_mapping}")
+        logger.info(f"   dest_radio_groups: {dest_radio_groups}")
+        
         # Track original path BEFORE any moving (for caching)
         original_embedded_pdf = embedded_pdf
         
-        # If using structured output, move file to proper directory
-        if file_config:
+        # If using structured output, move file to proper directory (cloud only, local paths already correct)
+        if file_config and storage_type != 'local':
             expected_embedded_path = file_config["embedding"]["embedded_pdf_path"]
             if embedded_pdf != expected_embedded_path:
                 logger.info(f"Moving embedded PDF to structured output: {expected_embedded_path}")
@@ -1639,16 +1779,25 @@ async def handle_make_embed_file_operation(
             try:
                 logger.info("💾 Saving results to hash cache for future use...")
                 
-                # Save to cache registry with current file paths
-                # Entry point will handle uploading files to cloud and updating paths
+                # Use DESTINATION paths (where files were actually saved) instead of processing paths
+                # This allows cache to work across container restarts and different environments
+                cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
+                cache_mapping = dest_semantic_mapping if dest_semantic_mapping else semantic_mapping_path
+                cache_radio = dest_radio_groups if dest_radio_groups else radio_groups
+                
+                logger.info(f"   Cache will reference persistent paths:")
+                logger.info(f"      embedded_pdf: {cache_embedded}")
+                logger.info(f"      mapping_json: {cache_mapping}")
+                logger.info(f"      radio_groups: {cache_radio}")
+                
                 # IMPORTANT: Save semantic_mapping_path (raw semantic mapper output),
                 # NOT mapping_json (Java-converted). Java conversion is done on-demand.
                 await save_hash_cache(
                     pdf_hash=pdf_hash,
                     cache_registry_path=cache_registry_path,
-                    embedded_pdf=embedded_pdf,
-                    mapping_json=semantic_mapping_path,  # ← Cache semantic output, not Java-converted
-                    radio_groups=radio_groups,
+                    embedded_pdf=cache_embedded,  # Use destination path
+                    mapping_json=cache_mapping,  # Use destination path
+                    radio_groups=cache_radio,  # Use destination path
                     user_id=user_id,
                     pdf_doc_id=pdf_doc_id,
                     headers_with_fields=headers_with_fields_path if use_second_mapper else None,
@@ -2237,16 +2386,41 @@ async def convert_semantic_to_java_format(
     with open(semantic_temp, 'r') as f:
         semantic_data = json.load(f)
     
-    logger.info(f"📊 Loaded semantic mapping with {len(semantic_data)} fields")
+    # Handle both formats:
+    # 1. New format (with predictions wrapper): {"user_id": ..., "predictions": {...}}
+    # 2. Old format (direct mappings): {"field_id": [...], ...}
+    if isinstance(semantic_data, dict) and "predictions" in semantic_data:
+        logger.info("📦 Detected wrapped format with 'predictions' key")
+        semantic_mappings = semantic_data["predictions"]
+    else:
+        logger.info("📋 Detected direct format (no wrapper)")
+        semantic_mappings = semantic_data
+    
+    logger.info(f"📊 Loaded semantic mapping with {len(semantic_mappings)} fields")
     
     # Convert to Java format: replace middle element (actual value) with empty string
     java_mapping = {}
-    for field_id, mapping_array in semantic_data.items():
-        if isinstance(mapping_array, list) and len(mapping_array) >= 3:
-            # Format: [field_name, actual_value, confidence]
+    for field_id, mapping_data in semantic_mappings.items():
+        # Handle three possible formats:
+        # 1. Array format (old): ["field_name", "actual_value", confidence]
+        # 2. Dict format (new): {"predicted_field_name": "...", "confidence": 0.95}
+        # 3. Dict format (with value): {"predicted_field_name": "...", "value": "...", "confidence": 0.95}
+        
+        if isinstance(mapping_data, dict):
+            # New dictionary format
+            field_name = mapping_data.get("predicted_field_name")
+            confidence = mapping_data.get("confidence", 0.0)
+            
+            if field_name:
+                java_mapping[field_id] = [field_name, "", confidence]
+            else:
+                java_mapping[field_id] = [None, None, 0]
+                
+        elif isinstance(mapping_data, list) and len(mapping_data) >= 3:
+            # Old array format: [field_name, actual_value, confidence]
             # Convert to: [field_name, "", confidence]
-            field_name = mapping_array[0]
-            confidence = mapping_array[2]
+            field_name = mapping_data[0]
+            confidence = mapping_data[2]
             
             if field_name:
                 java_mapping[field_id] = [field_name, "", confidence]
@@ -2254,7 +2428,7 @@ async def convert_semantic_to_java_format(
                 java_mapping[field_id] = [None, None, 0]
         else:
             # Fallback for unexpected format
-            logger.warning(f"Field {field_id} has unexpected format: {mapping_array}")
+            logger.warning(f"Field {field_id} has unexpected format: {mapping_data}")
             java_mapping[field_id] = [None, None, 0]
     
     logger.info(f"✅ Converted to Java format with {len(java_mapping)} fields")

@@ -1,0 +1,105 @@
+# PDF Mapper Module - Consolidated Requirements
+# All dependencies including cloud SDKs (AWS, Azure, GCP)
+# This enables deployment to any platform with a single Docker image
+
+# ============================================
+# CORE DEPENDENCIES
+# ============================================
+
+# PDF Processing
+PyMuPDF==1.26.5
+numpy==2.3.5
+pillow>=10.2.0
+
+# LLM Clients
+openai==2.6.0
+anthropic>=0.18.0
+litellm>=1.30.0
+
+# Tokenization
+tiktoken==0.12.0
+
+# Data Processing
+pandas==2.3.3
+pydantic==2.12.3
+pydantic-settings==2.11.0
+pydantic_core==2.41.4
+
+# Utilities
+python-dotenv==1.1.1
+tenacity==9.1.2
+
+# Logging & Monitoring
+python-json-logger==4.0.0
+
+# HTTP Clients
+httpx==0.28.1
+httpcore==1.0.9
+aiohttp==3.13.1
+requests==2.32.5
+
+# Other Core
+regex==2025.9.18
+tqdm==4.67.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+
+# ============================================
+# CLOUD SDKs (ALL PLATFORMS)
+# ============================================
+
+# AWS
+boto3>=1.40.54
+botocore>=1.40.54
+s3transfer>=0.14.0
+jmespath>=1.0.1
+
+# Azure
+azure-storage-blob>=12.19.0
+azure-identity>=1.15.0
+azure-functions>=1.18.0
+
+# Google Cloud Platform
+google-cloud-storage>=2.14.0
+google-cloud-logging>=3.9.0
+functions-framework>=3.5.0
+
+# ============================================
+# API SERVER
+# ============================================
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# ============================================
+# TESTING (Optional - include for dev builds)
+# ============================================
+
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# pytest-cov>=4.1.0
+# black>=23.7.0
+# flake8>=6.1.0
+
+# ============================================
+# NOTES
+# ============================================
+# 
+# This file includes ALL dependencies for production deployment.
+# The Docker image will be ~750MB total:
+#   - Base image: ~150MB
+#   - Core deps: ~400MB
+#   - Cloud SDKs: ~200MB (AWS 50MB + Azure 80MB + GCP 70MB)
+#
+# Benefits:
+#   ✅ Deploy to any cloud without rebuilding
+#   ✅ Test locally with any source
+#   ✅ Single file to maintain
+#   ✅ Clear dependency list
+#
+# To install for local development:
+#   pip install -r requirements-full.txt
+#
+# To build Docker image:
+#   docker build -t pdf-mapper -f modules/mapper/Dockerfile .
