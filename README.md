@@ -79,9 +79,19 @@ PDF Autofillr is a comprehensive system that solves the complex problem of autom
 
 ## 📦 System Modules
 
-PDF Autofillr consists of 4 core modules that work together to provide a complete PDF processing pipeline:
+PDF Autofillr consists of modules organized into two categories:
 
-### 1. **Mapper Module** 🗺️ (CORE ENGINE)
+### **Category 1: PDF Processing (Required)**
+The core engine that processes PDF forms
+
+### **Category 2: User Data Collection (Optional - Choose One or Both)**
+Modules that collect user information through different methods
+
+---
+
+## Core Processing Module
+
+### 1. **Mapper Module** 🗺️ (CORE ENGINE - REQUIRED)
 
 **Purpose:** The heart of the system - extracts, maps, embeds, and fills PDF forms.
 
@@ -121,16 +131,29 @@ python api_server.py          # Start server on :8000
 
 ---
 
-### 2. **Chatbot Module** 💬 (CONVERSATIONAL UI)
+## User Data Collection Modules
 
-**Purpose:** Conversational interface for users to fill forms via natural language chat.
+> **Note:** These modules collect user information to fill forms. Choose based on your preferred data collection method.
+
+### 2. **Chatbot Module** 💬 (INPUT COLLECTION - CONVERSATIONAL)
+
+**Purpose:** Collect user data through interactive conversation.
+
+**Collection Method:** Chat-based Q&A interface
 
 **What it does:**
-- 💬 **Interactive Chat** - Guides users through form filling conversations
-- 🎯 **Smart Extraction** - Extracts structured data from natural language
+- 💬 **Interactive Chat** - Guides users through conversational form filling
+- 🎯 **Smart Extraction** - Extracts structured data from natural language responses
 - 🔄 **State Management** - Maintains conversation context across sessions
-- ✅ **Validation** - Validates phone numbers, emails, and other fields
-- 🤖 **Multi-Step Workflows** - Investor type selection, data collection, PDF generation
+- ✅ **Validation** - Validates phone numbers, emails, dates, and other fields in real-time
+- 🤖 **Multi-Step Workflows** - Investor type selection, progressive data collection
+- 🔗 **Mapper Integration** - Sends collected data to Mapper module for PDF generation
+
+**Use Cases:**
+- Users don't have existing documents
+- Guided, step-by-step data entry
+- Natural language interaction preferred
+- Mobile-friendly conversational UI
 
 **Key Features:**
 - State machine-based conversation flow
@@ -148,6 +171,64 @@ python api_server.py          # Start server on :8000
 - API Gateway / Function URLs
 
 **Setup & Deployment:**
+📖 See **[docs/guides/chatbot-module.md](docs/guides/chatbot-module.md)**
+
+---
+
+### 3. **PDF Upload Module** 📤 (INPUT COLLECTION - DOCUMENT EXTRACTION)
+
+**Purpose:** Extract user data from uploaded documents (passports, IDs, financial statements).
+
+**Collection Method:** Document upload and automated extraction
+
+**What it does:**
+- 📤 **Document Upload** - Accept user document uploads (passport, ID, bank statements)
+- 🔍 **Data Extraction** - Extract personal information from uploaded documents
+- 📊 **Field Parsing** - Parse names, addresses, dates, account numbers, etc.
+- ✅ **Validation** - Verify extracted data accuracy
+- 🔗 **Mapper Integration** - Send extracted data to Mapper module for form filling
+
+**Use Cases:**
+- Users have existing identity/financial documents
+- Faster data entry from pre-existing information
+- Bulk document processing
+- Automated KYC (Know Your Customer) workflows
+
+**Key Features:**
+- Multi-format support (PDF, images, scanned documents)
+- OCR-based text extraction
+- Intelligent field identification
+- Document type detection
+- Secure storage and handling
+
+**Technology Stack:**
+- Python 3.8+
+- AWS Lambda / Serverless functions
+- OCR engines (Tesseract, AWS Textract, Azure Form Recognizer)
+- S3/Azure Blob/GCP Storage
+- API Gateway
+
+**Setup & Deployment:**
+📖 See **[docs/guides/pdf-upload-module.md](docs/guides/pdf-upload-module.md)**
+
+**Comparison: Chatbot vs PDF Upload**
+
+| Aspect | Chatbot Module | PDF Upload Module |
+|--------|----------------|-------------------|
+| **Input Method** | Conversational Q&A | Document upload |
+| **User Experience** | Interactive, guided | Quick, automated |
+| **Best For** | Users without docs | Users with existing docs |
+| **Speed** | Slower (conversation) | Faster (bulk extraction) |
+| **Accuracy** | Depends on user input | Depends on document quality |
+| **Use Together?** | Yes - hybrid approach for maximum flexibility |
+
+---
+
+## Enhancement Module
+
+### 4. **RAG Module** 🔍 (ENHANCEMENT - OPTIONAL)
+
+**Purpose:** Retrieval-Augmented Generation for improved field mapping on complex forms.
 📖 See **[rough_docs/MODULE_chatbot_lambda.md](rough_docs/MODULE_chatbot_lambda.md)**
 
 **Status:** 🚧 Code exists, needs documentation migration
@@ -177,9 +258,9 @@ python api_server.py          # Start server on :8000
 - AWS Lambda / API Gateway
 
 **Setup & Deployment:**
-📖 See **[rough_docs/MODULE_rag_lambda.md](rough_docs/MODULE_rag_lambda.md)** (if exists)
+📖 See **[docs/guides/rag-module.md](docs/guides/rag-module.md)**
 
-**Status:** 🚧 Code exists, needs documentation migration
+**Status:** � Optional - Integrates with Mapper module
 
 **Integration:**
 ```ini
@@ -193,32 +274,64 @@ rag_api_url = https://your-rag-api-url.com
 
 ---
 
-### 4. **PDF Upload Module** 📤 (STORAGE & MANAGEMENT)
+## 🔄 Complete System Flow
 
-**Purpose:** Handles PDF document uploads, storage, and retrieval.
+```
+┌────────────────────────────────────────────────────────────────┐
+│                   PHASE 1: DATA COLLECTION                      │
+│              (Choose Chatbot OR Upload OR Both)                 │
+└────────────────────────────────────────────────────────────────┘
 
-**What it does:**
-- 📤 **Upload Handling** - Receives and stores PDF files
-- 🗂️ **Storage Management** - Organizes PDFs by user/document IDs
-- 🔗 **URL Generation** - Creates signed URLs for secure access
-- 📊 **Metadata Tracking** - Tracks upload status and document info
-
-**Key Features:**
-- Multi-cloud storage support
-- Secure file uploads with validation
-- Document versioning
-- Integration with Mapper module
-
-**Technology Stack:**
-- Python 3.8+
-- AWS S3 / Azure Blob / GCP Storage
-- Lambda / Serverless functions
-- API Gateway
-
-**Setup & Deployment:**
-📖 See **[rough_docs/MODULE_pdf_upload_lambda.md](rough_docs/MODULE_pdf_upload_lambda.md)** (if exists)
-
-**Status:** 🚧 Code exists, needs documentation migration
+  Option A: Conversational          Option B: Document Upload
+  ┌──────────────────┐              ┌──────────────────┐
+  │ CHATBOT MODULE   │              │ PDF UPLOAD       │
+  │                  │              │ MODULE           │
+  │ User: "My name   │              │ [Upload passport]│
+  │ is John Doe"     │              │ [Upload bank     │
+  │                  │              │  statement]      │
+  │ Bot extracts:    │              │                  │
+  │ {name:"John Doe"}│              │ Extracts:        │
+  │                  │              │ {name, address,  │
+  │ Interactive Q&A  │              │  account, etc.}  │
+  └────────┬─────────┘              └────────┬─────────┘
+           │                                  │
+           └──────────────┬───────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   COLLECTED USER DATA │
+              │   (Standardized JSON) │
+              │                       │
+              │   {                   │
+              │     "firstName": "...",│
+              │     "lastName": "...", │
+              │     "address": "...",  │
+              │     ...               │
+              │   }                   │
+              └───────────┬───────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────────┐
+│              PHASE 2: PDF PROCESSING                            │
+│                 (Mapper Module)                                 │
+└────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   MAPPER MODULE       │
+              │                       │
+              │ 1. Extract PDF fields │
+              │ 2. Map to user data   │◄──── Optional: RAG
+              │ 3. Embed metadata     │      (Enhanced mapping)
+              │ 4. Fill PDF form      │
+              └───────────┬───────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   COMPLETED PDF       │
+              │   Ready for download  │
+              └───────────────────────┘
+```
 
 ---
 
@@ -398,6 +511,25 @@ curl -X POST http://localhost:8000/mapper/extract \
 pdf-autofillr/
 ├── README.md                          ← You are here
 ├── COMPLETE_SETUP_FLOW.md             ← End-to-end setup guide
+├── QUICK_REFERENCE.md                 ← Commands and troubleshooting
+├── ARCHITECTURE.md                    ← System architecture
+├── DOCUMENTATION_INDEX.md             ← Complete documentation index
+│
+├── docs/                              ← 📚 Complete Documentation
+│   ├── README.md                      ← Documentation hub
+│   ├── guides/                        ← Module guides
+│   │   ├── mapper-module.md           ← Mapper module guide
+│   │   ├── chatbot-module.md          ← Chatbot module guide
+│   │   ├── pdf-upload-module.md       ← PDF upload module guide
+│   │   ├── rag-module.md              ← RAG module guide
+│   │   └── orchestrator-module.md     ← Orchestrator guide
+│   │
+│   ├── architecture/                  ← Architecture docs
+│   │   ├── system-overview.md         ← Complete system architecture
+│   │   └── dual-mapper-flow.md        ← Dual mapper design
+│   │
+│   └── api-reference/                 ← API specifications
+│       └── (OpenAPI specs in sdks/)
 │
 ├── modules/                           ← Backend Modules
 │   ├── mapper/                        ← Core PDF processing
@@ -406,28 +538,18 @@ pdf-autofillr/
 │   │   ├── API_SERVER.md              ← API documentation
 │   │   └── INSTALLATION_GUIDE.md      ← Deployment guide
 │   │
-│   ├── chatbot/                       ← Conversational UI
-│   ├── rag/                           ← Enhanced mapping
-│   └── pdf_upload/                    ← Storage management
+│   ├── chatbot/                       ← Conversational data collection
+│   ├── pdf_upload/                    ← Document upload & extraction
+│   └── rag/                           ← Enhanced mapping
 │
-├── sdks/                              ← Client Libraries
-│   ├── python/                        ← Python SDK
-│   │   ├── QUICKSTART.md              ← Quick start guide
-│   │   ├── README.md                  ← SDK overview
-│   │   └── examples/README.md         ← Example scripts
-│   │
-│   └── typescript/                    ← TypeScript SDK
-│       └── README.md
-│
-├── docs/                              ← Full Documentation
-│   ├── api-reference/                 ← API specs
-│   ├── architecture/                  ← Architecture docs
-│   └── guides/                        ← How-to guides
-│
-└── rough_docs/                        ← Legacy/Working Docs
-    ├── MODULE_chatbot_lambda.md       ← Chatbot module details
-    ├── MODULE_rag_lambda.md           ← RAG module details
-    └── MODULE_pdf_upload_lambda.md    ← Upload module details
+└── sdks/                              ← Client Libraries
+    ├── python/                        ← Python SDK
+    │   ├── QUICKSTART.md              ← Quick start guide
+    │   ├── README.md                  ← SDK overview
+    │   └── examples/README.md         ← Example scripts
+    │
+    └── typescript/                    ← TypeScript SDK
+        └── README.md
 ```
 
 ---
@@ -436,12 +558,12 @@ pdf-autofillr/
 
 **Before using any SDK, you MUST set up the corresponding module(s):**
 
-| Module | Setup Required? | Documentation | Status |
-|--------|----------------|---------------|--------|
-| **Mapper** | ✅ Required for SDK | [modules/mapper/SETUP_GUIDE.md](modules/mapper/SETUP_GUIDE.md) | ✅ Complete |
-| **Chatbot** | ✅ Required for chat UI | [rough_docs/MODULE_chatbot_lambda.md](rough_docs/MODULE_chatbot_lambda.md) | 🚧 Needs migration |
-| **RAG** | 🔷 Optional | [rough_docs/](rough_docs/) | 🚧 Needs migration |
-| **PDF Upload** | 🔷 Optional | [rough_docs/](rough_docs/) | 🚧 Needs migration |
+| Module | Type | Setup Required? | Documentation | Status |
+|--------|------|----------------|---------------|--------|
+| **Mapper** | Processing | ✅ Required | [modules/mapper/SETUP_GUIDE.md](modules/mapper/SETUP_GUIDE.md) | ✅ Complete |
+| **Chatbot** | Input Collection | 🔷 Optional | [docs/guides/chatbot-module.md](docs/guides/chatbot-module.md) | ✅ Complete |
+| **PDF Upload** | Input Collection | 🔷 Optional | [docs/guides/pdf-upload-module.md](docs/guides/pdf-upload-module.md) | ✅ Complete |
+| **RAG** | Enhancement | 🔷 Optional | [docs/guides/rag-module.md](docs/guides/rag-module.md) | ✅ Complete |
 
 ### Setup Checklist
 
