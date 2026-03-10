@@ -1,0 +1,16 @@
+.env
+
+# Ignore deployment package
+chatbot-sdk-lambda.zipupload-document-sdk-lambda.zip
+*.zip
+
+# Ignore test file
+ignore_this.txt
+
+# Ignore Python cache folders anywhere
+__pycache__/
+
+# Ignore compiled Python files
+*.pyc
+*.pyo
+*.pyd

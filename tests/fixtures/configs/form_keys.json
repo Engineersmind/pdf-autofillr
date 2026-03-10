@@ -1,0 +1,44 @@
+{
+  "identity": {
+    "investor_full_legal_name_id": "",
+    "investor_email_id": "",
+    "investor_tax_id": "",
+    "investor_telephone_id": "",
+    "investor_date_of_birth_id": ""
+  },
+  "address_registered": {
+    "address_registered_line1_id": "",
+    "address_registered_line2_id": "",
+    "address_registered_city_id": "",
+    "address_registered_state_id": "",
+    "address_registered_zip_id": "",
+    "address_registered_country_id": ""
+  },
+  "address_mailing": {
+    "address_mailing_line1_id": "",
+    "address_mailing_line2_id": "",
+    "address_mailing_city_id": "",
+    "address_mailing_state_id": "",
+    "address_mailing_zip_id": "",
+    "address_mailing_country_id": ""
+  },
+  "investor_type": {
+    "individual_check": null,
+    "corporation_check": null,
+    "partnership_check": null,
+    "trust_check": null,
+    "llc_check": null
+  },
+  "investor_eligibility": {
+    "accredited_investor_check": null,
+    "qualified_purchaser_check": null,
+    "qualified_eligible_person_check": null
+  },
+  "wiring_details": {
+    "wiring_bank_name_id": "",
+    "wiring_account_name_id": "",
+    "wiring_account_number_id": "",
+    "wiring_routing_number_id": "",
+    "wiring_swift_code_id": ""
+  }
+}
