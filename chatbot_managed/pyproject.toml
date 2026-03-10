@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chatbot-managed"
+version = "0.1.0"
+description = "chatbot managed PDF filling service — private Auth0 + Lambda integration"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "chatbot-sdk>=0.1.0",
+    "requests>=2.31.0",
+]
+
+[project.urls]
+Repository = "https://github.com/yourorg/chatbot-managed"
+
+[tool.hatch.build.targets.wheel]
+packages = ["chatbot_managed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

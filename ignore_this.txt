@@ -1,0 +1,226 @@
+NEXT Steps
+
+### 3. Set your PyPI token as a GitHub secret
+In your GitHub repo → Settings → Secrets and variables → Actions → New repository secret:
+```
+Name:  PYPI_API_TOKEN
+Value: pypi-...your token...
+
+git add .
+git commit -m "v0.1.0 — full implementation, all tests passing"
+git tag v0.1.0
+git push origin main --tags
+
+5. Move chatbot_managed/ to its own private repo
+bash# In a separate directory
+git init chatbot-managed-private
+cd chatbot-managed-private
+# copy chatbot_managed/ folder contents in
+git add .
+git commit -m "initial"
+git remote add origin https://github.com/yourorg/chatbot-managed.git
+git push -u origin main
+Then delete the chatbot_managed/ folder from the public SDK repo so it never accidentally ships on PyPI.
+
+6. Wire your real Auth0 credentials into chatbot_managed
+In your private repo, create a .env or set these in your deployment environment:
+dotenvAUTH0_DOMAIN=your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=...
+AUTH0_CLIENT_SECRET=...
+AUTH0_AUDIENCE=https://your-api-audience
+FILL_PDF_LAMBDA_URL=https://your-lambda-url.com
+PDF_API_KEY=...
+Then smoke test a full session end to end — greeting → investor type → data collection → PDF fill — with a real blank PDF.
+
+7. That's it — you're live
+Once published, anyone can install with:
+pip install chatbot-sdk
+And your own internal deployments use:
+pip install chatbot-sdk
+pip install git+https://github.com/yourorg/chatbot-managed.git
+
+
+Yes.
+It's open source under the MIT license (your LICENSE file) — you can change anything, anytime, in any way you want. It's your code.
+When you make changes just bump the version in pyproject.toml (0.1.0 → 0.1.1 for small fixes, 0.2.0 for new features), tag it, push — PyPI updates automatically.
+
+
+Compress-Archive -Path chatbot-sdk\* -DestinationPath chatbot-sdk\chatbot-sdk-lambda.zip
+
+chatbot-sdk/
+│
+├── src/
+│   └── chatbot/
+│       ├── __init__.py
+│       │
+│       ├── client.py                          ← chatbotClient (public entry point)
+│       │
+│       ├── config/
+│       │   ├── __init__.py
+│       │   ├── form_config.py                 ← loads all JSON configs
+│       │   └── settings.py                    ← env var settings
+│       │
+│       ├── core/
+│       │   ├── __init__.py
+│       │   ├── engine.py                      ← ConversationEngine (orchestrator) + PDF workflow resume
+│       │   ├── router.py                      ← StateRouter (state → handler map)
+│       │   ├── session.py                     ← SessionManager (CRUD only)
+│       │   └── states.py                      ← State enum + INVESTOR_TYPES (Lambda's 10) + INVESTOR_TYPE_FILES
+│       │                                         + INVESTOR_TYPE_BOOLEAN_FIELD + INTERNAL_SPLIT_FIELD_PREFIXES
+│       │                                         + FORM_PF_FIELD_PREFIX + US_COUNTRY_VALUES
+│       │
+│       ├── extraction/
+│       │   ├── __init__.py
+│       │   ├── extractor.py                   ← unified entry point (LLM → fallback)
+│       │   ├── llm_extractor.py               ← GPT-4o-mini via LangChain
+│       │   ├── fallback_extractor.py          ← regex-based, no network call
+│       │   └── prompt_builder.py              ← builds dynamic LLM prompt from schema
+│       │
+│       ├── handlers/
+│       │   ├── __init__.py
+│       │   ├── base_handler.py                ← abstract BaseHandler
+│       │   ├── init_handler.py                ← INIT + SAVED_INFO_CHECK
+│       │   ├── update_existing_handler.py     ← UPDATE_EXISTING_PROMPT
+│       │   ├── investor_type_handler.py       ← INVESTOR_TYPE_SELECT + auto-sets investor_type boolean
+│       │   │                                     + strips internal split fields from live_fill_flat
+│       │   ├── data_collection_handler.py     ← DATA_COLLECTION (main workhorse)
+│       │   │                                     + form_pf filtering for non-US investors
+│       │   │                                     + auto-populates telephone_part_/fax_part_ split fields
+│       │   ├── boolean_group_handler.py       ← BOOLEAN_GROUP_SELECT
+│       │   ├── mailing_check_handler.py       ← MAILING_ADDRESS_CHECK
+│       │   ├── missing_fields_handler.py      ← MISSING_FIELDS_PROMPT
+│       │   ├── sequential_fill_handler.py     ← SEQUENTIAL_FILL
+│       │   ├── optional_fields_handler.py     ← OPTIONAL_FIELDS_PROMPT
+│       │   ├── continue_prompt_handler.py     ← CONTINUE_PROMPT
+│       │   └── another_info_handler.py        ← ANOTHER_INFO_PROMPT → COMPLETE
+│       │
+│       ├── pdf/
+│       │   ├── __init__.py
+│       │   ├── interface.py                   ← PDFFillerInterface (abstract: prepare/check/fill)
+│       │   └── workflow.py                    ← PDFWorkflowManager (poll/retry/thread/step logging)
+│       │
+│       ├── storage/
+│       │   ├── __init__.py
+│       │   ├── base.py                        ← StorageBackend (abstract, 17 methods incl. load_config)
+│       │   ├── local_storage.py               ← LocalStorage (filesystem JSON)
+│       │   ├── s3_storage.py                  ← S3Storage (developer's own AWS buckets)
+│       │   └── factory.py                     ← StorageFactory (env-based selection)
+│       │
+│       ├── telemetry/
+│       │   ├── __init__.py
+│       │   ├── collector.py                   ← TelemetryCollector (async aiohttp POST)
+│       │   ├── config.py                      ← TelemetryConfig dataclass
+│       │   └── document_context.py            ← DocumentContext (category/doc metadata)
+│       │
+│       ├── limits/
+│       │   ├── __init__.py
+│       │   └── rate_limiter.py                ← RateLimiter (local or Redis)
+│       │
+│       ├── logging/
+│       │   ├── __init__.py
+│       │   └── debug_logger.py                ← DebugLogger (thread-safe per-session)
+│       │
+│       ├── utils/
+│       │   ├── __init__.py
+│       │   ├── dict_utils.py                  ← flatten_dict, unflatten_dict, deep_update
+│       │   ├── field_utils.py                 ← missing fields, classify, format_field_name
+│       │   │                                     + is_internal_split_field, filter_user_facing_fields
+│       │   │                                     + filter_form_pf_fields, get_registered_country
+│       │   ├── address_utils.py               ← is_address_field, copy_registered_to_mailing
+│       │   └── intent_detection.py            ← is_skip, is_exit, is_affirmative, is_negative
+│       │
+│       ├── validation/
+│       │   ├── __init__.py
+│       │   ├── field_validator.py             ← validate_field (email, phone, boolean)
+│       │   └── phone_validator.py             ← validate_phone (requires country code, min 11 digits)
+│       │                                         + normalise_phone + split_phone_parts
+│       │
+│       └── managed/
+│           └── __init__.py                    ← stub pointing to chatbot-managed (private package)
+│
+├── server/
+│   ├── __init__.py
+│   └── local_server.py                        ← FastAPI dev server (uvicorn server.local_server:app)
+│
+├── config_samples/                            ← copy entire folder to your project as ./configs/
+│   ├── README.md
+│   ├── form_keys.json
+│   ├── mandatory.json
+│   ├── meta_form_keys.json
+│   ├── field_questions.json
+│   ├── form_keys_label.json
+│   └── global_investor_type_keys/
+│       ├── form_keys_individual.json
+│       ├── form_keys_corporation.json
+│       ├── form_keys_partnership.json
+│       ├── form_keys_trust.json
+│       ├── form_keys_llc.json
+│       ├── form_keys_non_profit_organisations.json
+│       ├── form_keys_fund_or_fund_of_funds.json
+│       ├── form_keys_ira.json
+│       ├── form_keys_government_bodies.json
+│       └── form_keys_education_institutions.json
+│
+├── examples/
+│   ├── basic_usage.py                         ← local storage, data-only mode
+│   ├── fastapi_integration.py                 ← FastAPI + telemetry + rate limiting
+│   ├── with_pdf_filler.py                     ← custom PDFFillerInterface example
+│   └── with_s3_storage.py                     ← S3Storage with own AWS buckets
+│
+├── tests/
+│   ├── __init__.py
+│   ├── unit/
+│   │   ├── __init__.py
+│   │   ├── test_extraction.py
+│   │   ├── test_field_utils.py
+│   │   ├── test_session.py
+│   │   ├── test_storage_local.py
+│   │   ├── test_telemetry.py
+│   │   └── test_validation.py
+│   ├── integration/
+│   │   ├── __init__.py
+│   │   └── test_full_conversation.py
+│   └── fixtures/
+│       └── configs/                           ← mirror of config_samples used by integration tests
+│           ├── form_keys.json
+│           ├── mandatory.json
+│           ├── meta_form_keys.json
+│           ├── field_questions.json
+│           ├── form_keys_label.json
+│           ├── README.md
+│           └── global_investor_type_keys/
+│               ├── form_keys_individual.json
+│               ├── form_keys_corporation.json
+│               ├── form_keys_partnership.json
+│               ├── form_keys_trust.json
+│               ├── form_keys_llc.json
+│               ├── form_keys_non_profit_organisations.json
+│               ├── form_keys_fund_or_fund_of_funds.json
+│               ├── form_keys_ira.json
+│               ├── form_keys_government_bodies.json
+│               └── form_keys_education_institutions.json
+│
+├── .github/
+│   └── workflows/
+│       ├── test.yml                           ← runs pytest on push/PR (py 3.10/3.11/3.12)
+│       └── publish.yml                        ← publishes to PyPI on version tag
+│
+├── .env.example
+├── pyproject.toml
+├── README.md
+├── CHANGELOG.md
+└── LICENSE
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PRIVATE REPO — chatbot-managed/  (NOT in public SDK)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+chatbot-managed/
+├── chatbot_managed/
+│   ├── __init__.py
+│   └── filler.py                              ← chatbotManagedPDFFiller
+│                                                 (Auth0 token cache + Steps 3/5/6:
+│                                                  prepare_document / check_document_ready / fill_document)
+├── pyproject.toml
+└── README.md
