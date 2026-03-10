@@ -1,0 +1,5 @@
+# Ignore deployment package
+rag-sdk.zip
+
+# Ignore test file
+ignore_this.txt
