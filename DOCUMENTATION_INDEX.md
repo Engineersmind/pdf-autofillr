@@ -39,6 +39,9 @@ Welcome to PDF Autofillr! This index will help you find the right documentation 
 | [README.md](README.md) | Project overview, features, quick start | Everyone |
 | [GETTING_STARTED.md](GETTING_STARTED.md) | **Automated 1-command setup** | **Everyone (START HERE!)** |
 | [COMMANDS.md](COMMANDS.md) | Complete command reference for all platforms | Everyone |
+| [FREE_LOCAL_LLMS.md](FREE_LOCAL_LLMS.md) | **Free open-source LLM options (Ollama, etc.)** | **Everyone (Zero cost!)** |
+| [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md) | **Docker-based deployment guide with GPU config** | **DevOps, Production** |
+| [SETUP_IMPROVEMENTS.md](SETUP_IMPROVEMENTS.md) | New automation features and enhancements | Developers |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and design | Architects, Developers |
 | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Quick commands and patterns | Users, Developers |
 | [COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md) | End-to-end manual setup guide | First-time users |

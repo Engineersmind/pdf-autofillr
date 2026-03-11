@@ -33,11 +33,8 @@ Server runs on **http://localhost:8000** using **free open-source Ollama models*
 | Type | Document | Purpose |
 |------|----------|---------|
 | ⚡ **Quick Start** | **[GETTING_STARTED.md](GETTING_STARTED.md)** | **1-command setup (Windows/Mac/Linux)** |
-| 🚀 **Start Here** | [COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md) | Complete setup guide (Modules + SDK) |
-| 📖 **Overview** | [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) | All documentation organized by topic |
-| ⚡ **Quick Reference** | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Commands, troubleshooting, cheat sheet |
-| 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) | System design and technical details |
-| 🗺️ **Mapper Module** | [modules/mapper/SETUP_GUIDE.md](modules/mapper/SETUP_GUIDE.md) | Configure & deploy mapper (REQUIRED) |
+| 🆓 **Free LLMs** | **[FREE_LOCAL_LLMS.md](FREE_LOCAL_LLMS.md)** | **Free open-source models (no API costs)** |
+| 🐳 **Docker Deploy** | **[DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)** | **Production deployment with GPU config** |
 | 🐍 **Python SDK** | [sdks/python/QUICKSTART.md](sdks/python/QUICKSTART.md) | Install and use SDK |
 | 🔌 **API Reference** | [modules/mapper/API_SERVER.md](modules/mapper/API_SERVER.md) | REST API endpoints |
 | 📝 **Examples** | [sdks/python/examples/README.md](sdks/python/examples/README.md) | Code examples and scripts |

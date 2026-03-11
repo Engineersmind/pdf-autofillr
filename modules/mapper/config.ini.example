@@ -124,6 +124,28 @@ rag_timeout = 180
 api_retry_attempts = 3
 
 
+[gpu]
+# GPU Configuration for Local LLM Deployments
+# Only applies when using local LLMs (Ollama, LM Studio, LocalAI)
+# See GPU_CONFIG_EXAMPLES.md for detailed scenarios
+
+# GPU mode: auto (recommended), cuda, mps, or cpu
+gpu_mode = auto
+
+# GPU memory limit in MB (0 = unlimited)
+# Recommended: Leave 2GB free (e.g., 6000 for 8GB VRAM)
+gpu_memory_limit = 0
+
+# Number of GPU layers to offload (-1 = all, 0 = cpu only)
+num_gpu_layers = -1
+
+# Low VRAM mode (for GPUs < 8GB)
+low_vram_mode = false
+
+# GPU device selection (0 = first, -1 = all)
+gpu_device = 0
+
+
 [notifications]
 # Microsoft Teams Notifications (optional)
 teams_notifications_enabled = false

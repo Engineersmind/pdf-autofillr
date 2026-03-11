@@ -174,15 +174,35 @@ ollama pull deepseek-r1:7b    # Good at complex reasoning
 
 ## ⚡ Performance Comparison
 
-### Speed (Fields per second)
+### ⚠️ Important: Realistic Performance Expectations
 
-| Model | Size | Speed | Quality | RAM Needed |
-|-------|------|-------|---------|------------|
-| **llama3.1** | 7B | ⚡⚡⚡⚡ Fast | ★★★ Good | 8 GB |
-| **llama3.1:70b** | 70B | ⚡ Slow | ★★★★★ Excellent | 48 GB |
-| **mistral** | 7B | ⚡⚡⚡⚡⚡ Very Fast | ★★★ Good | 8 GB |
-| **qwen2.5** | 7B | ⚡⚡⚡⚡ Fast | ★★★★ Great | 8 GB |
-| **deepseek-r1:7b** | 7B | ⚡⚡⚡ Medium | ★★★★ Great | 8 GB |
+**Open-source LLMs are slower than cloud APIs.** While free and private, expect longer processing times:
+
+- **Cloud APIs (OpenAI/Claude)**: 2-5 seconds per PDF ⚡⚡⚡⚡⚡
+- **Local GPU (NVIDIA/Apple Silicon)**: 10-30 seconds per PDF ⚡⚡⚡
+- **Local CPU only**: 60-300 seconds per PDF ⚡
+
+**Performance depends heavily on your system configuration:**
+- CPU: Model, cores, clock speed
+- RAM: Minimum 8GB for 7B models, 48GB+ for 70B models
+- GPU: NVIDIA (CUDA) or Apple Silicon (M1/M2/M3) dramatically improves speed
+- Storage: SSD recommended for model loading
+
+### Speed by Hardware Configuration
+
+| Model | CPU Only | GPU (8GB VRAM) | GPU (24GB VRAM) | Quality | RAM Needed |
+|-------|----------|----------------|-----------------|---------|------------|
+| **llama3.1** (7B) | 90s | 15s | 12s | ★★★ Good | 8 GB |
+| **llama3.1:70b** (70B) | 600s+ | N/A (needs 48GB) | 60s | ★★★★★ Excellent | 48 GB |
+| **mistral** (7B) | 60s | 12s | 10s | ★★★ Good | 8 GB |
+| **qwen2.5** (7B) | 80s | 14s | 11s | ★★★★ Great | 8 GB |
+| **deepseek-r1:7b** (7B) | 120s | 20s | 15s | ★★★★ Great | 8 GB |
+
+**Times shown are per PDF form (approximate).** Your actual performance will vary based on:
+- Form complexity (number of fields)
+- PDF page count
+- System load and background processes
+- Model quantization (4-bit vs 8-bit vs full precision)
 
 ### Cost Comparison
 
@@ -234,9 +254,11 @@ LLM_MODEL=ollama/mistral ./start.sh
 ### When to Use Local (Free)
 ✅ Development and testing  
 ✅ Privacy-sensitive data  
-✅ High volume (1000+ PDFs)  
+✅ High volume (1000+ PDFs) - cost savings outweigh slower speed  
 ✅ No budget for APIs  
 ✅ Learning and experimenting  
+✅ Have powerful GPU hardware  
+✅ Can tolerate 10-30s per PDF (GPU) or 60-300s (CPU)  
 
 ### When to Use Cloud APIs (Paid)
 ✅ Production with SLA requirements  
@@ -244,6 +266,8 @@ LLM_MODEL=ollama/mistral ./start.sh
 ✅ Low volume (< 100 PDFs/month)  
 ✅ Don't want to manage infrastructure  
 ✅ Need 24/7 reliability  
+✅ Require 2-5 second response times  
+✅ Don't have GPU hardware  
 
 ---
 
@@ -314,11 +338,12 @@ ollama pull llama3.1
 **A:** Yes! Llama 3.1 and Qwen 2.5 are surprisingly good for form filling. For 90% of use cases, they're perfectly adequate.
 
 ### Q: How much slower is local vs cloud?
-**A:** On modern hardware with GPU:
-- Local (GPU): 2-5 seconds per PDF
-- Cloud API: 1-3 seconds per PDF
+**A:** Significantly slower. Realistic expectations:
+- **Cloud API (OpenAI/Claude)**: 2-5 seconds per PDF
+- **Local with GPU (NVIDIA/Apple Silicon)**: 10-30 seconds per PDF (5-10x slower)
+- **Local CPU only**: 60-300 seconds per PDF (30-100x slower)
 
-Not much difference!
+The difference is substantial, but the zero cost and full privacy may justify the tradeoff for many use cases.
 
 ### Q: Can I use multiple free models?
 **A:** Yes! Download multiple with Ollama and switch between them:
