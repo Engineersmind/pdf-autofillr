@@ -3,6 +3,7 @@ import os
 import configparser
 from pathlib import Path
 from typing import Dict, Any
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 # Load config.ini
@@ -173,9 +174,9 @@ class Settings(BaseSettings):
     headers_max_tokens: int = get_ini_int("headers", "headers_max_tokens", 8192)
     
     # RAG API Configuration (for second mapper)
-    # Read from config.ini, default to empty (disabled) for local testing
-    rag_api_url: str = get_ini_value("general", "rag_api_url", "")  # RAG API endpoint
-    rag_api_key: str = get_ini_value("general", "rag_api_key", "")  # RAG API key for authentication
+    # Read from .env file - maps RAG_API_ENDPOINT to rag_api_url
+    rag_api_url: str = ""
+    rag_api_key: str = ""
     rag_bucket_name: str = "rag-bucket-pdf-filler"  # S3 bucket for RAG predictions
 
     class Config:
@@ -183,6 +184,7 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         env_prefix = ""
         extra = "allow"  # Allow extra fields from .env that aren't defined in Settings
+        populate_by_name = True  # Allow population by field name or alias
 
 settings = Settings()
 
