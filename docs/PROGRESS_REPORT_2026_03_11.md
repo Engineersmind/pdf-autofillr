@@ -9,7 +9,7 @@
 
 ## Summary
 
-The Mapper Module (core engine) is fully implemented and production-ready with multi-cloud deployment support. Open-source/multi-provider LLM capabilities are partially implemented — a `UnifiedLLMClient` using LiteLLM exists but is not yet connected to the active factory. Supporting modules (Chatbot, PDF Upload, RAG) exist only as documentation with no source code. The Plugin Framework is scaffolded but not integrated into the pipeline.
+The Mapper phase1 Module (core engine) is fully implemented and production-ready with multi-cloud deployment support. Open-source/multi-provider LLM capabilities are partially implemented — a `UnifiedLLMClient` using LiteLLM exists but is not yet connected to the active factory. Supporting modules (Chatbot, PDF Upload, RAG) exist only as documentation with no source code. The Plugin Framework is scaffolded but not integrated into the pipeline.
 
 ---
 
