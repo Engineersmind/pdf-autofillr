@@ -97,6 +97,7 @@ class InputFileHandler:
     def download_input(self, source_path: str, local_path: str) -> str:
         """
         Download input file from source storage.
+        Automatically detects storage type from path prefix.
         
         Args:
             source_path: Path in source storage (s3://, azure://, gs://, or /local/path)
@@ -112,18 +113,31 @@ class InputFileHandler:
         # Create local directory if needed
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         
-        # Download based on source type
-        if self.source_type == 'local':
-            return self._download_local(source_path, local_path)
-        elif self.source_type == 'aws':
+        # Detect storage type from path prefix (not from self.source_type)
+        # This allows us to download from different storage than our config
+        if source_path.startswith('s3://'):
+            logger.debug(f"Detected S3 path: {source_path}")
             return self._download_aws(source_path, local_path)
-        elif self.source_type == 'azure':
-            return self._download_azure(source_path, local_path)
-        elif self.source_type == 'gcp':
+        elif source_path.startswith('gs://'):
+            logger.debug(f"Detected GCS path: {source_path}")
             return self._download_gcp(source_path, local_path)
+        elif source_path.startswith('azure://') or ('blob.core.windows.net' in source_path and source_path.startswith('https://')):
+            logger.debug(f"Detected Azure path: {source_path}")
+            return self._download_azure(source_path, local_path)
         else:
-            logger.error(f"Unknown source type: {self.source_type}")
-            return None
+            # Local path or use configured source type
+            logger.debug(f"Using configured source type ({self.source_type}) for: {source_path}")
+            if self.source_type == 'local':
+                return self._download_local(source_path, local_path)
+            elif self.source_type == 'aws':
+                return self._download_aws(source_path, local_path)
+            elif self.source_type == 'azure':
+                return self._download_azure(source_path, local_path)
+            elif self.source_type == 'gcp':
+                return self._download_gcp(source_path, local_path)
+            else:
+                logger.error(f"Unknown source type: {self.source_type}")
+                return None
     
     def _get_local_path(self, file_type: str) -> Optional[str]:
         """
@@ -197,8 +211,17 @@ class InputFileHandler:
             s3://bucket/path/file.pdf → /tmp/processing/file.pdf
         """
         try:
-            # Use config's download method
-            self.config.download_file(source_path, local_path)
+            # Import AWS config and use it directly for S3 downloads
+            from src.configs.aws import AWSStorageConfig
+            
+            # Create AWS config if needed (or use existing if config is AWS)
+            if hasattr(self.config, 's3_client') and self.config.source_type == 'aws':
+                # Use existing AWS config
+                self.config.download_file(source_path, local_path)
+            else:
+                # Create temporary AWS config for S3 download
+                aws_config = AWSStorageConfig()
+                aws_config.download_file(source_path, local_path)
             
             logger.info(f"✅ Downloaded from S3: {source_path} → {local_path}")
             return local_path
@@ -215,8 +238,17 @@ class InputFileHandler:
             azure://container/path/file.pdf → /tmp/processing/file.pdf
         """
         try:
-            # Use config's download method
-            self.config.download_file(source_path, local_path)
+            # Import Azure config and use it directly for Azure downloads
+            from src.configs.azure import AzureStorageConfig
+            
+            # Create Azure config if needed (or use existing if config is Azure)
+            if hasattr(self.config, 'blob_client') and self.config.source_type == 'azure':
+                # Use existing Azure config
+                self.config.download_file(source_path, local_path)
+            else:
+                # Create temporary Azure config for download
+                azure_config = AzureStorageConfig()
+                azure_config.download_file(source_path, local_path)
             
             logger.info(f"✅ Downloaded from Azure: {source_path} → {local_path}")
             return local_path
@@ -233,8 +265,17 @@ class InputFileHandler:
             gs://bucket/path/file.pdf → /tmp/processing/file.pdf
         """
         try:
-            # Use config's download method
-            self.config.download_file(source_path, local_path)
+            # Import GCP config and use it directly for GCS downloads
+            from src.configs.gcp import GCPStorageConfig
+            
+            # Create GCP config if needed (or use existing if config is GCP)
+            if hasattr(self.config, 'gcs_client') and self.config.source_type == 'gcp':
+                # Use existing GCP config
+                self.config.download_file(source_path, local_path)
+            else:
+                # Create temporary GCP config for download
+                gcp_config = GCPStorageConfig()
+                gcp_config.download_file(source_path, local_path)
             
             logger.info(f"✅ Downloaded from GCS: {source_path} → {local_path}")
             return local_path

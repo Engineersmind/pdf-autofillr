@@ -4,55 +4,54 @@ Create RAG API input files from final form fields.
 This module creates two files for RAG API consumption:
 1. header_file.json: Contains field metadata with context and headers
 2. section_file.json: Contains hierarchical section structure
+
+Source-agnostic: Works with local, S3, Azure, or GCP storage.
+File paths are configured in config.ini, not hardcoded.
 """
 
 import json
+import os
 from typing import Dict, List, Any
 from src.core.logger import logger
-from src.clients.s3_client import S3Client
 
 
 async def create_rag_api_files(
     final_form_fields_path: str,
+    header_file_output_path: str,
+    section_file_output_path: str,
     user_id: int,
     session_id: str,
     pdf_doc_id: int,
-    pdf_hash: str,
-    s3_client: S3Client = None
+    pdf_hash: str
 ) -> Dict[str, str]:
     """
     Create RAG API input files from final form fields.
+    Source-agnostic - paths come from config.ini.
     
     Creates two files:
     1. header_file.json: Field-level data with context
     2. section_file.json: Section hierarchy structure
     
     Args:
-        final_form_fields_path: S3 path to final_form_fields.json
+        final_form_fields_path: Path to final_form_fields.json (from config)
+        header_file_output_path: Where to save header_file.json (from config)
+        section_file_output_path: Where to save section_file.json (from config)
         user_id: User ID
         session_id: Session ID
         pdf_doc_id: PDF document ID
         pdf_hash: PDF fingerprint hash
-        s3_client: Optional S3Client instance (will create if not provided)
         
     Returns:
-        Dict with S3 paths to created files:
+        Dict with paths to created files:
         {
-            "header_file": "s3://...",
-            "section_file": "s3://..."
+            "header_file": "/path/to/header_file.json",
+            "section_file": "/path/to/section_file.json"
         }
     """
-    if s3_client is None:
-        s3_client = S3Client()
-    
     logger.info(f"Creating RAG API files from {final_form_fields_path}")
     
-    # Download final form fields
-    import uuid
-    local_temp = f"/tmp/final_fields_{uuid.uuid4().hex[:8]}.json"
-    s3_client.download_file_from_s3(final_form_fields_path, local_temp)
-    
-    with open(local_temp, 'r') as f:
+    # Load final form fields (local file - already downloaded by caller)
+    with open(final_form_fields_path, 'r') as f:
         data = json.load(f)
     
     # Extract fields and pdf_category
@@ -80,36 +79,23 @@ async def create_rag_api_files(
         pdf_doc_id=pdf_doc_id
     )
     
-    # Upload to S3
-    from src.core.config import settings
-    rag_bucket = settings.rag_bucket_name
-    rag_base_path = f"predictions/{user_id}/{session_id}/{pdf_doc_id}"
+    # Ensure output directories exist
+    os.makedirs(os.path.dirname(header_file_output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(section_file_output_path), exist_ok=True)
     
-    # Save header_file.json
-    header_file_key = f"{rag_base_path}/input_file/header_file.json"
-    header_file_s3_path = f"s3://{rag_bucket}/{header_file_key}"
-    
-    header_temp = f"/tmp/rag_header_{uuid.uuid4().hex[:8]}.json"
-    with open(header_temp, 'w') as f:
+    # Save header_file.json to configured path
+    with open(header_file_output_path, 'w') as f:
         json.dump(header_file_data, f, indent=2, ensure_ascii=False)
+    logger.info(f"✅ header_file.json created: {header_file_output_path}")
     
-    s3_client.upload_file_to_s3(header_temp, header_file_s3_path)
-    logger.info(f"✅ header_file.json uploaded to {header_file_s3_path}")
-    
-    # Save section_file.json
-    section_file_key = f"{rag_base_path}/input_file/section_file.json"
-    section_file_s3_path = f"s3://{rag_bucket}/{section_file_key}"
-    
-    section_temp = f"/tmp/rag_section_{uuid.uuid4().hex[:8]}.json"
-    with open(section_temp, 'w') as f:
+    # Save section_file.json to configured path
+    with open(section_file_output_path, 'w') as f:
         json.dump(section_file_data, f, indent=2, ensure_ascii=False)
-    
-    s3_client.upload_file_to_s3(section_temp, section_file_s3_path)
-    logger.info(f"✅ section_file.json uploaded to {section_file_s3_path}")
+    logger.info(f"✅ section_file.json created: {section_file_output_path}")
     
     return {
-        "header_file": header_file_s3_path,
-        "section_file": section_file_s3_path
+        "header_file": header_file_output_path,
+        "section_file": section_file_output_path
     }
 
 
