@@ -16,6 +16,8 @@ The Mapper phase1 Module (core engine) is fully implemented and production-ready
 ## What Was Completed (as of March 11)
 
 ### Mapper Module — Core Engine
+
+
 | Component | Status | Notes |
 |-----------|--------|-------|
 | PDF Field Extraction | ✅ Done | PyMuPDF (fitz) — text fields, checkboxes, radio buttons, dropdowns, coordinates |
