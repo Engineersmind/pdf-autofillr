@@ -77,6 +77,7 @@ async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
         user_id = event['user_id']
         session_id = event['session_id']
         pdf_doc_id = event['pdf_doc_id']
+        use_second_mapper = event.get('use_second_mapper', False)
         
         logger.info(f"Processing: user={user_id}, session={session_id}, pdf={pdf_doc_id}")
         
@@ -245,6 +246,27 @@ def _build_file_paths(
     paths['source_output_final_fields'] = file_config.get_source_output_path(
         'final_form_fields_json', user_id, session_id, pdf_doc_id
     )
+    paths['source_output_header_file'] = file_config.get_source_output_path(
+        'header_file_json', user_id, session_id, pdf_doc_id
+    )
+    paths['source_output_section_file'] = file_config.get_source_output_path(
+        'section_file_json', user_id, session_id, pdf_doc_id
+    )
+    paths['source_output_java_mapping'] = file_config.get_source_output_path(
+        'java_mapping', user_id, session_id, pdf_doc_id
+    )
+    paths['source_output_final_predictions'] = file_config.get_source_output_path(
+        'final_predictions', user_id, session_id, pdf_doc_id
+    )
+    paths['source_output_llm_predictions'] = file_config.get_source_output_path(
+        'llm_predictions', user_id, session_id, pdf_doc_id
+    )
+    paths['source_output_rag_predictions'] = file_config.get_source_output_path(
+        'rag_predictions', user_id, session_id, pdf_doc_id
+    )
+    paths['source_output_cache_registry'] = file_config.get_source_output_path(
+        'cache_registry_json', user_id, session_id, pdf_doc_id
+    )
     
     return paths
 
@@ -293,6 +315,9 @@ def _create_storage_config(paths: Dict[str, str]) -> LocalStorageConfig:
     """
     config = LocalStorageConfig()
     
+    # Set processing directory for temp file operations
+    config.processing_dir = paths['processing_dir']
+    
     # Set all local paths (in /tmp/processing/ - where operations work)
     config.local_input_pdf = paths['processing_input_pdf']
     config.local_input_json = paths['processing_input_json']
@@ -322,6 +347,13 @@ def _create_storage_config(paths: Dict[str, str]) -> LocalStorageConfig:
     config.dest_semantic_mapping_json = paths.get('source_output_semantic_mapping')
     config.dest_headers_with_fields_json = paths.get('source_output_headers')
     config.dest_final_form_fields_json = paths.get('source_output_final_fields')
+    config.dest_header_file_json = paths.get('source_output_header_file')
+    config.dest_section_file_json = paths.get('source_output_section_file')
+    config.dest_cache_registry = paths.get('source_output_cache_registry')
+    config.dest_java_mapping_json = paths.get('source_output_java_mapping')
+    config.dest_final_predictions_json = paths.get('source_output_final_predictions')
+    config.dest_llm_predictions_json = paths.get('source_output_llm_predictions')
+    config.dest_rag_predictions_json = paths.get('source_output_rag_predictions')
     
     return config
 
@@ -354,6 +386,12 @@ async def _call_operation(
             "chunking_strategy": file_config.get('mapping', 'chunking_strategy', fallback='page'),
         }
         
+        # Use second mapper: event value overrides config.ini
+        use_second_mapper_default = file_config.get('mapping', 'use_second_mapper', fallback='false').lower() == 'true'
+        use_second_mapper = event.get('use_second_mapper', use_second_mapper_default)
+        
+        logger.info(f"🔀 Dual mapper mode: {use_second_mapper} (event={event.get('use_second_mapper')}, config.ini={use_second_mapper_default})")
+        
         result = await operations.handle_make_embed_file_operation(
             config=config,
             user_id=user_id,
@@ -361,7 +399,7 @@ async def _call_operation(
             session_id=session_id,
             investor_type=event.get('investor_type'),
             mapping_config=mapping_config,
-            use_second_mapper=event.get('use_second_mapper', False)
+            use_second_mapper=use_second_mapper
         )
         
     elif operation == "fill_pdf":

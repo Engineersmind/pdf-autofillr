@@ -104,7 +104,7 @@ def test_local_entrypoint():
         "session_id": session_id,
         "pdf_doc_id": pdf_doc_id,
         "investor_type": "individual",
-        "use_second_mapper": False
+        "use_second_mapper": True
     }
     
     print(f"\nTest Event:")
