@@ -1,0 +1,40 @@
+{
+  "name": "pdf-autofillr",
+  "version": "1.0.0",
+  "description": "Intelligent PDF Form Filling System with AI-Powered Field Mapping",
+  "scripts": {
+    "setup": "bash setup.sh || pwsh -File setup.ps1",
+    "start": "bash start.sh || pwsh -File start.ps1",
+    "dev": "cd modules/mapper && uvicorn api_server:app --reload --host 0.0.0.0 --port 8000",
+    "stop": "pkill -f api_server || taskkill /F /IM python.exe /FI \"WINDOWTITLE eq api_server*\"",
+    "health": "curl -s http://localhost:8000/health",
+    "test": "cd modules/mapper && python -m pytest tests/",
+    "clean": "make clean || pwsh -Command 'Remove-Item -Recurse -Force data/modules/mapper_sample/tmp/*'",
+    "install": "cd modules/mapper && pip install -r requirements.txt -r requirements-api.txt",
+    "install-sdk": "cd sdks/python && pip install -e .",
+    "docker:build": "cd modules/mapper && docker build -t pdf-autofiller-mapper .",
+    "docker:run": "docker run -p 8000:8000 pdf-autofiller-mapper",
+    "ollama:setup": "ollama pull llama3.1",
+    "ollama:models": "ollama list"
+  },
+  "keywords": [
+    "pdf",
+    "form-filling",
+    "ai",
+    "llm",
+    "automation",
+    "document-processing",
+    "ollama",
+    "openai"
+  ],
+  "author": "PDF Autofillr Team",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/pdf-autofillr"
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  }
+}

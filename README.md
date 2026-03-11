@@ -6,15 +6,35 @@ An enterprise-grade platform that automates PDF form filling by intelligently ma
 
 ---
 
+## ⚡ Quick Start (1 Command!)
+
+```bash
+# Windows PowerShell
+.\setup.ps1
+.\start.ps1
+
+# Mac/Linux
+./setup.sh
+./start.sh
+
+# Or using Make (all platforms)
+make setup
+make start
+```
+
+Server runs on **http://localhost:8000** using **free open-source Ollama models** (no API keys needed!)
+
+📖 **Full guide:** [GETTING_STARTED.md](GETTING_STARTED.md)
+
+---
+
 ## 📚 Documentation Quick Links
 
 | Type | Document | Purpose |
 |------|----------|---------|
-| 🚀 **Start Here** | **[COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md)** | Complete setup guide (Modules + SDK) |
-| 📖 **Overview** | [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) | All documentation organized by topic |
-| ⚡ **Quick Reference** | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Commands, troubleshooting, cheat sheet |
-| 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) | System design and technical details |
-| 🗺️ **Mapper Module** | [modules/mapper/SETUP_GUIDE.md](modules/mapper/SETUP_GUIDE.md) | Configure & deploy mapper (REQUIRED) |
+| ⚡ **Quick Start** | **[GETTING_STARTED.md](GETTING_STARTED.md)** | **1-command setup (Windows/Mac/Linux)** |
+| 🆓 **Free LLMs** | **[FREE_LOCAL_LLMS.md](FREE_LOCAL_LLMS.md)** | **Free open-source models (no API costs)** |
+| 🐳 **Docker Deploy** | **[DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)** | **Production deployment with GPU config** |
 | 🐍 **Python SDK** | [sdks/python/QUICKSTART.md](sdks/python/QUICKSTART.md) | Install and use SDK |
 | 🔌 **API Reference** | [modules/mapper/API_SERVER.md](modules/mapper/API_SERVER.md) | REST API endpoints |
 | 📝 **Examples** | [sdks/python/examples/README.md](sdks/python/examples/README.md) | Code examples and scripts |
