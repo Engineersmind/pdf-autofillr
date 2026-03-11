@@ -6,11 +6,34 @@ An enterprise-grade platform that automates PDF form filling by intelligently ma
 
 ---
 
+## ⚡ Quick Start (1 Command!)
+
+```bash
+# Windows PowerShell
+.\setup.ps1
+.\start.ps1
+
+# Mac/Linux
+./setup.sh
+./start.sh
+
+# Or using Make (all platforms)
+make setup
+make start
+```
+
+Server runs on **http://localhost:8000** using **free open-source Ollama models** (no API keys needed!)
+
+📖 **Full guide:** [GETTING_STARTED.md](GETTING_STARTED.md)
+
+---
+
 ## 📚 Documentation Quick Links
 
 | Type | Document | Purpose |
 |------|----------|---------|
-| 🚀 **Start Here** | **[COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md)** | Complete setup guide (Modules + SDK) |
+| ⚡ **Quick Start** | **[GETTING_STARTED.md](GETTING_STARTED.md)** | **1-command setup (Windows/Mac/Linux)** |
+| 🚀 **Start Here** | [COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md) | Complete setup guide (Modules + SDK) |
 | 📖 **Overview** | [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) | All documentation organized by topic |
 | ⚡ **Quick Reference** | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Commands, troubleshooting, cheat sheet |
 | 🏗️ **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) | System design and technical details |

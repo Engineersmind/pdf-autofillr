@@ -6,9 +6,11 @@ Welcome to PDF Autofillr! This index will help you find the right documentation 
 
 ## 🚀 Getting Started (Pick Your Path)
 
-### I want to use the system
+### I want to use the system (FASTEST - Automated Setup!)
+→ **[GETTING_STARTED.md](GETTING_STARTED.md)** - 1-command setup for Windows/Mac/Linux  
+→ **[COMMANDS.md](COMMANDS.md)** - Complete command reference  
 → **[README.md](README.md)** - Start here for overview  
-→ **[COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md)** - Step-by-step setup  
+→ **[COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md)** - Step-by-step manual setup  
 → **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Quick commands and cheat sheet
 
 ### I want to understand the architecture
@@ -35,9 +37,23 @@ Welcome to PDF Autofillr! This index will help you find the right documentation 
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | [README.md](README.md) | Project overview, features, quick start | Everyone |
+| [GETTING_STARTED.md](GETTING_STARTED.md) | **Automated 1-command setup** | **Everyone (START HERE!)** |
+| [COMMANDS.md](COMMANDS.md) | Complete command reference for all platforms | Everyone |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and design | Architects, Developers |
 | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Quick commands and patterns | Users, Developers |
-| [COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md) | End-to-end setup guide | First-time users |
+| [COMPLETE_SETUP_FLOW.md](COMPLETE_SETUP_FLOW.md) | End-to-end manual setup guide | First-time users |
+
+### Automation Scripts
+| File | Platform | Purpose |
+|------|----------|---------|
+| [setup.ps1](setup.ps1) | Windows PowerShell | Automated setup script |
+| [setup.sh](setup.sh) | Mac/Linux | Automated setup script |
+| [start.ps1](start.ps1) | Windows PowerShell | Start server script |
+| [start.sh](start.sh) | Mac/Linux | Start server script |
+| [stop.ps1](stop.ps1) | Windows PowerShell | Stop server script |
+| [stop.sh](stop.sh) | Mac/Linux | Stop server script |
+| [Makefile](Makefile) | All (with Make) | Cross-platform commands |
+| [package.json](package.json) | All (with npm) | npm-style commands |
 
 ### Module Documentation
 | Module | Location | Key Files |
@@ -52,6 +68,13 @@ Welcome to PDF Autofillr! This index will help you find the right documentation 
 |-----|----------|-----------|
 | **Python** | `sdks/python/` | [QUICKSTART.md](sdks/python/QUICKSTART.md), [examples/README.md](sdks/python/examples/README.md) |
 | **TypeScript** | `sdks/typescript/` | [README.md](sdks/typescript/README.md) _(coming soon)_ |
+**Option A: Automated (Recommended)**
+1. **Quick Start Guide** → [GETTING_STARTED.md](GETTING_STARTED.md)
+2. **Run setup script** → `./setup.sh` or `.\setup.ps1` or `make setup`
+3. **Start server** → `./start.sh` or `.\start.ps1` or `make start`
+4. **Follow commands** → [COMMANDS.md](COMMANDS.md)
+
+**Option B: Manual**
 
 ### API Documentation
 | Type | Location | Purpose |
