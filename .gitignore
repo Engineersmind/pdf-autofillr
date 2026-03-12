@@ -13,3 +13,9 @@
 rough_docs/
 data/
 .vscode
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
