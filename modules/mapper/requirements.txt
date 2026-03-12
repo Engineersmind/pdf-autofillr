@@ -5,7 +5,7 @@ PyMuPDF==1.26.5
 numpy==2.3.5
 
 # LLM Clients
-openai==2.6.0
+openai>=2.8.0
 
 # Tokenization
 tiktoken==0.12.0
@@ -28,6 +28,13 @@ httpx==0.28.1
 httpcore==1.0.9
 aiohttp==3.13.1
 requests==2.32.5
+
+# HTTP Server (for HTTP API entrypoint)
+fastapi==0.115.0
+uvicorn[standard]==0.34.0
+
+boto3==1.42.66
+litellm==1.82.0
 
 # Other dependencies from your current requirements
 regex==2025.9.18

@@ -188,6 +188,7 @@ async def handle_extract_operation(
         response = {
             "operation": "extract",
             "output_file": extraction_output_path,
+            "dest_output_file": saved_path,  # Destination path where file was actually saved
             "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration,
@@ -1314,6 +1315,9 @@ async def handle_make_embed_file_operation(
         import os
         import tempfile
         
+        # Initialize destination paths tracker (final output locations after save_output())
+        dest_paths = {}
+        
         # Store pdf_doc_id on config for structured output paths (if output_base_path is set)
         if hasattr(config, 'output_base_path') and config.output_base_path:
             config.pdf_doc_id = pdf_doc_id
@@ -1378,6 +1382,13 @@ async def handle_make_embed_file_operation(
                     json.dump(extract_result.get('extracted_data', {}), f, indent=2)
                 extract_result["output_file"] = extracted_json
                 logger.info(f"Saved cached extraction to: {extracted_json}")
+                
+                # Save to destination storage
+                from src.handlers.output_handler import OutputFileHandler
+                output_handler = OutputFileHandler(config)
+                dest_extracted_json = output_handler.save_output(extracted_json, 'extracted_json')
+                logger.info(f"📤 Saved cached extraction to destination: {dest_extracted_json}")
+                
             elif file_config:
                 # Cloud: use generated structured output path
                 extracted_json = file_config["extraction_output_path"]
@@ -1407,6 +1418,7 @@ async def handle_make_embed_file_operation(
                 mapping_config=mapping_config
             )
             extracted_json = extract_result["output_file"]
+            dest_extracted_json = extract_result.get("dest_output_file")  # Capture destination path
         
         pipeline_results["extract"] = extract_result
         
@@ -1461,12 +1473,17 @@ async def handle_make_embed_file_operation(
         rag_api_failed = False
         rag_failure_reason = None
         
-        # Initialize destination path variables for cache registration
+        # Initialize destination path variables for cache registration and return
         dest_semantic_mapping = None
         dest_radio_groups = None
         dest_embedded_pdf = None
         dest_headers_with_fields = None
         dest_final_form_fields = None
+        dest_llm_predictions = None
+        dest_rag_predictions = None
+        dest_java_mapping = None
+        dest_combined_mapping = None
+        dest_extracted_json = None
         
         # Stage 2: Mapping (with cache check)
         logger.info("\n" + "=" * 80)
@@ -1548,6 +1565,10 @@ async def handle_make_embed_file_operation(
                     config.cached_final_form_fields if hasattr(config, 'cached_final_form_fields') and config.cached_final_form_fields
                     else cached_final_fields_from_registry
                 )
+                
+                # Set destination paths from cache (these ARE the final storage locations)
+                dest_headers_with_fields = headers_with_fields_path
+                dest_final_form_fields = final_form_fields_path
                 
                 logger.info(f"   Final headers_with_fields_path: {headers_with_fields_path}")
                 logger.info(f"   Final final_form_fields_path: {final_form_fields_path}")
@@ -1741,10 +1762,10 @@ async def handle_make_embed_file_operation(
                         
                         # Upload java mapping and final predictions to source storage
                         output_handler = OutputFileHandler(config)
-                        saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                        saved_final_predictions = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
-                        logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
-                        logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+                        dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                        dest_combined_mapping = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
+                        logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
+                        logger.info(f"📤 Uploaded final predictions to: {dest_combined_mapping}")
                         
                         rag_api_failed = False
                     else:
@@ -1759,8 +1780,8 @@ async def handle_make_embed_file_operation(
                         # Upload java mapping to source storage
                         from src.handlers.output_handler import OutputFileHandler
                         output_handler = OutputFileHandler(config)
-                        saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                        logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                        dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                        logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
                         
                         rag_api_failed = True
                         rag_failure_reason = rag_result['error']
@@ -1778,8 +1799,8 @@ async def handle_make_embed_file_operation(
                     # Upload java mapping to source storage
                     from src.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
-                    saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                    logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                    dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
                 
                 # Update config paths for embed operation
                 config.local_mapped_json = mapping_json
@@ -2195,17 +2216,17 @@ async def handle_make_embed_file_operation(
                 "global_input_json": input_json_s3
             },
             "outputs": {
-                "refreshed_pdf": input_pdf_s3,  # Same as input in this flow
-                "extracted_json": extracted_json,
-                "mapping_json": mapping_json,
-                "radio_groups_json": radio_groups,
-                "embedded_pdf": embedded_pdf,
-                "semantic_mapping_json": semantic_mapping_path,
-                "llm_predictions": llm_predictions_path,
-                "headers_with_fields": headers_with_fields_path,
-                "final_form_fields": final_form_fields_path,
-                "rag_predictions": rag_predictions_path,
-                "combined_mapping": combined_mapping_path
+                "refreshed_pdf": getattr(config, 'source_input_pdf', input_pdf_s3),  # Original source input PDF
+                "extracted_json": dest_extracted_json,  # Only show if saved to destination
+                "mapping_json": dest_java_mapping or mapping_json,  # Java mapping destination
+                "radio_groups_json": dest_radio_groups or radio_groups,  # Radio groups destination
+                "embedded_pdf": dest_embedded_pdf or embedded_pdf,  # Embedded PDF destination
+                "semantic_mapping_json": dest_semantic_mapping or semantic_mapping_path,  # Semantic mapping destination
+                "llm_predictions": dest_llm_predictions,  # Only show if saved (dual mapper)
+                "headers_with_fields": dest_headers_with_fields,  # Only show if saved (dual mapper)
+                "final_form_fields": dest_final_form_fields,  # Only show if saved (dual mapper)
+                "rag_predictions": dest_rag_predictions,  # Only show if saved (dual mapper)
+                "combined_mapping": dest_combined_mapping or combined_mapping_path  # Combined mapping destination (dual mapper)
             },
             "pdf_category": pdf_category,
             "pdf_hash": pdf_hash,
@@ -2663,7 +2684,7 @@ async def call_rag_api(
         # This assumes RAG predictions already exist in source storage
         if storage_config.source_type == 'local':
             # For local: assume file is in data/output/ or similar
-            source_rag_path = f"../../data/modules/mapper_sample/output/{user_id}_{session_id}_{pdf_doc_id}_rag_predictions.json"
+            source_rag_path = f"/app/data/modules/mapper_sample/output/{user_id}_{session_id}_{pdf_doc_id}_rag_predictions.json"
         elif storage_config.source_type == 'aws':
             # For S3: construct S3 path where RAG predictions are stored
             source_rag_path = getattr(storage_config, 's3_rag_predictions', None)

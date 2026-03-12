@@ -1,0 +1,55 @@
+# Docker Compose for PDF Autofiller Mapper
+# 
+# Usage:
+#   docker-compose up          # Start in foreground
+#   docker-compose up -d       # Start in background
+#   docker-compose logs -f     # View logs
+#   docker-compose down        # Stop and remove
+
+services:
+  mapper:
+    build:
+      context: ../../../../
+      dockerfile: modules/mapper/deployment/docker/Dockerfile
+    container_name: pdf-autofiller-mapper
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount data directory for persistent storage
+      - ../../../../data:/app/data
+      # Mount config file (uses absolute paths for Docker)
+      - ../../config.ini:/app/config.ini:ro
+      # Optional: Mount .env for development
+      - ../../.env:/app/.env:ro
+    environment:
+      # Server configuration
+      HTTP_HOST: "0.0.0.0"
+      HTTP_PORT: "8000"
+      
+      # Storage configuration
+      STORAGE_TYPE: "local"
+      DATA_DIR: "/app/data"
+      PROCESSING_DIR: "/tmp/processing"
+      
+      # Optional: Override config.ini settings
+      # LLM_MODEL: "gpt-4o"
+      # LLM_TEMPERATURE: "0.05"
+      # USE_SECOND_MAPPER: "true"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mapper-network
+
+networks:
+  mapper-network:
+    driver: bridge
+
+# Optional: Add volumes for better data persistence
+volumes:
+  mapper-data:
+    driver: local
