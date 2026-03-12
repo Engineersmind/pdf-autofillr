@@ -1,0 +1,15 @@
+# Optional: mapper PDF filler dependencies
+# Only needed when chatbot_PDF_FILLER=mapper
+# Install with: pip install -r requirements-mapper.txt
+#
+# The pdf-autofiller-sdk lives in the rv1 repo at:
+#   modules/mapper/sdks/python/
+#
+# Install locally (recommended inside the monorepo):
+#   pip install -e ../../modules/mapper/sdks/python/
+#
+# Or if published to PyPI:
+#   pip install pdf-autofiller-sdk
+
+pdf-autofiller-sdk
+httpx>=0.24.0

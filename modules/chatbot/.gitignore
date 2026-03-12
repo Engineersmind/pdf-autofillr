@@ -1,0 +1,16 @@
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+chatbot_data/
+data/output/
+data/cache/
+*.pdf
+!data/input/.gitkeep
