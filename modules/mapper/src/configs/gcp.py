@@ -16,7 +16,6 @@ class GCPStorageConfig(BaseStorageConfig):
     def __init__(self):
         super().__init__(source_type="gcp")
         self.gcs_client = None
-        logger.warning("GCP storage not fully implemented yet")
     
     def parse_path(self, file_path: str) -> Dict[str, str]:
         """
@@ -50,17 +49,38 @@ class GCPStorageConfig(BaseStorageConfig):
             "filename": filename
         }
     
+    def _get_gcs_client(self):
+        """Lazy-load GCS client."""
+        if self.gcs_client is None:
+            from google.cloud import storage
+            project = os.getenv('GOOGLE_CLOUD_PROJECT')
+            # GOOGLE_APPLICATION_CREDENTIALS is picked up automatically by the SDK
+            self.gcs_client = storage.Client(project=project)
+        return self.gcs_client
+
     def download_file(self, source_path: str, local_path: str) -> str:
         """Download file from GCS to local path."""
-        raise NotImplementedError("GCS download not implemented yet")
-    
+        import os as _os
+        parsed = self.parse_path(source_path)
+        _os.makedirs(_os.path.dirname(local_path), exist_ok=True)
+        client = self._get_gcs_client()
+        client.bucket(parsed['bucket']).blob(parsed['object']).download_to_filename(local_path)
+        logger.info(f"Downloaded {source_path} to {local_path}")
+        return local_path
+
     def upload_file(self, local_path: str, destination_path: str) -> str:
         """Upload file from local to GCS."""
-        raise NotImplementedError("GCS upload not implemented yet")
-    
+        parsed = self.parse_path(destination_path)
+        client = self._get_gcs_client()
+        client.bucket(parsed['bucket']).blob(parsed['object']).upload_from_filename(local_path)
+        logger.info(f"Uploaded {local_path} to {destination_path}")
+        return destination_path
+
     def file_exists(self, file_path: str) -> bool:
         """Check if GCS object exists."""
-        raise NotImplementedError("GCS existence check not implemented yet")
+        parsed = self.parse_path(file_path)
+        client = self._get_gcs_client()
+        return client.bucket(parsed['bucket']).blob(parsed['object']).exists()
     
     def generate_output_path(self, input_path: str, suffix: str, extension: str = None) -> str:
         """Generate GCS output path."""

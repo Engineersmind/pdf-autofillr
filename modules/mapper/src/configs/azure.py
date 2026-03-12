@@ -16,7 +16,6 @@ class AzureStorageConfig(BaseStorageConfig):
     def __init__(self):
         super().__init__(source_type="azure")
         self.blob_client = None
-        logger.warning("Azure storage not fully implemented yet")
     
     def parse_path(self, file_path: str) -> Dict[str, str]:
         """
@@ -61,17 +60,62 @@ class AzureStorageConfig(BaseStorageConfig):
             "filename": filename
         }
     
+    def _get_blob_service_client(self):
+        """Lazy-load Azure BlobServiceClient."""
+        if self.blob_client is None:
+            from azure.storage.blob import BlobServiceClient
+            conn_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+            account   = os.getenv('AZURE_STORAGE_ACCOUNT')
+            sas_token = os.getenv('AZURE_STORAGE_SAS_TOKEN')
+            if conn_str:
+                self.blob_client = BlobServiceClient.from_connection_string(conn_str)
+            elif account and sas_token:
+                self.blob_client = BlobServiceClient(
+                    account_url=f"https://{account}.blob.core.windows.net",
+                    credential=sas_token
+                )
+            elif account:
+                # Managed identity / DefaultAzureCredential
+                from azure.identity import DefaultAzureCredential
+                self.blob_client = BlobServiceClient(
+                    account_url=f"https://{account}.blob.core.windows.net",
+                    credential=DefaultAzureCredential()
+                )
+            else:
+                raise EnvironmentError(
+                    "No Azure credentials found. Set AZURE_STORAGE_CONNECTION_STRING "
+                    "or AZURE_STORAGE_ACCOUNT (with optional AZURE_STORAGE_SAS_TOKEN)."
+                )
+        return self.blob_client
+
     def download_file(self, source_path: str, local_path: str) -> str:
         """Download file from Azure Blob to local path."""
-        raise NotImplementedError("Azure Blob download not implemented yet")
-    
+        import os as _os
+        parsed = self.parse_path(source_path)
+        _os.makedirs(_os.path.dirname(local_path), exist_ok=True)
+        client = self._get_blob_service_client()
+        blob = client.get_blob_client(container=parsed['container'], blob=parsed['blob'])
+        with open(local_path, 'wb') as f:
+            f.write(blob.download_blob().readall())
+        logger.info(f"Downloaded {source_path} to {local_path}")
+        return local_path
+
     def upload_file(self, local_path: str, destination_path: str) -> str:
         """Upload file from local to Azure Blob."""
-        raise NotImplementedError("Azure Blob upload not implemented yet")
-    
+        parsed = self.parse_path(destination_path)
+        client = self._get_blob_service_client()
+        blob = client.get_blob_client(container=parsed['container'], blob=parsed['blob'])
+        with open(local_path, 'rb') as f:
+            blob.upload_blob(f, overwrite=True)
+        logger.info(f"Uploaded {local_path} to {destination_path}")
+        return destination_path
+
     def file_exists(self, file_path: str) -> bool:
         """Check if Azure blob exists."""
-        raise NotImplementedError("Azure Blob existence check not implemented yet")
+        parsed = self.parse_path(file_path)
+        client = self._get_blob_service_client()
+        blob = client.get_blob_client(container=parsed['container'], blob=parsed['blob'])
+        return blob.exists()
     
     def generate_output_path(self, input_path: str, suffix: str, extension: str = None) -> str:
         """Generate Azure blob output path."""
