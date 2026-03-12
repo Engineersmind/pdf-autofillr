@@ -10,13 +10,18 @@ Platform-specific wrappers (lambda_handler.py, azure_function.py, etc.) call the
 import os
 import time
 import json
+import uuid
 import asyncio
 import logging
 import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from src.core.config import get_complete_file_config, get_processing_output_config
+import aiohttp
+
+from src.core.config import get_complete_file_config, get_processing_output_config, settings
 from src.utils.storage_helper import (
     download_from_source,
     upload_to_source,
@@ -25,11 +30,21 @@ from src.utils.storage_helper import (
     get_storage_type
 )
 from src.handlers.file_handlers import create_file_handlers
+from src.handlers.output_handler import OutputFileHandler
+from src.handlers.input_handler import InputFileHandler
 from src.extractors.detailed_fitz import DetailedFitzExtractor
 from src.mappers.semantic_mapper import SemanticMapper
 from src.embedders.embed_keys import run_embed_java_stage
 from src.fillers.fill_pdf import fill_with_java
 from src.utils.map_time_estimator import estimate_map_stage_time
+from src.utils.hash_cache import check_hash_cache, save_hash_cache, copy_cached_files
+
+try:
+    HEADERS_AVAILABLE = True
+except ImportError:
+    get_form_fields_points = None
+    create_rag_api_files = None
+    HEADERS_AVAILABLE = False
 
 # Import notification system (optional)
 try:
@@ -65,6 +80,120 @@ async def safe_notify(notifier, operation_name: str, *args, **kwargs) -> bool:
         return False
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Private helpers (shared across handlers)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _log_op_start(name: str, config, user_id=None, session_id=None) -> None:
+    """Print the standard 5-line operation header."""
+    logger.info("=" * 60)
+    logger.info(name)
+    logger.info("=" * 60)
+    logger.info(f"Storage type: {config.source_type}")
+    if user_id is not None:
+        logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+
+
+async def _extract_headers(config, extracted_json: str, file_config, storage_type: str) -> dict:
+    """
+    Extract form-field headers from extracted_json and upload results.
+
+    Returns:
+        {
+            "headers_with_fields_path": str,
+            "final_form_fields_path": str,
+            "dest_headers_with_fields": str | None,
+            "dest_final_form_fields": str | None,
+            "pdf_category": str | None,
+        }
+    Raises ValueError if header paths are not configured.
+    Raises ImportError if HEADERS_AVAILABLE is False.
+    """
+    if not HEADERS_AVAILABLE:
+        raise ImportError("src.headers module is not available")
+
+    if storage_type == 'local' and hasattr(config, 'local_headers_with_fields'):
+        headers_output_path = config.local_headers_with_fields
+        final_fields_output_path = config.local_final_form_fields
+    elif file_config and "headers" in file_config:
+        headers_output_path = file_config["headers"]["headers_with_fields_path"]
+        final_fields_output_path = file_config["headers"]["final_form_fields_path"]
+    else:
+        raise ValueError("Missing header paths configuration")
+
+    logger.info("📝 Extracting headers for RAG API...")
+    headers_result = await get_form_fields_points(
+        extracted_json_path=extracted_json,
+        headers_output_path=headers_output_path,
+        final_fields_output_path=final_fields_output_path,
+    )
+
+    pdf_category = headers_result.get("pdf_category")
+    logger.info(f"✅ Headers extracted: {final_fields_output_path}")
+    if pdf_category:
+        logger.info(f"📋 PDF Category: {pdf_category}")
+
+    output_handler = OutputFileHandler(config)
+    dest_headers = output_handler.save_output(headers_output_path, 'headers_with_fields_json')
+    dest_fields = output_handler.save_output(final_fields_output_path, 'final_form_fields_json')
+    if dest_headers:
+        logger.info(f"📤 Uploaded headers_with_fields to: {dest_headers}")
+    if dest_fields:
+        logger.info(f"📤 Uploaded final_form_fields to: {dest_fields}")
+
+    return {
+        "headers_with_fields_path": headers_output_path,
+        "final_form_fields_path": final_fields_output_path,
+        "dest_headers_with_fields": dest_headers,
+        "dest_final_form_fields": dest_fields,
+        "pdf_category": pdf_category,
+    }
+
+
+async def _save_phase_cache(
+    pdf_hash: str,
+    cache_registry_path: str,
+    config,
+    embedded_pdf: str,
+    semantic_mapping_path: str,
+    radio_groups: str,
+    user_id: int,
+    pdf_doc_id: int,
+    headers_with_fields: Optional[str] = None,
+    final_form_fields: Optional[str] = None,
+    pdf_category: Optional[str] = None,
+) -> None:
+    """
+    Save pipeline phase results to the hash cache, then upload the registry.
+    Logs a warning on any error — never raises.
+    """
+    try:
+        logger.info("💾 Saving results to cache...")
+        await save_hash_cache(
+            pdf_hash=pdf_hash,
+            cache_registry_path=cache_registry_path,
+            embedded_pdf=embedded_pdf,
+            mapping_json=semantic_mapping_path,
+            radio_groups=radio_groups,
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            headers_with_fields=headers_with_fields,
+            final_form_fields=final_form_fields,
+            pdf_category=pdf_category,
+        )
+        logger.info(f"✅ Cached locally: {cache_registry_path}")
+
+        if os.path.exists(cache_registry_path):
+            output_handler = OutputFileHandler(config)
+            cache_dest = output_handler.save_output(cache_registry_path, 'cache_registry_json')
+            if cache_dest:
+                logger.info(f"📤 Cache registry persisted to: {cache_dest}")
+            else:
+                logger.warning("⚠️  Cache registry not uploaded (local storage mode)")
+    except Exception as cache_error:
+        logger.warning(f"Failed to cache results: {cache_error}. Continuing anyway.")
+
+
 async def handle_extract_operation(
     config,  # Storage config (first parameter)
     user_id: Optional[int] = None,
@@ -92,13 +221,8 @@ async def handle_extract_operation(
         Operation result with output file path
     """
     start_time = time.time()
-    
-    logger.info("=" * 60)
-    logger.info("EXTRACT OPERATION")
-    logger.info("=" * 60)
-    logger.info(f"Storage type: {config.source_type}")
-    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
-    
+    _log_op_start("EXTRACT OPERATION", config, user_id, session_id)
+
     user_input_details = {
         "user_id": user_id,
         "pdf_doc_id": pdf_doc_id,
@@ -249,13 +373,9 @@ async def handle_map_operation(
     """
     start_time = time.time()
     
-    logger.info("=" * 60)
-    logger.info("MAP OPERATION")
-    logger.info("=" * 60)
-    logger.info(f"Storage type: {config.source_type}")
-    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+    _log_op_start("MAP OPERATION", config, user_id, session_id)
     logger.info(f"Investor Type: {investor_type}")
-    
+
     user_input_details = {
         "user_id": user_id,
         "pdf_doc_id": pdf_doc_id,
@@ -279,7 +399,6 @@ async def handle_map_operation(
         logger.info(f"Input JSON: {local_input}")
         
         # Initialize mapper - use llm_model from settings (LiteLLM format)
-        from src.core.config import settings
         mapper = SemanticMapper(
             llm_provider=mapping_config.get("llm_model", settings.llm_model),
             confidence_threshold=mapping_config.get("confidence_threshold", 0.7),
@@ -458,12 +577,8 @@ async def handle_embed_operation(
     """
     start_time = time.time()
     
-    logger.info("=" * 60)
-    logger.info("EMBED OPERATION")
-    logger.info("=" * 60)
-    logger.info(f"Storage type: {config.source_type}")
-    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
-    
+    _log_op_start("EMBED OPERATION", config, user_id, session_id)
+
     user_input_details = {
         "user_id": user_id,
         "pdf_doc_id": pdf_doc_id,
@@ -607,12 +722,8 @@ async def handle_fill_operation(
     """
     start_time = time.time()
     
-    logger.info("=" * 60)
-    logger.info("FILL OPERATION")
-    logger.info("=" * 60)
-    logger.info(f"Storage type: {config.source_type}")
-    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
-    
+    _log_op_start("FILL OPERATION", config, user_id, session_id)
+
     user_input_details = {
         "user_id": user_id,
         "pdf_doc_id": pdf_doc_id,
@@ -983,10 +1094,6 @@ async def run_semantic_api_mapper(
             "cache_hit": bool                # Whether this was a cache hit
         }
     """
-    from src.core.config import settings
-    from src.utils.hash_cache import check_hash_cache, copy_cached_files
-    import os
-    import json
     
     logger.info("=" * 80)
     logger.info("PHASE 1: SEMANTIC API MAPPER (with cache check)")
@@ -1004,7 +1111,6 @@ async def run_semantic_api_mapper(
             
             # IMPORTANT: Persist updated cache registry after check (usage stats were updated)
             if cache_result and os.path.exists(cache_registry_path):
-                from src.handlers.output_handler import OutputFileHandler
                 cache_output_handler = OutputFileHandler(storage_config)
                 cache_dest = cache_output_handler.save_output(
                     cache_registry_path, 
@@ -1079,10 +1185,6 @@ async def run_semantic_api_mapper(
     
     # Cache miss - run semantic mapper
     logger.info("🚀 Running semantic mapper (Phase 1)...")
-    
-    from src.handlers.output_handler import OutputFileHandler
-    from src.mappers.semantic_mapper import SemanticMapper
-    from src.core.config import settings
     
     # Initialize handlers
     output_handler = OutputFileHandler(storage_config)
@@ -1212,8 +1314,6 @@ async def run_rag_api_mapper(
             "error": str                    # Error message if failed
         }
     """
-    from src.handlers.output_handler import OutputFileHandler
-    import os
     
     logger.info("=" * 80)
     logger.info("PHASE 2: RAG API MAPPER (always calls RAG API - not cached)")
@@ -1311,9 +1411,6 @@ async def handle_make_embed_file_operation(
     logger.info(f"🔀 Use Second Mapper (RAG): {use_second_mapper}")
     
     try:
-        import json
-        import os
-        import tempfile
         
         # Initialize destination paths tracker (final output locations after save_output())
         dest_paths = {}
@@ -1384,7 +1481,6 @@ async def handle_make_embed_file_operation(
                 logger.info(f"Saved cached extraction to: {extracted_json}")
                 
                 # Save to destination storage
-                from src.handlers.output_handler import OutputFileHandler
                 output_handler = OutputFileHandler(config)
                 dest_extracted_json = output_handler.save_output(extracted_json, 'extracted_json')
                 logger.info(f"📤 Saved cached extraction to destination: {dest_extracted_json}")
@@ -1448,8 +1544,6 @@ async def handle_make_embed_file_operation(
             logger.warning(f"PDF hash not available for caching (pdf_doc_id={pdf_doc_id})")
         
         # CHECK HASH CACHE - Skip MAP if we've processed this PDF structure before
-        from src.core.config import settings
-        from src.utils.hash_cache import check_hash_cache, save_hash_cache, copy_cached_files
         
         pdf_cache_enabled = getattr(settings, 'pdf_cache_enabled', True)
         cache_result = None
@@ -1501,7 +1595,6 @@ async def handle_make_embed_file_operation(
                 
                 # IMPORTANT: Persist updated cache registry after check (usage stats were updated)
                 if cache_result and os.path.exists(cache_registry_path):
-                    from src.handlers.output_handler import OutputFileHandler
                     cache_output_handler = OutputFileHandler(config)
                     cache_dest = cache_output_handler.save_output(
                         cache_registry_path, 
@@ -1585,91 +1678,28 @@ async def handle_make_embed_file_operation(
                         logger.info("MAPPER PHASE 2: RAG API Mapper - Extracting Headers")
                         logger.info("-" * 80)
                         logger.info("📝 Headers not cached, extracting headers for RAG API...")
-                        
-                        from src.headers import get_form_fields_points
-                        
-                        # Get header file paths from config
-                        if storage_type == 'local' and hasattr(config, 'local_headers_with_fields'):
-                            headers_output_path = config.local_headers_with_fields
-                            final_fields_output_path = config.local_final_form_fields
-                        elif file_config and "headers" in file_config:
-                            headers_output_path = file_config["headers"]["headers_with_fields_path"]
-                            final_fields_output_path = file_config["headers"]["final_form_fields_path"]
-                        else:
-                            raise ValueError("Missing header paths configuration")
-                        
-                        headers_result = await get_form_fields_points(
-                            extracted_json_path=extracted_json,
-                            headers_output_path=headers_output_path,
-                            final_fields_output_path=final_fields_output_path
-                        )
-                        
-                        headers_with_fields_path = headers_output_path
-                        final_form_fields_path = final_fields_output_path
-                        pdf_category = headers_result.get("pdf_category")
-                        
-                        # Upload header files to source storage
-                        from src.handlers.output_handler import OutputFileHandler
-                        output_handler = OutputFileHandler(config)
-                        dest_headers_with_fields = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
-                        dest_final_form_fields = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
-                        
-                        if dest_headers_with_fields:
-                            logger.info(f"📤 Uploaded headers_with_fields to: {dest_headers_with_fields}")
-                        if dest_final_form_fields:
-                            logger.info(f"📤 Uploaded final_form_fields to: {dest_final_form_fields}")
-                        
-                        logger.info(f"✅ Headers extracted: {final_form_fields_path}")
-                        if pdf_category:
-                            logger.info(f"� PDF Category: {pdf_category}")
-                        
-                        # CACHE PHASE 2 RESULTS immediately after headers extraction completes
-                        # This updates the existing cache entry with headers_with_fields and final_form_fields
+
+                        hdr = await _extract_headers(config, extracted_json, file_config, storage_type)
+                        headers_with_fields_path = hdr["headers_with_fields_path"]
+                        final_form_fields_path   = hdr["final_form_fields_path"]
+                        dest_headers_with_fields = hdr["dest_headers_with_fields"]
+                        dest_final_form_fields   = hdr["dest_final_form_fields"]
+                        pdf_category             = hdr["pdf_category"]
+
                         if pdf_hash and phase2_needs_caching:
-                            try:
-                                from src.utils.hash_cache import save_hash_cache
-                                from src.handlers.output_handler import OutputFileHandler
-                                
-                                logger.info("💾 Updating cache with Phase 2 results (headers_with_fields + final_form_fields)...")
-                                
-                                # Use destination paths for cache (persistent storage)
-                                cache_headers = dest_headers_with_fields if dest_headers_with_fields else headers_with_fields_path
-                                cache_final_fields = dest_final_form_fields if dest_final_form_fields else final_form_fields_path
-                                
-                                # Get cached Phase 1 paths (embedded_pdf, mapping, radio were already cached)
-                                cache_mapping = dest_semantic_mapping if dest_semantic_mapping else semantic_mapping_path
-                                cache_radio = dest_radio_groups if dest_radio_groups else radio_groups
-                                cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
-                                
-                                await save_hash_cache(
-                                    pdf_hash=pdf_hash,
-                                    cache_registry_path=cache_registry_path,
-                                    embedded_pdf=cache_embedded,
-                                    mapping_json=cache_mapping,
-                                    radio_groups=cache_radio,
-                                    user_id=user_id,
-                                    pdf_doc_id=pdf_doc_id,
-                                    headers_with_fields=cache_headers,
-                                    final_form_fields=cache_final_fields,
-                                    pdf_category=pdf_category
-                                )
-                                logger.info("✅ Phase 2 cached locally")
-                                
-                                # IMPORTANT: Upload cache registry to source storage so it persists
-                                if os.path.exists(cache_registry_path):
-                                    cache_output_handler = OutputFileHandler(config)
-                                    cache_dest = cache_output_handler.save_output(
-                                        cache_registry_path, 
-                                        'cache_registry_json'
-                                    )
-                                    if cache_dest:
-                                        logger.info(f"📤 Cache registry persisted to: {cache_dest}")
-                                    else:
-                                        logger.warning("⚠️  Cache registry not uploaded (local storage mode)")
-                                
-                                logger.info("✅ Phase 2 cached: headers_with_fields, final_form_fields")
-                            except Exception as cache_error:
-                                logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
+                            cache_headers     = dest_headers_with_fields or headers_with_fields_path
+                            cache_final_fields = dest_final_form_fields  or final_form_fields_path
+                            cache_mapping     = dest_semantic_mapping    or semantic_mapping_path
+                            cache_radio       = dest_radio_groups        or radio_groups
+                            cache_embedded    = dest_embedded_pdf        or embedded_pdf
+                            await _save_phase_cache(
+                                pdf_hash, cache_registry_path, config,
+                                cache_embedded, cache_mapping, cache_radio,
+                                user_id, pdf_doc_id,
+                                headers_with_fields=cache_headers,
+                                final_form_fields=cache_final_fields,
+                                pdf_category=pdf_category,
+                            )
                         elif not phase2_needs_caching:
                             logger.info("⏭️  Phase 2 already cached - skipping cache update")
                         else:
@@ -1684,9 +1714,8 @@ async def handle_make_embed_file_operation(
                         if headers_with_fields_path and final_form_fields_path:
                             # If paths point to source storage, download to processing
                             if not headers_with_fields_path.startswith('/tmp/processing'):
-                                from src.handlers.input_handler import InputFileHandler
                                 input_handler = InputFileHandler(config)
-                                
+
                                 # Get processing paths from config
                                 if storage_type == 'local' and hasattr(config, 'local_headers_with_fields'):
                                     processing_headers_path = config.local_headers_with_fields
@@ -1741,7 +1770,6 @@ async def handle_make_embed_file_operation(
                         )
                         
                         # Upload LLM predictions to source storage
-                        from src.handlers.output_handler import OutputFileHandler
                         output_handler = OutputFileHandler(config)
                         dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
                         logger.info(f"✅ LLM predictions saved and uploaded")
@@ -1778,7 +1806,6 @@ async def handle_make_embed_file_operation(
                         )
                         
                         # Upload java mapping to source storage
-                        from src.handlers.output_handler import OutputFileHandler
                         output_handler = OutputFileHandler(config)
                         dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
                         logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
@@ -1797,7 +1824,6 @@ async def handle_make_embed_file_operation(
                     )
                     
                     # Upload java mapping to source storage
-                    from src.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
                     dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
                     logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
@@ -1855,91 +1881,27 @@ async def handle_make_embed_file_operation(
                 logger.info("-" * 80)
                 
                 # First, extract headers (required by RAG API)
-                from src.headers import get_form_fields_points
-                
-                # Get header file paths from config (use existing config.ini patterns)
-                if storage_type == 'local' and hasattr(config, 'local_headers_with_fields'):
-                    headers_output_path = config.local_headers_with_fields
-                    final_fields_output_path = config.local_final_form_fields
-                elif file_config and "headers" in file_config:
-                    headers_output_path = file_config["headers"]["headers_with_fields_path"]
-                    final_fields_output_path = file_config["headers"]["final_form_fields_path"]
-                else:
-                    raise ValueError("Missing header paths configuration")
-                
-                logger.info("📝 Extracting headers for RAG API...")
-                headers_result = await get_form_fields_points(
-                    extracted_json_path=extracted_json,
-                    headers_output_path=headers_output_path,
-                    final_fields_output_path=final_fields_output_path
-                )
-                
-                headers_with_fields_path = headers_output_path
-                final_form_fields_path = final_fields_output_path
-                pdf_category = headers_result.get("pdf_category")
-                
-                logger.info(f"✅ Headers extracted: {final_form_fields_path}")
-                if pdf_category:
-                    logger.info(f"📋 PDF Category: {pdf_category}")
-                
-                # Upload header files to source storage
-                from src.handlers.output_handler import OutputFileHandler
-                output_handler = OutputFileHandler(config)
-                dest_headers_with_fields = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
-                dest_final_form_fields = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
-                
-                if dest_headers_with_fields:
-                    logger.info(f"📤 Uploaded headers to: {dest_headers_with_fields}")
-                if dest_final_form_fields:
-                    logger.info(f"📤 Uploaded final fields to: {dest_final_form_fields}")
-                
-                # CACHE PHASE 2 RESULTS immediately after headers extraction completes
-                # This updates the existing cache entry with headers_with_fields and final_form_fields
+                hdr = await _extract_headers(config, extracted_json, file_config, storage_type)
+                headers_with_fields_path = hdr["headers_with_fields_path"]
+                final_form_fields_path   = hdr["final_form_fields_path"]
+                dest_headers_with_fields = hdr["dest_headers_with_fields"]
+                dest_final_form_fields   = hdr["dest_final_form_fields"]
+                pdf_category             = hdr["pdf_category"]
+
                 if pdf_hash and not cache_hit:
-                    try:
-                        from src.utils.hash_cache import save_hash_cache
-                        from src.handlers.output_handler import OutputFileHandler
-                        
-                        logger.info("💾 Updating cache with Phase 2 results (headers_with_fields + final_form_fields)...")
-                        
-                        # Use destination paths for cache (persistent storage)
-                        cache_headers = dest_headers_with_fields if dest_headers_with_fields else headers_with_fields_path
-                        cache_final_fields = dest_final_form_fields if dest_final_form_fields else final_form_fields_path
-                        
-                        # Get cached Phase 1 paths (embedded_pdf, mapping, radio were already cached)
-                        cache_mapping = dest_semantic_mapping if dest_semantic_mapping else semantic_mapping_path
-                        cache_radio = dest_radio_groups if dest_radio_groups else radio_groups
-                        cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
-                        
-                        await save_hash_cache(
-                            pdf_hash=pdf_hash,
-                            cache_registry_path=cache_registry_path,
-                            embedded_pdf=cache_embedded,
-                            mapping_json=cache_mapping,
-                            radio_groups=cache_radio,
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            headers_with_fields=cache_headers,
-                            final_form_fields=cache_final_fields,
-                            pdf_category=pdf_category
-                        )
-                        logger.info("✅ Phase 2 cached locally")
-                        
-                        # IMPORTANT: Upload cache registry to source storage so it persists
-                        if os.path.exists(cache_registry_path):
-                            cache_output_handler = OutputFileHandler(config)
-                            cache_dest = cache_output_handler.save_output(
-                                cache_registry_path, 
-                                'cache_registry_json'
-                            )
-                            if cache_dest:
-                                logger.info(f"📤 Cache registry persisted to: {cache_dest}")
-                            else:
-                                logger.warning("⚠️  Cache registry not uploaded (local storage mode)")
-                        
-                        logger.info("✅ Phase 2 cached: headers_with_fields, final_form_fields")
-                    except Exception as cache_error:
-                        logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
+                    cache_headers      = dest_headers_with_fields or headers_with_fields_path
+                    cache_final_fields = dest_final_form_fields   or final_form_fields_path
+                    cache_mapping      = dest_semantic_mapping    or semantic_mapping_path
+                    cache_radio        = dest_radio_groups        or radio_groups
+                    cache_embedded     = dest_embedded_pdf        or embedded_pdf
+                    await _save_phase_cache(
+                        pdf_hash, cache_registry_path, config,
+                        cache_embedded, cache_mapping, cache_radio,
+                        user_id, pdf_doc_id,
+                        headers_with_fields=cache_headers,
+                        final_form_fields=cache_final_fields,
+                        pdf_category=pdf_category,
+                    )
                 elif cache_hit:
                     logger.info("⏭️  Cache hit - skipping Phase 2 cache update")
                 else:
@@ -1974,13 +1936,12 @@ async def handle_make_embed_file_operation(
                     )
                     
                     # Upload LLM predictions to source storage
-                    from src.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
                     dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
                     logger.info(f"✅ LLM predictions saved and uploaded")
                     logger.info(f"   Local: {llm_predictions_path}")
                     logger.info(f"   Uploaded: {dest_llm_predictions}")
-                    
+
                     # Combine semantic + RAG predictions
                     logger.info("🔄 Combining semantic + RAG predictions...")
                     mapping_json, combined_mapping_path = await combine_mappings(
@@ -1993,7 +1954,6 @@ async def handle_make_embed_file_operation(
                     )
                     
                     # Upload java mapping and final predictions to source storage
-                    from src.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
                     saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
                     saved_final_predictions = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
@@ -2020,7 +1980,6 @@ async def handle_make_embed_file_operation(
                     )
                     
                     # Upload java mapping to source storage
-                    from src.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
                     saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
                     logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
@@ -2035,7 +1994,6 @@ async def handle_make_embed_file_operation(
                 )
                 
                 # Upload java mapping to source storage
-                from src.handlers.output_handler import OutputFileHandler
                 output_handler = OutputFileHandler(config)
                 saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
                 logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
@@ -2130,59 +2088,15 @@ async def handle_make_embed_file_operation(
         # CACHE PHASE 1 RESULTS immediately after embed stage completes
         # This saves: embedded_pdf, mapping_json, radio_groups
         if pdf_cache_enabled and pdf_hash and not cache_hit:
-            try:
-                from src.utils.hash_cache import save_hash_cache
-                from src.handlers.output_handler import OutputFileHandler
-                
-                logger.info("💾 Saving Phase 1 to cache (embedded_pdf + semantic_mapping + radio_groups)...")
-                
-                # Use DESTINATION paths (where files were actually saved) for cache
-                cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
-                cache_mapping = dest_semantic_mapping if dest_semantic_mapping else semantic_mapping_path
-                cache_radio = dest_radio_groups if dest_radio_groups else radio_groups
-                
-                logger.info(f"   Cache will reference persistent paths:")
-                logger.info(f"      embedded_pdf: {cache_embedded}")
-                logger.info(f"      mapping_json: {cache_mapping}")
-                logger.info(f"      radio_groups: {cache_radio}")
-                
-                await save_hash_cache(
-                    pdf_hash=pdf_hash,
-                    cache_registry_path=cache_registry_path,
-                    embedded_pdf=cache_embedded,
-                    mapping_json=cache_mapping,
-                    radio_groups=cache_radio,
-                    user_id=user_id,
-                    pdf_doc_id=pdf_doc_id
-                )
-                logger.info(f"✅ Phase 1 cached locally to: {cache_registry_path}")
-                
-                # IMPORTANT: Upload cache registry to source storage so it persists
-                if os.path.exists(cache_registry_path):
-                    output_handler = OutputFileHandler(config)
-                    
-                    # Construct proper destination path for cache file
-                    # cache_registry_path is like: /tmp/processing/cache/hash_registry.json
-                    # or: ../../data/modules/mapper_sample/cache/hash_registry.json (local)
-                    
-                    from src.core.config import settings
-                    if storage_type == 'local':
-                        # For local, use the data_output_dir + cache/hash_registry.json
-                        cache_dest_path = os.path.join(settings.data_output_dir, 'cache', 'hash_registry.json')
-                    logger.info(f"📤 Persisting cache registry: {cache_registry_path} → source storage")
-                    
-                    cache_dest = output_handler.save_output(
-                        cache_registry_path, 
-                        'cache_registry_json'
-                    )
-                    if cache_dest:
-                        logger.info(f"✅ Cache registry persisted to: {cache_dest}")
-                    else:
-                        logger.warning("⚠️  Cache registry save returned None")
-                
-                logger.info("✅ Phase 1 cached: embedded_pdf, mapping_json, radio_groups")
-            except Exception as cache_error:
-                logger.warning(f"Failed to cache Phase 1 results: {cache_error}. Continuing anyway.")
+            cache_embedded = dest_embedded_pdf    or embedded_pdf
+            cache_mapping  = dest_semantic_mapping or semantic_mapping_path
+            cache_radio    = dest_radio_groups    or radio_groups
+            logger.info(f"   Cache will reference: embedded={cache_embedded}")
+            await _save_phase_cache(
+                pdf_hash, cache_registry_path, config,
+                cache_embedded, cache_mapping, cache_radio,
+                user_id, pdf_doc_id,
+            )
         elif cache_hit:
             logger.info("⏭️  Cache hit - Phase 1 already cached")
         elif not pdf_hash:
@@ -2297,7 +2211,6 @@ async def handle_make_form_fields_data_points(
     logger.info("Extracting form fields and analyzing structure...")
     
     try:
-        import tempfile
         
         # Extract PDF data (includes form fields and headers)
         extract_result = await handle_extract_operation(
@@ -2311,7 +2224,6 @@ async def handle_make_form_fields_data_points(
         extracted_json_path = extract_result["output_file"]
         
         # Load and process the extracted data directly
-        import json
         with open(extracted_json_path, 'r') as f:
             extracted_data = json.load(f)
         
@@ -2648,11 +2560,6 @@ async def call_rag_api(
     Returns:
         Path to rag_predictions.json (in processing dir, ready for upload)
     """
-    import aiohttp
-    import uuid
-    from src.headers.create_rag_files import create_rag_api_files
-    from src.handlers.output_handler import OutputFileHandler
-    from src.core.config import settings
     
     # Generate session ID if not provided
     if not session_id:
@@ -2672,8 +2579,7 @@ async def call_rag_api(
     logger.warning("⚠️  This bypasses the RAG API call - remove this for production!")
     
     try:
-        from src.handlers.input_handler import InputFileHandler
-        
+            
         # Get local destination path from config
         local_predictions_path = storage_config.local_rag_predictions
         
@@ -2856,7 +2762,6 @@ async def call_rag_api(
                     logger.info(f"   Source: {rag_source_path}")
                     
                     # InputFileHandler detects storage type from path and downloads appropriately
-                    from src.handlers.input_handler import InputFileHandler
                     input_handler = InputFileHandler(storage_config)
                     downloaded_path = input_handler.download_input(rag_source_path, local_predictions_path)
                     
@@ -3026,8 +2931,6 @@ async def save_llm_predictions_to_rag_bucket(
     Returns:
         Path to saved LLM predictions JSON (same storage type as input)
     """
-    from datetime import datetime
-    from src.core.config import settings
     
     logger.info("📋 Saving LLM predictions to RAG bucket...")
     
@@ -3077,7 +2980,6 @@ async def save_llm_predictions_to_rag_bucket(
     
     # Try to upload to RAG source storage (optional, non-blocking)
     try:
-        from src.handlers.output_handler import OutputFileHandler
         rag_output_handler = OutputFileHandler(storage_config)
         rag_dest_path = rag_output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
         
@@ -3123,8 +3025,6 @@ async def combine_mappings(
         - java_mapping_path: Path to Java-compatible mapping for embedder
         - final_predictions_path: Path to detailed predictions with reasoning
     """
-    from datetime import datetime
-    from src.core.config import settings
     
     logger.info("🔄 Combining semantic mapping with RAG predictions...")
     

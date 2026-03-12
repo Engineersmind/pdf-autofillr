@@ -33,12 +33,9 @@ from src.core.config import settings
 from src.configs.file_config import get_file_config
 from src.handlers import operations
 from src.utils.entrypoint_helpers import (
-    build_all_file_paths,
-    create_storage_config_from_paths,
-    prepare_input_files,
+    create_job_context,
     cleanup_processing_directory,
-    validate_input_files,
-    extract_event_params
+    extract_event_params,
 )
 
 
@@ -137,117 +134,93 @@ async def process_operation(
     request_data: OperationRequest,
     extra_params: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """
-    Process an operation request.
-    
-    Args:
-        operation: Operation name
-        request_data: Request data
-        extra_params: Extra parameters for the operation
-        
-    Returns:
-        Operation result dictionary
-    """
+    """Process an operation request using JobContext (UUID-isolated, source-agnostic)."""
+    file_config = get_file_config()
+    ctx = create_job_context(
+        file_config,
+        request_data.user_id,
+        request_data.session_id,
+        request_data.pdf_doc_id,
+    )
+
+    logger.info(
+        f"HTTP API: op={operation} user={request_data.user_id} "
+        f"pdf={request_data.pdf_doc_id} storage={ctx.source_type}"
+    )
+
+    # Validate source inputs
+    missing = [p for p in (ctx.source_input_pdf, ctx.source_input_json)
+               if not ctx.file_exists(p)]
+    if missing:
+        raise FileNotFoundError(f"Required input files not found: {missing}")
+
+    # Download inputs to isolated temp dir
+    import os
+    os.makedirs(os.path.dirname(ctx.local_input_pdf), exist_ok=True)
+    ctx.download_file(ctx.source_input_pdf,  ctx.local_input_pdf)
+    ctx.download_file(ctx.source_input_json, ctx.local_input_json)
+
+    mapping_config = {
+        "llm_model":            file_config.get('mapping', 'llm_model',            fallback='gpt-4o'),
+        "llm_temperature":      float(file_config.get('mapping', 'llm_temperature', fallback='0.05')),
+        "llm_max_tokens":       int(file_config.get('mapping',   'llm_max_tokens',  fallback='8192')),
+        "confidence_threshold": float(file_config.get('mapping', 'confidence_threshold', fallback='0.7')),
+        "chunking_strategy":    file_config.get('mapping', 'chunking_strategy',    fallback='page'),
+    }
+
     try:
-        # Load config
-        file_config = get_file_config()
-        
-        # Build event dict
-        event = {
-            "operation": operation,
-            "user_id": request_data.user_id,
-            "session_id": request_data.session_id,
-            "pdf_doc_id": request_data.pdf_doc_id,
-            "investor_type": request_data.investor_type,
-            "use_second_mapper": request_data.use_second_mapper
-        }
-        
-        # Add extra params if provided
-        if extra_params:
-            event.update(extra_params)
-        
-        logger.info(f"HTTP API: Processing {operation} for user={request_data.user_id}, pdf={request_data.pdf_doc_id}")
-        
-        # Build file paths
-        paths = build_all_file_paths(
-            file_config,
-            request_data.user_id,
-            request_data.session_id,
-            request_data.pdf_doc_id
-        )
-        
-        # Validate input files
-        validate_input_files(paths)
-        
-        # Prepare input files (copy from source to processing)
-        prepare_input_files(paths, file_config)
-        
-        # Create storage config
-        config = create_storage_config_from_paths(paths, source_type=settings.storage_type)
-        
-        # Call the appropriate operation
         if operation == "make_embed_file":
             result = await operations.handle_make_embed_file_operation(
-                config=config,
+                config=ctx,
                 user_id=request_data.user_id,
                 pdf_doc_id=request_data.pdf_doc_id,
                 session_id=request_data.session_id,
                 investor_type=request_data.investor_type,
-                use_second_mapper=request_data.use_second_mapper
+                mapping_config=mapping_config,
+                use_second_mapper=request_data.use_second_mapper,
             )
         elif operation == "extract":
             result = await operations.handle_extract_operation(
-                config=config,
+                config=ctx,
                 user_id=request_data.user_id,
                 pdf_doc_id=request_data.pdf_doc_id,
-                session_id=request_data.session_id
+                session_id=request_data.session_id,
             )
         elif operation == "map":
             result = await operations.handle_map_operation(
-                config=config,
+                config=ctx,
+                mapping_config=mapping_config,
                 user_id=request_data.user_id,
                 pdf_doc_id=request_data.pdf_doc_id,
                 session_id=request_data.session_id,
-                investor_type=request_data.investor_type
+                investor_type=request_data.investor_type,
             )
         elif operation == "embed":
             result = await operations.handle_embed_operation(
-                config=config,
-                user_id=request_data.user_id,
-                pdf_doc_id=request_data.pdf_doc_id,
-                session_id=request_data.session_id
-            )
-        elif operation == "fill":
-            result = await operations.handle_fill_operation(
-                config=config,
+                config=ctx,
                 user_id=request_data.user_id,
                 pdf_doc_id=request_data.pdf_doc_id,
                 session_id=request_data.session_id,
-                data=extra_params.get("data", {})
+            )
+        elif operation == "fill":
+            result = await operations.handle_fill_operation(
+                config=ctx,
+                user_id=request_data.user_id,
+                pdf_doc_id=request_data.pdf_doc_id,
+                session_id=request_data.session_id,
+                data=(extra_params or {}).get("data", {}),
             )
         else:
-            raise ValueError(f"Unknown operation: {operation}")
-        
-        # Cleanup temp files
-        cleanup_processing_directory(paths['processing_dir'])
-        
-        return {
-            "status": "success",
-            "operation": operation,
-            "output_paths": {
-                key: value for key, value in result.get('outputs', {}).items()
-                if value is not None
-            },
-            "metadata": result
-        }
-        
-    except Exception as e:
-        logger.error(f"HTTP API error: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "operation": operation,
-            "error": str(e)
-        }
+            raise ValueError(f"Unknown operation: {operation!r}")
+    finally:
+        cleanup_processing_directory(ctx.processing_dir)
+
+    return {
+        "status":       "success",
+        "operation":    operation,
+        "output_paths": {k: v for k, v in result.get('outputs', {}).items() if v},
+        "metadata":     result,
+    }
 
 
 # ========================================

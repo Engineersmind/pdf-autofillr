@@ -11,6 +11,45 @@ from typing import Dict, Any, Optional
 from src.core.logger import logger
 
 
+# ── New clean API ────────────────────────────────────────────────────────────
+
+def create_job_context(file_config, user_id: int, session_id: str, pdf_doc_id: int):
+    """
+    Build a JobContext for one processing job.
+
+    This is the single entry point for wiring storage backend + path resolution.
+    Replaces the old build_all_file_paths() + create_storage_config_from_paths() pair.
+
+    Args:
+        file_config:  FileConfig instance (loaded from config.ini)
+        user_id:      User ID
+        session_id:   Session ID
+        pdf_doc_id:   PDF document ID
+
+    Returns:
+        JobContext ready to pass to operations.handle_*()
+
+    Example:
+        ctx = create_job_context(file_config, 553, "086d...", 990)
+        # Download inputs
+        ctx.download_file(ctx.source_input_pdf, ctx.local_input_pdf)
+        ctx.download_file(ctx.source_input_json, ctx.local_input_json)
+        # Call operation
+        result = await operations.handle_make_embed_file_operation(config=ctx, ...)
+    """
+    from src.storage.paths.resolver import PathResolver
+    from src.storage.backends.factory import get_storage_backend
+    from src.storage.job_context import JobContext
+
+    source_type = file_config.get_source_type()
+    backend     = get_storage_backend(source_type)
+    resolver    = PathResolver(file_config)
+    return JobContext(backend, resolver, user_id, session_id, pdf_doc_id)
+
+
+# ── Legacy API (kept for backward compatibility) ─────────────────────────────
+
+
 def build_all_file_paths(
     file_config,
     user_id: int,

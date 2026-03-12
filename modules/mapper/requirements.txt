@@ -36,6 +36,13 @@ uvicorn[standard]==0.34.0
 boto3==1.42.66
 litellm==1.82.0
 
+# Azure storage (optional — only needed when source_type = azure)
+azure-storage-blob>=12.19.0
+azure-identity>=1.15.0
+
+# GCP storage (optional — only needed when source_type = gcp)
+google-cloud-storage>=2.10.0
+
 # Other dependencies from your current requirements
 regex==2025.9.18
 tqdm==4.67.1
