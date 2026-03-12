@@ -20,6 +20,14 @@ from src.configs.file_config import get_file_config
 from src.configs.local import LocalStorageConfig
 from src.handlers import operations
 from src.core.logger import logger
+from src.utils.entrypoint_helpers import (
+    build_all_file_paths,
+    create_storage_config_from_paths,
+    prepare_input_files,
+    cleanup_processing_directory,
+    validate_input_files,
+    extract_event_params
+)
 
 
 async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -27,15 +35,18 @@ async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
     Handle local deployment event.
     
     This is the main entry point for local deployment, analogous to AWS Lambda handler.
+    Uses shared utilities from entrypoint_helpers to avoid code duplication.
     
     Flow:
         1. Load config.ini and .env
-        2. Build file paths from patterns
-        3. Copy files from source (/app/data/input/) to processing (/tmp/processing/)
-        4. Call operations (source-agnostic orchestrator)
-        5. Copy results from processing to source (/app/data/output/)
-        6. Cleanup temp files
-        7. Return result with source paths
+        2. Build file paths from patterns (via entrypoint_helpers)
+        3. Validate input files exist (via entrypoint_helpers)
+        4. Copy files from source to processing (via entrypoint_helpers)
+        5. Create storage config (via entrypoint_helpers)
+        6. Call operations (source-agnostic orchestrator)
+        7. Copy results from processing to source
+        8. Cleanup temp files (via entrypoint_helpers)
+        9. Return result with source paths
     
     Args:
         event: Event dictionary with:
@@ -72,103 +83,64 @@ async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
         load_dotenv()
         file_config = get_file_config()
         
-        # 2. Extract event parameters
-        operation = event.get('operation')
-        user_id = event['user_id']
-        session_id = event['session_id']
-        pdf_doc_id = event['pdf_doc_id']
+        # 2. Extract event parameters using shared utility
+        operation, user_id, session_id, pdf_doc_id = extract_event_params(event)
         use_second_mapper = event.get('use_second_mapper', False)
         
         logger.info(f"Processing: user={user_id}, session={session_id}, pdf={pdf_doc_id}")
         
-        # 3. Build all file paths
-        paths = _build_file_paths(file_config, user_id, session_id, pdf_doc_id)
+        # 3. Build all file paths using shared utility
+        paths = build_all_file_paths(file_config, user_id, session_id, pdf_doc_id)
         logger.debug(f"File paths built: {paths}")
         
-        # 3.5. Validate input files exist in source storage
+        # 4. Validate input files exist using shared utility
         logger.info("=" * 60)
         logger.info("VALIDATING INPUT FILES")
         logger.info("=" * 60)
         
-        input_base = file_config.get('local', 'input_base_path', fallback='data/input')
-        logger.info(f"Input directory: {input_base}")
-        logger.info(f"Expected naming: {{user_id}}_{{session_id}}_{{pdf_doc_id}}.{{ext}}")
-        logger.info(f"Current IDs: user={user_id}, session={session_id}, pdf_doc={pdf_doc_id}")
-        
-        missing_files = []
-        
-        # Check input PDF
-        if not os.path.exists(paths['source_input_pdf']):
-            missing_files.append(("Input PDF", paths['source_input_pdf']))
-            logger.error(f"❌ Input PDF NOT FOUND: {paths['source_input_pdf']}")
-        else:
+        try:
+            validate_input_files(paths)
+            
+            # Log file sizes for confirmation
             pdf_size = os.path.getsize(paths['source_input_pdf'])
-            logger.info(f"✅ Input PDF found: {paths['source_input_pdf']} ({pdf_size:,} bytes)")
-        
-        # Check input JSON
-        if not os.path.exists(paths['source_input_json']):
-            missing_files.append(("Input JSON", paths['source_input_json']))
-            logger.error(f"❌ Input JSON NOT FOUND: {paths['source_input_json']}")
-        else:
             json_size = os.path.getsize(paths['source_input_json'])
-            logger.info(f"✅ Input JSON found: {paths['source_input_json']} ({json_size:,} bytes)")
-        
-        # Check global JSON registry (optional)
-        if not os.path.exists(paths['source_registry']):
-            logger.warning(f"⚠️  Global JSON registry NOT FOUND: {paths['source_registry']}")
-            logger.warning("   (Optional - used as fallback if input JSON is missing)")
-        else:
-            reg_size = os.path.getsize(paths['source_registry'])
-            logger.info(f"✅ Global JSON registry found: {paths['source_registry']} ({reg_size:,} bytes)")
-        
-        logger.info("=" * 60)
-        
-        # Raise error if required files are missing
-        if missing_files:
-            error_msg = "\n" + "=" * 60 + "\n"
-            error_msg += "❌ MISSING REQUIRED INPUT FILES\n"
-            error_msg += "=" * 60 + "\n\n"
+            logger.info(f"✅ Input PDF: {paths['source_input_pdf']} ({pdf_size:,} bytes)")
+            logger.info(f"✅ Input JSON: {paths['source_input_json']} ({json_size:,} bytes)")
             
-            for file_type, file_path in missing_files:
-                error_msg += f"  ❌ {file_type}: {file_path}\n"
-            
+        except FileNotFoundError as e:
+            # Enhance error message with helpful instructions
+            input_base = file_config.get('local', 'input_base_path', fallback='data/input')
+            error_msg = str(e) + "\n"
             error_msg += f"\n📝 Please place your files in: {input_base}/\n"
             error_msg += f"\n   Expected file names:\n"
             error_msg += f"   - {user_id}_{session_id}_{pdf_doc_id}.pdf\n"
             error_msg += f"   - {user_id}_{session_id}_{pdf_doc_id}.json\n"
-            error_msg += f"\n   Example JSON content:\n"
-            error_msg += "   {\n"
-            error_msg += '     "firstName": "John",\n'
-            error_msg += '     "lastName": "Doe",\n'
-            error_msg += '     "email": "john@example.com"\n'
-            error_msg += "   }\n"
             error_msg += "\n" + "=" * 60 + "\n"
-            
             logger.error(error_msg)
             raise FileNotFoundError(error_msg)
         
-        logger.info("✅ All required input files validated\n")
+        logger.info("=" * 60)
         
-        # 4. Prepare input files (copy from source to processing)
-        _prepare_input_files(paths, file_config)
+        # 5. Prepare input files using shared utility
+        prepare_input_files(paths, file_config)
         
-        # 5. Create storage config for operations
-        config = _create_storage_config(paths)
+        # 6. Create storage config using shared utility
+        config = create_storage_config_from_paths(paths, source_type='local')
         
-        # 6. Call orchestrator (source-agnostic!)
+        # 7. Call orchestrator (source-agnostic!)
         result = await _call_operation(
             operation=operation,
             config=config,
             event=event
         )
         
-        # 7. Save results (copy from processing to source)
+        # 8. Save results (copy from processing to source)
         output_paths = _save_results(result, paths, file_config, user_id, session_id, pdf_doc_id)
         
-        # 8. Cleanup temp files (like Lambda!)
-        _cleanup_temp_files(paths['processing_dir'])
+        # 9. Cleanup temp files using shared utility
+        cleanup_processing_directory(paths['processing_dir'])
         
-        # 9. Return result with source paths
+        # 10. Return result with source paths
         return {
             "status": "success",
             "operation": operation,
@@ -183,179 +155,6 @@ async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
             "error": str(e),
             "operation": event.get('operation')
         }
-
-
-def _build_file_paths(
-    file_config,
-    user_id: int,
-    session_id: str,
-    pdf_doc_id: int
-) -> Dict[str, str]:
-    """Build all file paths needed for processing."""
-    
-    paths = {}
-    
-    # Processing directory (Docker local)
-    paths['processing_dir'] = file_config.get('local', 'processing_dir', 
-                                              fallback='/tmp/processing')
-    
-    # Ensure processing directory exists
-    os.makedirs(paths['processing_dir'], exist_ok=True)
-    
-    # Source input paths (where files come from)
-    paths['source_input_pdf'] = file_config.get_source_input_path(
-        'pdf', user_id, session_id, pdf_doc_id
-    )
-    paths['source_input_json'] = file_config.get_source_input_path(
-        'json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_registry'] = file_config.get_source_input_path(
-        'registry', user_id, session_id, pdf_doc_id
-    )
-    
-    # Processing paths (where operations work)
-    processing_paths = file_config.get_all_processing_paths(
-        user_id, session_id, pdf_doc_id
-    )
-    paths.update(processing_paths)
-    
-    # Source output paths (where results go)
-    paths['source_output_extracted'] = file_config.get_source_output_path(
-        'extracted_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_mapped'] = file_config.get_source_output_path(
-        'mapped_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_radio'] = file_config.get_source_output_path(
-        'radio_groups_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_embedded'] = file_config.get_source_output_path(
-        'embedded_pdf', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_filled'] = file_config.get_source_output_path(
-        'filled_pdf', user_id, session_id, pdf_doc_id
-    )
-    
-    # Dual mapper output paths (if used)
-    paths['source_output_semantic_mapping'] = file_config.get_source_output_path(
-        'semantic_mapping_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_headers'] = file_config.get_source_output_path(
-        'headers_with_fields_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_final_fields'] = file_config.get_source_output_path(
-        'final_form_fields_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_header_file'] = file_config.get_source_output_path(
-        'header_file_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_section_file'] = file_config.get_source_output_path(
-        'section_file_json', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_java_mapping'] = file_config.get_source_output_path(
-        'java_mapping', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_final_predictions'] = file_config.get_source_output_path(
-        'final_predictions', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_llm_predictions'] = file_config.get_source_output_path(
-        'llm_predictions', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_rag_predictions'] = file_config.get_source_output_path(
-        'rag_predictions', user_id, session_id, pdf_doc_id
-    )
-    paths['source_output_cache_registry'] = file_config.get_source_output_path(
-        'cache_registry_json', user_id, session_id, pdf_doc_id
-    )
-    
-    return paths
-
-
-def _prepare_input_files(paths: Dict[str, str], file_config):
-    """
-    Copy input files from source storage to processing directory.
-    
-    Like AWS Lambda downloading from S3 to /tmp/
-    """
-    logger.info("Preparing input files (copy source → processing)")
-    
-    # Ensure output directory exists
-    output_base = file_config.get('local', 'output_base_path', fallback='/app/data/output')
-    os.makedirs(output_base, exist_ok=True)
-    
-    # Copy input PDF
-    if os.path.exists(paths['source_input_pdf']):
-        shutil.copy2(paths['source_input_pdf'], paths['processing_input_pdf'])
-        logger.info(f"Copied PDF: {paths['source_input_pdf']} → {paths['processing_input_pdf']}")
-    else:
-        raise FileNotFoundError(f"Input PDF not found: {paths['source_input_pdf']}")
-    
-    # Copy input JSON
-    if os.path.exists(paths['source_input_json']):
-        shutil.copy2(paths['source_input_json'], paths['processing_input_json'])
-        logger.info(f"Copied JSON: {paths['source_input_json']} → {paths['processing_input_json']}")
-    else:
-        logger.warning(f"Input JSON not found: {paths['source_input_json']}, will use registry")
-    
-    # Copy registry if exists (optional)
-    if os.path.exists(paths['source_registry']):
-        registry_dest = os.path.join(paths['processing_dir'], 'pdf_registry.json')
-        shutil.copy2(paths['source_registry'], registry_dest)
-        logger.info(f"Copied registry: {paths['source_registry']} → {registry_dest}")
-    else:
-        logger.info(f"Registry not found: {paths['source_registry']}, will create if needed")
-
-
-def _create_storage_config(paths: Dict[str, str]) -> LocalStorageConfig:
-    """
-    Create LocalStorageConfig with processing paths and output destination paths.
-    
-    Operations work with processing paths (source-agnostic).
-    OutputFileHandler uses destination paths to save files.
-    """
-    config = LocalStorageConfig()
-    
-    # Set processing directory for temp file operations
-    config.processing_dir = paths['processing_dir']
-    
-    # Set all local paths (in /tmp/processing/ - where operations work)
-    config.local_input_pdf = paths['processing_input_pdf']
-    config.local_input_json = paths['processing_input_json']
-    config.local_extracted_json = paths['extracted_json']
-    config.local_mapped_json = paths['mapped_json']
-    config.local_radio_json = paths['radio_groups_json']
-    config.local_embedded_pdf = paths['embedded_pdf']
-    config.local_filled_pdf = paths['filled_pdf']
-    
-    # Dual mapper paths
-    config.local_headers_with_fields = paths.get('headers_with_fields')
-    config.local_final_form_fields = paths.get('final_form_fields')
-    config.local_header_file = paths.get('header_file')
-    config.local_section_file = paths.get('section_file')
-    config.local_llm_predictions = paths.get('llm_predictions')
-    config.local_rag_predictions = paths.get('rag_predictions')
-    config.local_final_predictions = paths.get('final_predictions')
-    config.local_java_mapping = paths.get('java_mapping')
-    
-    # Set destination paths (in ../../data/output/ - where files should be saved)
-    # These are used by OutputFileHandler to know where to save files
-    config.dest_extracted_json = paths.get('source_output_extracted')
-    config.dest_mapped_json = paths.get('source_output_mapped')
-    config.dest_radio_json = paths.get('source_output_radio')
-    config.dest_embedded_pdf = paths.get('source_output_embedded')
-    config.dest_filled_pdf = paths.get('source_output_filled')
-    config.dest_semantic_mapping_json = paths.get('source_output_semantic_mapping')
-    config.dest_headers_with_fields_json = paths.get('source_output_headers')
-    config.dest_final_form_fields_json = paths.get('source_output_final_fields')
-    config.dest_header_file_json = paths.get('source_output_header_file')
-    config.dest_section_file_json = paths.get('source_output_section_file')
-    config.dest_cache_registry = paths.get('source_output_cache_registry')
-    config.dest_java_mapping_json = paths.get('source_output_java_mapping')
-    config.dest_final_predictions_json = paths.get('source_output_final_predictions')
-    config.dest_llm_predictions_json = paths.get('source_output_llm_predictions')
-    config.dest_rag_predictions_json = paths.get('source_output_rag_predictions')
-    
-    return config
 
 
 async def _call_operation(
@@ -496,26 +295,4 @@ def _save_results(
     return output_paths
 
 
-def _cleanup_temp_files(processing_dir: str):
-    """
-    Delete all files in processing directory.
-    
-    Like Lambda ephemeral /tmp/ storage cleanup.
-    """
-    logger.info(f"Cleaning up temp files in: {processing_dir}")
-    
-    try:
-        if os.path.exists(processing_dir):
-            for item in os.listdir(processing_dir):
-                item_path = os.path.join(processing_dir, item)
-                if os.path.isfile(item_path):
-                    os.remove(item_path)
-                    logger.debug(f"Deleted: {item_path}")
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-                    logger.debug(f"Deleted directory: {item_path}")
-            
-            logger.info("Cleanup completed")
-    except Exception as e:
-        logger.warning(f"Cleanup warning: {e}")
-        # Don't fail the operation if cleanup fails
+

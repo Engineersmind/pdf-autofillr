@@ -338,10 +338,13 @@ class SemanticMapper:
                         first_occurrence = occurrences[0]
                         duplicates_to_remove = occurrences[1:]
                         
+                        # Format duplicate info without nested f-strings
+                        duplicate_info = ", ".join([f"Row {occ['row']} (FID {occ['fid']})" for occ in duplicates_to_remove])
+                        
                         logger.warning(
                             f"⚠️  Duplicate key '{key}' found in Table {tid}, Column {col} "
                             f"across {len(occurrences)} rows. Keeping Row {first_occurrence['row']} (FID {first_occurrence['fid']}), "
-                            f"removing {len(duplicates_to_remove)} duplicate(s): {[f'Row {occ['row']} (FID {occ['fid']})' for occ in duplicates_to_remove]}"
+                            f"removing {len(duplicates_to_remove)} duplicate(s): {duplicate_info}"
                         )
                         
                         # Set only the duplicate occurrences to null (skip the first one)
