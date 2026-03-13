@@ -80,7 +80,8 @@ class JobContext:
         self.local_rag_predictions     = local.get('rag_predictions')
         self.local_final_predictions   = local.get('final_predictions')
         self.local_java_mapping        = local.get('java_mapping')
-        self.local_cache_registry      = local.get('cache_registry')
+        # Cache registry is a shared constant file in cache/ — not a per-request processing path.
+        self.local_cache_registry      = path_resolver.remote_cache_registry(uid, sid, pid)
 
         # ── Remote source paths (inputs) ─────────────────────────────────
         self.source_input_pdf  = path_resolver.remote_input_pdf(uid, sid, pid)
