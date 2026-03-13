@@ -157,9 +157,12 @@ def build_all_file_paths(
         'rag_predictions', user_id, session_id, pdf_doc_id
     )
     
-    # Cache registry path
-    paths['source_output_cache_registry'] = file_config.get_source_output_path(
-        'cache_registry_json', user_id, session_id, pdf_doc_id
+    # Cache registry — constant shared file, read directly from config.ini
+    # NOT a per-user/session output path; always lives at settings.cache_registry_path
+    from src.core.config import settings
+    paths['source_output_cache_registry'] = settings.cache_registry_path or os.path.join(
+        file_config.get(file_config.get_source_type(), 'output_base_path', fallback='/app/data/output'),
+        'cache', 'hash_registry.json'
     )
     
     return paths
@@ -236,27 +239,27 @@ def create_storage_config_from_paths(
     config.local_llm_predictions = paths.get('llm_predictions')
     config.local_rag_predictions = paths.get('rag_predictions')
     
-    # Cache registry
-    config.local_cache_registry = paths.get('cache_registry')
+    # Cache registry — constant shared file from config.ini, not a per-request path
+    config.local_cache_registry = paths.get('source_output_cache_registry')
     
     # ========================================
     # OUTPUT DESTINATION PATHS (where to save results)
     # ========================================
-    config.dest_extracted_json = paths.get('source_output_extracted')
-    config.dest_mapped_json = paths.get('source_output_mapped')
-    config.dest_radio_json = paths.get('source_output_radio')
-    config.dest_embedded_pdf = paths.get('source_output_embedded')
-    config.dest_filled_pdf = paths.get('source_output_filled')
-    config.dest_semantic_mapping_json = paths.get('source_output_semantic_mapping')
-    config.dest_headers_with_fields_json = paths.get('source_output_headers')
-    config.dest_final_form_fields_json = paths.get('source_output_final_fields')
-    config.dest_header_file_json = paths.get('source_output_header_file')
-    config.dest_section_file_json = paths.get('source_output_section_file')
-    config.dest_cache_registry_json = paths.get('source_output_cache_registry')
-    config.dest_java_mapping_json = paths.get('source_output_java_mapping')
-    config.dest_final_predictions_json = paths.get('source_output_final_predictions')
-    config.dest_llm_predictions_json = paths.get('source_output_llm_predictions')
-    config.dest_rag_predictions_json = paths.get('source_output_rag_predictions')
+    config.dest_extracted_json        = paths.get('source_output_extracted')
+    config.dest_mapped_json           = paths.get('source_output_mapped')
+    config.dest_radio_json            = paths.get('source_output_radio')
+    config.dest_embedded_pdf          = paths.get('source_output_embedded')
+    config.dest_filled_pdf            = paths.get('source_output_filled')
+    config.dest_semantic_mapping      = paths.get('source_output_semantic_mapping')
+    config.dest_headers_with_fields   = paths.get('source_output_headers')
+    config.dest_final_form_fields     = paths.get('source_output_final_fields')
+    config.dest_header_file           = paths.get('source_output_header_file')
+    config.dest_section_file          = paths.get('source_output_section_file')
+    config.dest_cache_registry        = paths.get('source_output_cache_registry')
+    config.dest_java_mapping          = paths.get('source_output_java_mapping')
+    config.dest_final_predictions     = paths.get('source_output_final_predictions')
+    config.dest_llm_predictions       = paths.get('source_output_llm_predictions')
+    config.dest_rag_predictions       = paths.get('source_output_rag_predictions')
     
     return config
 

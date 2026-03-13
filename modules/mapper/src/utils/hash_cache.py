@@ -163,30 +163,43 @@ async def save_hash_cache(
         
         # Check if entry already exists
         if cache_key in entries:
-            logger.info(f"Cache entry already exists for key: {cache_key[:32]}... Updating with new mappers if provided.")
+            logger.info(f"Cache entry already exists for key: {cache_key[:32]}... Updating with new data if provided.")
             existing_entry = entries[cache_key]
-            
-            # Update RAG predictions if provided (dual mapper was run later)
+
+            # Update base files if provided (overwrite null/stale values)
+            if embedded_pdf:
+                existing_entry["reference_files"]["embedded_pdf"] = embedded_pdf
+                logger.info("Updated cache entry with embedded_pdf")
+
+            if mapping_json:
+                existing_entry["reference_files"]["mapping_json"] = mapping_json
+                logger.info("Updated cache entry with mapping_json")
+
+            if radio_groups:
+                existing_entry["reference_files"]["radio_groups"] = radio_groups
+                logger.info("Updated cache entry with radio_groups")
+
+            # Update optional files if provided
             if rag_predictions:
                 existing_entry["reference_files"]["rag_predictions"] = rag_predictions
                 logger.info("Updated cache entry with RAG predictions")
-            
+
             if combined_mapping:
                 existing_entry["reference_files"]["combined_mapping"] = combined_mapping
                 logger.info("Updated cache entry with combined mapping")
-            
+
             if headers_with_fields:
                 existing_entry["reference_files"]["headers_with_fields"] = headers_with_fields
                 logger.info("Updated cache entry with headers_with_fields")
-            
+
             if final_form_fields:
                 existing_entry["reference_files"]["final_form_fields"] = final_form_fields
                 logger.info("Updated cache entry with final_form_fields")
-            
+
             if pdf_category:
                 existing_entry["pdf_category"] = pdf_category
                 logger.info("Updated cache entry with pdf_category")
-            
+
             existing_entry["last_used_at"] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         else:
             # Add new entry with human-readable timestamps

@@ -74,7 +74,11 @@ class PathResolver:
         return self._cfg.get_source_output_path('rag_predictions', uid, sid, pid)
 
     def remote_cache_registry(self, uid, sid, pid) -> str:
-        return self._cfg.get_source_output_path('cache_registry_json', uid, sid, pid)
+        # Cache registry is a shared constant file in cache/, NOT a per-request output.
+        # Read directly from [source_type] cache_registry_path in config.ini.
+        source_type = self._cfg.get_source_type()
+        return self._cfg.get(source_type, 'cache_registry_path',
+                             fallback='/app/data/modules/mapper_sample/cache/hash_registry.json')
 
     # ── Local processing paths (all under processing_dir) ───────────────
 

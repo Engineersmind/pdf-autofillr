@@ -40,8 +40,10 @@ from src.utils.map_time_estimator import estimate_map_stage_time
 from src.utils.hash_cache import check_hash_cache, save_hash_cache, copy_cached_files
 
 try:
+    from src.headers import get_form_fields_points
+    from src.headers.create_rag_files import create_rag_api_files
     HEADERS_AVAILABLE = True
-except ImportError:
+except Exception:
     get_form_fields_points = None
     create_rag_api_files = None
     HEADERS_AVAILABLE = False
@@ -134,8 +136,8 @@ async def _extract_headers(config, extracted_json: str, file_config, storage_typ
         logger.info(f"📋 PDF Category: {pdf_category}")
 
     output_handler = OutputFileHandler(config)
-    dest_headers = output_handler.save_output(headers_output_path, 'headers_with_fields_json')
-    dest_fields = output_handler.save_output(final_fields_output_path, 'final_form_fields_json')
+    dest_headers = output_handler.save_output(headers_output_path, 'headers_with_fields')
+    dest_fields = output_handler.save_output(final_fields_output_path, 'final_form_fields')
     if dest_headers:
         logger.info(f"📤 Uploaded headers_with_fields to: {dest_headers}")
     if dest_fields:
@@ -185,7 +187,7 @@ async def _save_phase_cache(
 
         if os.path.exists(cache_registry_path):
             output_handler = OutputFileHandler(config)
-            cache_dest = output_handler.save_output(cache_registry_path, 'cache_registry_json')
+            cache_dest = output_handler.save_output(cache_registry_path, 'cache_registry')
             if cache_dest:
                 logger.info(f"📤 Cache registry persisted to: {cache_dest}")
             else:
@@ -476,7 +478,7 @@ async def handle_map_operation(
         
         # Save outputs immediately to source storage
         # IMPORTANT: Save semantic mapping first (for cache), then Java format (for embedder)
-        saved_semantic = output_handler.save_output(semantic_path, 'semantic_mapping_json')
+        saved_semantic = output_handler.save_output(semantic_path, 'semantic_mapping')
         saved_mapping = output_handler.save_output(local_mapping, 'mapped_json')
         saved_radio = output_handler.save_output(local_radio, 'radio_json')
         
@@ -1114,7 +1116,7 @@ async def run_semantic_api_mapper(
                 cache_output_handler = OutputFileHandler(storage_config)
                 cache_dest = cache_output_handler.save_output(
                     cache_registry_path, 
-                    'cache_registry_json'
+                    'cache_registry'
                 )
                 if cache_dest:
                     logger.info(f"📤 Cache registry updated and persisted to: {cache_dest}")
@@ -1237,7 +1239,7 @@ async def run_semantic_api_mapper(
     logger.info(f"   Radio groups: {local_radio}")
     
     # Save to destination storage (returns destination path or None)
-    dest_semantic_mapping = output_handler.save_output(local_mapping, 'semantic_mapping_json')
+    dest_semantic_mapping = output_handler.save_output(local_mapping, 'semantic_mapping')
     dest_radio_groups = output_handler.save_output(local_radio, 'radio_json')
     
     if dest_semantic_mapping:
@@ -1353,7 +1355,7 @@ async def run_rag_api_mapper(
         
         # Save to destination storage
         output_handler = OutputFileHandler(storage_config)
-        dest_rag_predictions = output_handler.save_output(rag_predictions_path, 'rag_predictions_json')
+        dest_rag_predictions = output_handler.save_output(rag_predictions_path, 'rag_predictions')
         
         if dest_rag_predictions:
             logger.info(f"📤 Uploaded RAG predictions to: {dest_rag_predictions}")
@@ -1459,7 +1461,17 @@ async def handle_make_embed_file_operation(
             file_config = None
         
         pipeline_results = {}
-        
+        dest_extracted_json = None  # set during extract stage below
+
+        # Pre-initialize variables that may be referenced before their assignment
+        # (e.g. in _save_phase_cache calls that run before the embed stage)
+        embedded_pdf = None
+        radio_groups = None
+        semantic_mapping_path = None
+        dest_embedded_pdf = None
+        dest_radio_groups = None
+        dest_semantic_mapping = None
+
         # Stage 1: Extract
         logger.info("\n" + "=" * 80)
         logger.info("[1/3] EXTRACTION STAGE")
@@ -1549,12 +1561,21 @@ async def handle_make_embed_file_operation(
         cache_result = None
         cache_hit = False
         
-        # Get cache registry path directly from config.ini
-        cache_registry_path = settings.cache_registry_path
-        if not cache_registry_path:
-            # Fallback to default local path if not configured
-            cache_registry_path = os.path.join(settings.data_output_dir, 'cache', 'hash_registry.json')
-            logger.debug(f"No cache_registry_path in config, using default: {cache_registry_path}")
+        # Persistent cache path (source of truth in cache/)
+        persistent_cache_path = settings.cache_registry_path
+        if not persistent_cache_path:
+            persistent_cache_path = os.path.join(settings.data_output_dir, 'cache', 'hash_registry.json')
+
+        # Working copy lives in the per-request processing dir (/tmp/processing/<uuid>/).
+        # All reads/writes go to this tmp copy; it is uploaded back to persistent_cache_path
+        # after each phase. This avoids SameFileError on local storage and mirrors the
+        # cloud pattern (download → work → upload).
+        _proc_dir = getattr(config, 'processing_dir', tempfile.gettempdir())
+        os.makedirs(_proc_dir, exist_ok=True)
+        cache_registry_path = os.path.join(_proc_dir, 'hash_registry.json')
+        if os.path.exists(persistent_cache_path):
+            shutil.copy2(persistent_cache_path, cache_registry_path)
+            logger.debug(f"Downloaded cache registry to working copy: {cache_registry_path}")
         
         # Initialize variables for dual mapper (needed in all code paths)
         semantic_mapping_path = None
@@ -1577,7 +1598,8 @@ async def handle_make_embed_file_operation(
         dest_rag_predictions = None
         dest_java_mapping = None
         dest_combined_mapping = None
-        dest_extracted_json = None
+        # NOTE: dest_extracted_json is intentionally NOT reset here —
+        # it is set during the extract stage above and must not be overwritten.
         
         # Stage 2: Mapping (with cache check)
         logger.info("\n" + "=" * 80)
@@ -1598,7 +1620,7 @@ async def handle_make_embed_file_operation(
                     cache_output_handler = OutputFileHandler(config)
                     cache_dest = cache_output_handler.save_output(
                         cache_registry_path, 
-                        'cache_registry_json'
+                        'cache_registry'
                     )
                     if cache_dest:
                         logger.info(f"📤 Cache registry updated and persisted to: {cache_dest}")
@@ -1771,7 +1793,7 @@ async def handle_make_embed_file_operation(
                         
                         # Upload LLM predictions to source storage
                         output_handler = OutputFileHandler(config)
-                        dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
+                        dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions')
                         logger.info(f"✅ LLM predictions saved and uploaded")
                         logger.info(f"   Local: {llm_predictions_path}")
                         logger.info(f"   Uploaded: {dest_llm_predictions}")
@@ -1790,8 +1812,8 @@ async def handle_make_embed_file_operation(
                         
                         # Upload java mapping and final predictions to source storage
                         output_handler = OutputFileHandler(config)
-                        dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                        dest_combined_mapping = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
+                        dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping')
+                        dest_combined_mapping = output_handler.save_output(combined_mapping_path, 'final_predictions')
                         logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
                         logger.info(f"📤 Uploaded final predictions to: {dest_combined_mapping}")
                         
@@ -1807,7 +1829,7 @@ async def handle_make_embed_file_operation(
                         
                         # Upload java mapping to source storage
                         output_handler = OutputFileHandler(config)
-                        dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                        dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping')
                         logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
                         
                         rag_api_failed = True
@@ -1825,7 +1847,7 @@ async def handle_make_embed_file_operation(
                     
                     # Upload java mapping to source storage
                     output_handler = OutputFileHandler(config)
-                    dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping')
                     logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
                 
                 # Update config paths for embed operation
@@ -1869,11 +1891,22 @@ async def handle_make_embed_file_operation(
             radio_groups = semantic_result["radio_groups_path"]
             dest_semantic_mapping = semantic_result["dest_semantic_mapping"]
             dest_radio_groups = semantic_result["dest_radio_groups"]
-            
+
             logger.info(f"✅ Semantic mapper completed")
             logger.info(f"   Semantic mapping: {semantic_mapping_path}")
             logger.info(f"   Radio groups: {radio_groups}")
-            
+
+            # ── Incremental cache save #1: semantic mapping + radio groups ──────────
+            if pdf_hash and not cache_hit:
+                await _save_phase_cache(
+                    pdf_hash, cache_registry_path, config,
+                    embedded_pdf=None,  # not available yet
+                    semantic_mapping_path=dest_semantic_mapping or semantic_mapping_path,
+                    radio_groups=dest_radio_groups or radio_groups,
+                    user_id=user_id, pdf_doc_id=pdf_doc_id,
+                    pdf_category=pdf_category,
+                )
+
             # Phase 2: RAG Mapper (optional - if use_second_mapper is True)
             if use_second_mapper:
                 logger.info("\n" + "-" * 80)
@@ -1888,25 +1921,19 @@ async def handle_make_embed_file_operation(
                 dest_final_form_fields   = hdr["dest_final_form_fields"]
                 pdf_category             = hdr["pdf_category"]
 
+                # ── Incremental cache save #2: headers + pdf_category ──────────────
                 if pdf_hash and not cache_hit:
-                    cache_headers      = dest_headers_with_fields or headers_with_fields_path
-                    cache_final_fields = dest_final_form_fields   or final_form_fields_path
-                    cache_mapping      = dest_semantic_mapping    or semantic_mapping_path
-                    cache_radio        = dest_radio_groups        or radio_groups
-                    cache_embedded     = dest_embedded_pdf        or embedded_pdf
                     await _save_phase_cache(
                         pdf_hash, cache_registry_path, config,
-                        cache_embedded, cache_mapping, cache_radio,
-                        user_id, pdf_doc_id,
-                        headers_with_fields=cache_headers,
-                        final_form_fields=cache_final_fields,
+                        embedded_pdf=None,  # not available yet
+                        semantic_mapping_path=dest_semantic_mapping or semantic_mapping_path,
+                        radio_groups=dest_radio_groups or radio_groups,
+                        user_id=user_id, pdf_doc_id=pdf_doc_id,
+                        headers_with_fields=dest_headers_with_fields or headers_with_fields_path,
+                        final_form_fields=dest_final_form_fields or final_form_fields_path,
                         pdf_category=pdf_category,
                     )
-                elif cache_hit:
-                    logger.info("⏭️  Cache hit - skipping Phase 2 cache update")
-                else:
-                    logger.info("⚠️  No pdf_hash available, skipping Phase 2 cache")
-                
+
                 # Now call RAG mapper with cache check
                 rag_result = await run_rag_api_mapper(
                     extracted_json_path=extracted_json,
@@ -1937,7 +1964,7 @@ async def handle_make_embed_file_operation(
                     
                     # Upload LLM predictions to source storage
                     output_handler = OutputFileHandler(config)
-                    dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
+                    dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions')
                     logger.info(f"✅ LLM predictions saved and uploaded")
                     logger.info(f"   Local: {llm_predictions_path}")
                     logger.info(f"   Uploaded: {dest_llm_predictions}")
@@ -1955,22 +1982,22 @@ async def handle_make_embed_file_operation(
                     
                     # Upload java mapping and final predictions to source storage
                     output_handler = OutputFileHandler(config)
-                    saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                    saved_final_predictions = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
-                    logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
-                    logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
-                    
+                    dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping')
+                    dest_combined_mapping = output_handler.save_output(combined_mapping_path, 'final_predictions')
+                    logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
+                    logger.info(f"📤 Uploaded final predictions to: {dest_combined_mapping}")
+
                     logger.info(f"✅ Combined mapping created (Java format): {mapping_json}")
                     rag_api_failed = False
                 else:
                     logger.warning(f"❌ RAG mapper failed: {rag_result['error']}")
-                    logger.info("� Falling back to semantic mapping only")
-                    
+                    logger.info("⬇️  Falling back to semantic mapping only")
+
                     rag_api_failed = True
                     rag_failure_reason = rag_result['error']
                     rag_predictions_path = None
                     dest_rag_predictions = None
-                    
+
                     # Convert semantic to Java format
                     mapping_json = await convert_semantic_to_java_format(
                         semantic_mapping_path=semantic_mapping_path,
@@ -1978,11 +2005,11 @@ async def handle_make_embed_file_operation(
                         pdf_doc_id=pdf_doc_id,
                         storage_config=config
                     )
-                    
+
                     # Upload java mapping to source storage
                     output_handler = OutputFileHandler(config)
-                    saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                    logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                    dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping')
+                    logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
             else:
                 # Semantic mapper only - convert to Java format
                 logger.info("🔄 Converting semantic mapping to Java format...")
@@ -1992,11 +2019,11 @@ async def handle_make_embed_file_operation(
                     pdf_doc_id=pdf_doc_id,
                     storage_config=config
                 )
-                
+
                 # Upload java mapping to source storage
                 output_handler = OutputFileHandler(config)
-                saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                dest_java_mapping = output_handler.save_output(mapping_json, 'java_mapping')
+                logger.info(f"📤 Uploaded Java mapping to: {dest_java_mapping}")
                 
                 rag_api_failed = False
                 rag_predictions_path = None
@@ -2091,22 +2118,22 @@ async def handle_make_embed_file_operation(
             cache_embedded = dest_embedded_pdf    or embedded_pdf
             cache_mapping  = dest_semantic_mapping or semantic_mapping_path
             cache_radio    = dest_radio_groups    or radio_groups
+            # Also include headers if dual mapper ran (so embedded_pdf + headers saved together)
+            cache_headers      = (dest_headers_with_fields or headers_with_fields_path) if use_second_mapper else None
+            cache_final_fields = (dest_final_form_fields or final_form_fields_path) if use_second_mapper else None
             logger.info(f"   Cache will reference: embedded={cache_embedded}")
             await _save_phase_cache(
                 pdf_hash, cache_registry_path, config,
                 cache_embedded, cache_mapping, cache_radio,
                 user_id, pdf_doc_id,
+                headers_with_fields=cache_headers,
+                final_form_fields=cache_final_fields,
+                pdf_category=pdf_category if use_second_mapper else None,
             )
         elif cache_hit:
             logger.info("⏭️  Cache hit - Phase 1 already cached")
         elif not pdf_hash:
             logger.info("⚠️  No pdf_hash available, skipping Phase 1 cache")
-        
-        # NOTE: Cache is now saved incrementally after each phase completes:
-        # - Phase 1 (After Embed): embedded_pdf, mapping_json, radio_groups  ← JUST SAVED ABOVE
-        # - Phase 2 (After Headers): headers_with_fields, final_form_fields   ← Saved in dual mapper path
-        # - Phase 3 (RAG API): Not cached (always fresh)
-        # This ensures we don't lose work if later phases fail.
         
         end_time = time.time()
         total_duration = round(end_time - start_time, 2)
@@ -2665,8 +2692,8 @@ async def call_rag_api(
         output_handler = OutputFileHandler(storage_config)
         
         # Upload header_file (OutputFileHandler will handle local/cloud)
-        dest_header_file = output_handler.save_output(header_file_local, 'header_file_json')
-        dest_section_file = output_handler.save_output(section_file_local, 'section_file_json')
+        dest_header_file = output_handler.save_output(header_file_local, 'header_file')
+        dest_section_file = output_handler.save_output(section_file_local, 'section_file')
         
         if dest_header_file:
             logger.info(f"📤 header_file uploaded to: {dest_header_file}")
@@ -2981,7 +3008,7 @@ async def save_llm_predictions_to_rag_bucket(
     # Try to upload to RAG source storage (optional, non-blocking)
     try:
         rag_output_handler = OutputFileHandler(storage_config)
-        rag_dest_path = rag_output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
+        rag_dest_path = rag_output_handler.save_output(llm_predictions_path, 'llm_predictions')
         
         if rag_dest_path:
             logger.info(f"✅ LLM predictions uploaded to RAG storage: {rag_dest_path}")

@@ -74,10 +74,14 @@ class LocalStorageConfig(BaseStorageConfig):
         """
         source_abs = os.path.abspath(local_path)
         dest_abs = os.path.abspath(destination_path)
-        
+
+        if source_abs == dest_abs:
+            logger.debug(f"upload_file: source and destination are the same, skipping copy: {source_abs}")
+            return dest_abs
+
         # Create destination directory if needed
         os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
-        
+
         # Copy file
         shutil.copy2(source_abs, dest_abs)
         logger.info(f"Copied {source_abs} to {dest_abs}")
