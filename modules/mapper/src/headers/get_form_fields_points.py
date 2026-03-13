@@ -16,6 +16,7 @@ from src.core.config import settings
 # S3Client imported conditionally where needed (only for AWS mode)
 from src.clients.unified_llm_client import UnifiedLLMClient
 from src.prompts.renderer import render as render_prompt, build_messages
+from src.utils.llm_json import parse_llm_json
 
 # Setup logging
 setup_logging()
@@ -583,19 +584,7 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
                 f"Cost: ${usage.cost_usd:.6f}"
             )
             
-            # Try to extract JSON from response (handle markdown code blocks)
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(1)
-            else:
-                # Try to find JSON object directly
-                json_match = re.search(r'(\{.*"sections".*\})', response_text, re.DOTALL)
-                if json_match:
-                    json_text = json_match.group(1)
-                else:
-                    json_text = response_text
-            
-            chunk_sections = json.loads(json_text)
+            chunk_sections = parse_llm_json(response_text)
             elapsed_time = time.time() - start_time
             
             # Get LLM usage stats from the response

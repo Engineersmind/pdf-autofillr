@@ -1,8 +1,8 @@
-import re
 import json
 import logging
 from src.groupers.base_grouper import BaseGrouper
 from src.prompts.renderer import render as render_prompt, build_messages
+from src.utils.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ class GroupByLLM(BaseGrouper):
             # Use UnifiedLLMClient - returns LLMResponse with usage tracking
             messages = build_messages(self.llm.model, prompt)
             llm_response = self.llm.complete(messages)
+
+            logger.debug(f"LLM Response Content:\n{repr(llm_response.content[:500])}")  # Log first 500 chars
             
             # Extract response and track cumulative usage
             usage = llm_response.usage
@@ -78,15 +80,13 @@ class GroupByLLM(BaseGrouper):
             
             logger.info(f"Field grouping LLM call - Tokens: {usage.total_tokens} (prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), Cost: ${usage.cost_usd:.6f}")
             
-            cleaned_json = re.sub(r"^```json\n?|```$", "", llm_response.content.strip(), flags=re.MULTILINE)
-            
-            if not cleaned_json.strip():
-                raise ValueError("LLM response is empty after cleaning")
-            
+            if not llm_response.content.strip():
+                raise ValueError("LLM response is empty")
+
             try:
-                parsed = json.loads(cleaned_json)
+                parsed = parse_llm_json(llm_response.content)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse LLM output as JSON. Output was: {repr(cleaned_json)}")
+                logger.error(f"Failed to parse LLM output as JSON. Output was: {repr(llm_response.content)}")
                 raise RuntimeError(f"LLM response is not valid JSON: {str(e)}") from e
             
             logger.info(f"Successfully grouped fields into {len(parsed)} groups")

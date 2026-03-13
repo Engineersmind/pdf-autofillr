@@ -9,6 +9,7 @@ from src.chunkers import get_chunker
 from src.utils.storage import save_json
 from src.groupers.group_by_llm import GroupByLLM
 from src.prompts.renderer import render as render_prompt, build_messages
+from src.utils.llm_json import parse_llm_json, MappingOutput
 
 import asyncio
 from functools import partial
@@ -298,18 +299,7 @@ class SemanticMapper:
     def generate_key_descriptions_bulk(self, keys: list, llm) -> dict:
         prompt = render_prompt("semantic/key_descriptions.j2", keys=keys)
         raw_response = llm.complete(prompt)
-        
-        # Extract content from LLMResponse object
-        if hasattr(raw_response, "content"):
-            text = raw_response.content
-        elif hasattr(raw_response, "text"):
-            text = raw_response.text
-        else:
-            text = str(raw_response)
-        
-        cleaned_json = re.sub(r"^```json\n?|```$", "", text.strip(), flags=re.MULTILINE)
-        parsed = json.loads(cleaned_json)
-        return parsed
+        return parse_llm_json(raw_response.content)
 
 
     async def enrich_input_data_llm(self, flat_json: dict, llm) -> dict:
@@ -440,21 +430,18 @@ class SemanticMapper:
                 # Log raw response for debugging
                 logger.debug(f"[{chunk_key}] Raw LLM response: {raw_response[:200]}..." if len(raw_response) > 200 else f"[{chunk_key}] Raw LLM response: {raw_response}")
 
-                # STAGE 4: Parse LLM JSON
+                # STAGE 4: Parse and validate LLM JSON
                 parse_start = time.time()
-                cleaned_json = re.sub(r"^```json\n?|```$", "", raw_response.strip(), flags=re.MULTILINE)
-                parsed = json.loads(cleaned_json)
+                output = MappingOutput.model_validate(parse_llm_json(raw_response))
                 parse_time = time.time() - parse_start
                 timing_info["parsing_time"] = parse_time
-                
-                logger.debug(f"[{chunk_key}] Parsed {len(parsed)} field mappings in {parse_time:.3f}s")
 
-                for fid, info in parsed.items():
-                    key = info.get("key")
-                    confidence = info.get("con", 0)
-                    value = input_data.get(key) if key in input_data else None
-                    result_mapping[fid] = (key, value, confidence)
-                    logger.debug(f"[{chunk_key}] Mapped fid {fid} -> key: {key}, confidence: {confidence}")
+                logger.debug(f"[{chunk_key}] Parsed {len(output)} field mappings in {parse_time:.3f}s")
+
+                for fid, match in output.items():
+                    value = input_data.get(match.key) if match.key else None
+                    result_mapping[fid] = (match.key, value, match.con)
+                    logger.debug(f"[{chunk_key}] Mapped fid {fid} -> key: {match.key}, confidence: {match.con}")
 
             except json.JSONDecodeError as e:
                 logger.warning(f"[{chunk_key}] Failed to parse LLM JSON response: {e}")
