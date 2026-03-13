@@ -4,7 +4,7 @@ The core PDF field extraction, mapping, embedding, and filling engine.
 
 ## 🚀 Quick Start
 
-### 1. Configure the Module
+### Option 1: Cloud LLMs (OpenAI/Anthropic)
 
 **IMPORTANT: You must configure before running!**
 
@@ -21,6 +21,27 @@ nano config.ini
 ```
 
 See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for detailed configuration instructions.
+
+### Option 2: FREE Local LLMs (Ollama) 🆓
+
+**Run locally without API costs or internet!**
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Download a model
+ollama pull qwen2.5:14b
+
+# Start Ollama server
+ollama serve
+
+# Update config.ini
+# Change: llm_model = gpt-4o
+# To:     llm_model = ollama/qwen2.5:14b
+```
+
+See **[docs/OLLAMA_QUICKSTART.md](docs/OLLAMA_QUICKSTART.md)** for 5-minute setup or **[docs/OLLAMA_SETUP.md](docs/OLLAMA_SETUP.md)** for complete guide.
 
 ### 2. Install Dependencies
 
@@ -52,6 +73,9 @@ modules/mapper/
 ├── config.ini.example      ← Copy to config.ini (configure paths)
 ├── config.ini              ← Active configuration (DO NOT COMMIT)
 ├── .env                    ← Active environment (DO NOT COMMIT)
+├── docs/
+│   ├── OLLAMA_QUICKSTART.md ← 5-min Ollama setup
+│   └── OLLAMA_SETUP.md      ← Complete Ollama guide
 ├── SETUP_GUIDE.md          ← Detailed setup instructions
 ├── API_SERVER.md           ← API server documentation
 ├── api_server.py           ← FastAPI server (run this!)

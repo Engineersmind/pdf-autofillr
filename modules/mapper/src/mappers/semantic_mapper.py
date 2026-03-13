@@ -9,6 +9,7 @@ from src.chunkers import get_chunker
 from src.utils.storage import save_json
 from src.groupers.group_by_llm import GroupByLLM
 from src.prompts.renderer import render as render_prompt, build_messages
+from src.utils.llm_json import parse_llm_json, MappingOutput
 
 import asyncio
 from functools import partial
@@ -36,56 +37,54 @@ class SemanticMapper:
         # Import config system
         from src.core.config import settings, get_semantic_mapper_config, get_chunking_config
         
+        from src.clients.unified_llm_client import UnifiedLLMClient
+
         # Handle legacy constructor calls vs new parameter-based calls
         if method_config is not None or chunking_section is not None:
             # Legacy mode - use provided configs
             logger.warning("Using legacy SemanticMapper constructor. Consider updating to parameter-based constructor.")
-            
+
             if method_config is None:
                 method_config = {}
             if chunking_section is None:
                 chunking_section = get_chunking_config()
-                
+
             # Extract values from legacy configs
-            llm_name = method_config.get("llm", settings.mapper_method_llm)
+            llm_name = method_config.get("llm", settings.llm_model)
             self.confidence_threshold = float(method_config.get("confidence_threshold", settings.mapper_method_confidence_threshold))
             self.include_key_variants = method_config.get("include_key_variants", settings.mapper_method_include_key_variants)
             self.include_field_name_variants = method_config.get("include_field_name_variants", settings.mapper_method_include_field_name_variants)
             self.include_description = method_config.get("include_description", settings.mapper_method_include_description)
-            
+            self.llm = UnifiedLLMClient(
+                model=llm_name,
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_tokens,
+                timeout=settings.llm_timeout,
+                max_retries=settings.llm_max_retries,
+            )
         else:
             # Modern mode - use parameters with config defaults
             semantic_config = get_semantic_mapper_config()
             chunking_section = get_chunking_config()
-            
-            llm_name = llm_provider or semantic_config["llm"]
+
             self.confidence_threshold = confidence_threshold or semantic_config["confidence_threshold"]
-            self.include_key_variants = semantic_config["include_key_variants"] 
+            self.include_key_variants = semantic_config["include_key_variants"]
             self.include_field_name_variants = semantic_config["include_field_name_variants"]
             self.include_description = semantic_config["include_description"]
-        
-        # Initialize LLM with UnifiedLLMClient (LiteLLM)
-        from src.clients.unified_llm_client import UnifiedLLMClient
-        
-        # Get LLM config from settings
-        llm_model = llm_name  # Model name in LiteLLM format
-        llm_temperature = getattr(settings, 'llm_temperature', 0.0)
-        llm_max_tokens = getattr(settings, 'llm_max_tokens', 4096)
-        llm_timeout = getattr(settings, 'llm_timeout', 120)
-        llm_max_retries = getattr(settings, 'llm_max_retries', 3)
-        
-        self.llm = UnifiedLLMClient(
-            model=llm_model,
-            temperature=llm_temperature,
-            max_tokens=llm_max_tokens,
-            timeout=llm_timeout,
-            max_retries=llm_max_retries
-        )
-        self.max_threads = settings.llm_max_threads
+            if llm_provider:
+                self.llm = UnifiedLLMClient(
+                    model=llm_provider,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_tokens,
+                    timeout=settings.llm_timeout,
+                    max_retries=settings.llm_max_retries,
+                )
+            else:
+                self.llm = UnifiedLLMClient.create_from_settings()
 
-        logger.info(f"Initialized SemanticMapper with LLM: {llm_model}, max_threads: {self.max_threads}")
-        logger.info(f"Config - temperature: {llm_temperature}, confidence_threshold: {self.confidence_threshold}")
-        logger.info(f"LLM Config - max_tokens: {llm_max_tokens}, timeout: {llm_timeout}s, max_retries: {llm_max_retries}")
+        self.max_threads = settings.llm_max_threads
+        logger.info(f"Initialized SemanticMapper with LLM: {self.llm.model}, max_threads: {self.max_threads}")
+        logger.info(f"Config - confidence_threshold: {self.confidence_threshold}")
 
         # Initialize tokenizer
         self.tokenizer = tiktoken.encoding_for_model("gpt-3.5-turbo")
@@ -300,18 +299,7 @@ class SemanticMapper:
     def generate_key_descriptions_bulk(self, keys: list, llm) -> dict:
         prompt = render_prompt("semantic/key_descriptions.j2", keys=keys)
         raw_response = llm.complete(prompt)
-        
-        # Extract content from LLMResponse object
-        if hasattr(raw_response, "content"):
-            text = raw_response.content
-        elif hasattr(raw_response, "text"):
-            text = raw_response.text
-        else:
-            text = str(raw_response)
-        
-        cleaned_json = re.sub(r"^```json\n?|```$", "", text.strip(), flags=re.MULTILINE)
-        parsed = json.loads(cleaned_json)
-        return parsed
+        return parse_llm_json(raw_response.content)
 
 
     async def enrich_input_data_llm(self, flat_json: dict, llm) -> dict:
@@ -442,21 +430,18 @@ class SemanticMapper:
                 # Log raw response for debugging
                 logger.debug(f"[{chunk_key}] Raw LLM response: {raw_response[:200]}..." if len(raw_response) > 200 else f"[{chunk_key}] Raw LLM response: {raw_response}")
 
-                # STAGE 4: Parse LLM JSON
+                # STAGE 4: Parse and validate LLM JSON
                 parse_start = time.time()
-                cleaned_json = re.sub(r"^```json\n?|```$", "", raw_response.strip(), flags=re.MULTILINE)
-                parsed = json.loads(cleaned_json)
+                output = MappingOutput.model_validate(parse_llm_json(raw_response))
                 parse_time = time.time() - parse_start
                 timing_info["parsing_time"] = parse_time
-                
-                logger.debug(f"[{chunk_key}] Parsed {len(parsed)} field mappings in {parse_time:.3f}s")
 
-                for fid, info in parsed.items():
-                    key = info.get("key")
-                    confidence = info.get("con", 0)
-                    value = input_data.get(key) if key in input_data else None
-                    result_mapping[fid] = (key, value, confidence)
-                    logger.debug(f"[{chunk_key}] Mapped fid {fid} -> key: {key}, confidence: {confidence}")
+                logger.debug(f"[{chunk_key}] Parsed {len(output)} field mappings in {parse_time:.3f}s")
+
+                for fid, match in output.items():
+                    value = input_data.get(match.key) if match.key else None
+                    result_mapping[fid] = (match.key, value, match.con)
+                    logger.debug(f"[{chunk_key}] Mapped fid {fid} -> key: {match.key}, confidence: {match.con}")
 
             except json.JSONDecodeError as e:
                 logger.warning(f"[{chunk_key}] Failed to parse LLM JSON response: {e}")

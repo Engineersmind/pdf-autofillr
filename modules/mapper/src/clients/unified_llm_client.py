@@ -100,6 +100,45 @@ class UnifiedLLMClient:
         self.max_retries = max_retries
         self.fallback_models = fallback_models or []
         
+        # Detect if using Ollama
+        self.is_ollama = model.startswith("ollama/") or model.startswith("ollama_chat/")
+        
+        # Configure Ollama API base if needed
+        if self.is_ollama:
+            ollama_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            os.environ["OLLAMA_API_BASE"] = ollama_base
+            logger.info(f"Using Ollama API base: {ollama_base}")
+            
+            # Validate Ollama connection
+            try:
+                import requests
+                response = requests.get(f"{ollama_base}/api/tags", timeout=5)
+                if response.status_code == 200:
+                    models = [m['name'] for m in response.json().get('models', [])]
+                    model_name = model.replace("ollama/", "").replace("ollama_chat/", "")
+                    if models:
+                        logger.info(f"✅ Ollama connected. Available models: {', '.join(models)}")
+                        if model_name not in models:
+                            logger.warning(
+                                f"⚠️  Model '{model_name}' not found in Ollama. "
+                                f"Download it with: ollama pull {model_name}"
+                            )
+                    else:
+                        logger.warning("⚠️  No models found in Ollama. Download with: ollama pull <model-name>")
+                else:
+                    logger.warning(f"⚠️  Ollama responded with status {response.status_code}")
+            except requests.exceptions.ConnectionError:
+                logger.error(
+                    f"❌ Cannot connect to Ollama at {ollama_base}\n"
+                    f"   Make sure Ollama is running:\n"
+                    f"   - On host: ollama serve\n"
+                    f"   - Check with: curl {ollama_base}/api/tags\n"
+                    f"   - Docker users: Set OLLAMA_API_BASE=http://host.docker.internal:11434"
+                )
+                raise ConnectionError(f"Ollama not reachable at {ollama_base}. Please start Ollama or check OLLAMA_API_BASE configuration.")
+            except Exception as e:
+                logger.warning(f"Could not validate Ollama setup: {e}")
+        
         # Track cumulative usage
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
@@ -357,6 +396,41 @@ class UnifiedLLMClient:
         self.total_completion_tokens = 0
         self.total_cost_usd = 0.0
         self.total_calls = 0
+
+    @classmethod
+    def create_from_settings(cls) -> "UnifiedLLMClient":
+        """
+        Create a client from the [mapping] section of config.ini / Settings.
+
+        Also pre-seeds OLLAMA_API_BASE from settings.ollama_api_base when the
+        model is an Ollama model and the env var isn't already set.
+        """
+        from src.core.config import settings
+        model = settings.llm_model
+        if model.startswith("ollama/") or model.startswith("ollama_chat/"):
+            if not os.getenv("OLLAMA_API_BASE"):
+                base = getattr(settings, "ollama_api_base", "http://localhost:11434")
+                if base:
+                    os.environ["OLLAMA_API_BASE"] = base
+        return cls(
+            model=model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout,
+            max_retries=settings.llm_max_retries,
+        )
+
+    @classmethod
+    def create_headers_client(cls) -> "UnifiedLLMClient":
+        """Create a client from the [headers] section of config.ini / Settings."""
+        from src.core.config import settings
+        return cls(
+            model=settings.headers_llm_model,
+            temperature=settings.headers_temperature,
+            max_tokens=settings.headers_max_tokens,
+            timeout=settings.llm_timeout,
+            max_retries=settings.llm_max_retries,
+        )
 
 
 def create_llm_client(
