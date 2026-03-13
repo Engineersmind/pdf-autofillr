@@ -31,8 +31,13 @@ services:
       DATA_DIR: "/app/data"
       PROCESSING_DIR: "/tmp/processing"
       
+      # Ollama connection (override .env for Docker)
+      # For macOS/Windows Docker Desktop
+      OLLAMA_API_BASE: "http://host.docker.internal:11434"
+      # For Linux, use: "http://172.17.0.1:11434"
+      
       # Optional: Override config.ini settings
-      # LLM_MODEL: "gpt-4o"
+      # LLM_MODEL: "ollama/llama3.1:8b"
       # LLM_TEMPERATURE: "0.05"
       # USE_SECOND_MAPPER: "true"
     restart: unless-stopped

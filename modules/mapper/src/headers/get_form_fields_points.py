@@ -16,6 +16,7 @@ from src.core.config import settings
 # S3Client imported conditionally where needed (only for AWS mode)
 from src.clients.unified_llm_client import UnifiedLLMClient
 from src.prompts.renderer import render as render_prompt, build_messages
+from src.utils.llm_json import parse_llm_json
 
 # Setup logging
 setup_logging()
@@ -551,32 +552,10 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
     # Create prompt
     prompt = create_header_and_field_prompt(chunk_pages, is_first)
     
-    # Get LLM client with headers-specific configuration
-    provider = settings.headers_llm_provider
-    
-    # Get model ID based on provider (for backwards compatibility)
-    # With LiteLLM, we use model names directly
-    if provider == "openai":
-        model_id = settings.headers_openai_model_id or "gpt-4o"
-    elif provider == "claude":
-        model_id = settings.headers_claude_model_id or "claude-3-5-sonnet-20241022"
-    else:
-        # Default to gpt-4o if provider not recognized
-        model_id = "gpt-4o"
-        logger.warning(f"Unsupported headers LLM provider: {provider}, using default: {model_id}")
-    
-    logger.info(f"Using model: {model_id}")
-    
-    # Create UnifiedLLMClient
-    llm_client = UnifiedLLMClient(
-        model=model_id,
-        temperature=settings.headers_temperature,
-        max_tokens=settings.headers_max_tokens,
-        timeout=getattr(settings, 'llm_timeout', 120),
-        max_retries=getattr(settings, 'llm_max_retries', 3)
-    )
-    
-    logger.info(f"LLM client configured - model: {model_id}, temp: {settings.headers_temperature}, max_tokens: {settings.headers_max_tokens}")
+    # Create UnifiedLLMClient from headers config
+    llm_client = UnifiedLLMClient.create_headers_client()
+
+    logger.info(f"LLM client configured - model: {llm_client.model}, temp: {settings.headers_temperature}, max_tokens: {settings.headers_max_tokens}")
     
     max_retries = 2
     for attempt in range(max_retries):
@@ -605,19 +584,7 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
                 f"Cost: ${usage.cost_usd:.6f}"
             )
             
-            # Try to extract JSON from response (handle markdown code blocks)
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(1)
-            else:
-                # Try to find JSON object directly
-                json_match = re.search(r'(\{.*"sections".*\})', response_text, re.DOTALL)
-                if json_match:
-                    json_text = json_match.group(1)
-                else:
-                    json_text = response_text
-            
-            chunk_sections = json.loads(json_text)
+            chunk_sections = parse_llm_json(response_text)
             elapsed_time = time.time() - start_time
             
             # Get LLM usage stats from the response

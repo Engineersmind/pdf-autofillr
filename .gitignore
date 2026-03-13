@@ -1,21 +1,146 @@
+# =============================================================================
+# PDF Autofiller - Consolidated .gitignore
+# =============================================================================
+# This file covers all modules: mapper, chatbot, rag, orchestrator, packages
+# No need for module-specific .gitignore files
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+# Byte-compiled / optimized / DLL files
+__pycache__/
 **/__pycache__/
-**/*.pyc
-**/*.pyo
-**/*.pyd
-**/.Python
-**/*.so
-**/*.egg
-**/*.egg-info/
-**/.pytest_cache/
-**/.mypy_cache/
-**/.coverage
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
 
-rough_docs/
-data/
-.vscode
+# C extensions
+*.so
 
-# Virtual Environment
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# -----------------------------------------------------------------------------
+# Virtual Environments
+# -----------------------------------------------------------------------------
 venv/
 env/
 ENV/
 .venv/
+.ENV/
+env.bak/
+venv.bak/
+
+# -----------------------------------------------------------------------------
+# Environment Variables (CRITICAL - NEVER COMMIT!)
+# -----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.env
+
+# -----------------------------------------------------------------------------
+# IDE & Editors
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# -----------------------------------------------------------------------------
+# Testing & Coverage
+# -----------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# -----------------------------------------------------------------------------
+# Type Checking & Linting
+# -----------------------------------------------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# -----------------------------------------------------------------------------
+# Jupyter Notebooks
+# -----------------------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+*.log
+logs/
+*.out
+
+# -----------------------------------------------------------------------------
+# Data & Output (Large Files)
+# -----------------------------------------------------------------------------
+data/
+rough_docs/
+*.pdf
+test_pdfs/
+temp/
+tmp/
+output/
+chatbot_data/
+local_test_data/
+!data/input/.gitkeep
+
+# -----------------------------------------------------------------------------
+# Caches
+# -----------------------------------------------------------------------------
+.cache/
+data/output/
+data/cache/
+
+# -----------------------------------------------------------------------------
+# AWS & Cloud Credentials
+# -----------------------------------------------------------------------------
+.aws/
+.boto
+credentials
+
+# -----------------------------------------------------------------------------
+# Java (for PDF utilities - iText, PDFBox)
+# -----------------------------------------------------------------------------
+*.class
+*.jar
+!java_utils/lib/*.jar
+!modules/mapper/java_utils/*.jar
+target/
