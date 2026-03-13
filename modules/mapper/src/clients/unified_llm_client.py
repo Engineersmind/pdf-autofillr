@@ -38,6 +38,8 @@ class LLMUsage:
     total_tokens: int
     cost_usd: float
     model: str
+    cache_read_tokens: int = 0       # Claude: tokens served from cache
+    cache_creation_tokens: int = 0   # Claude: tokens written into cache
 
 
 @dataclass
@@ -122,7 +124,14 @@ class UnifiedLLMClient:
         except Exception as e:
             logger.warning(f"Token estimation failed: {e}, using character count / 4")
             # Fallback: rough estimate (1 token ≈ 4 chars)
-            total_chars = sum(len(msg.get("content", "")) for msg in messages)
+            # content may be a string or a list of content blocks
+            total_chars = 0
+            for msg in messages:
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    total_chars += sum(len(b.get("text", "")) for b in content if isinstance(b, dict))
+                else:
+                    total_chars += len(content)
             return total_chars // 4
     
     def complete(
@@ -185,10 +194,15 @@ class UnifiedLLMClient:
             self.total_cost_usd += usage.cost_usd
             self.total_calls += 1
             
+            cache_info = (
+                f", cache_read={usage.cache_read_tokens}"
+                f", cache_created={usage.cache_creation_tokens}"
+                if usage.cache_read_tokens or usage.cache_creation_tokens else ""
+            )
             logger.info(
                 f"LLM response - Tokens: {usage.total_tokens} "
-                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
-                f"Cost: ${usage.cost_usd:.6f}"
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}"
+                f"{cache_info}), Cost: ${usage.cost_usd:.6f}"
             )
             
             # Extract content
@@ -264,10 +278,15 @@ class UnifiedLLMClient:
             self.total_cost_usd += usage.cost_usd
             self.total_calls += 1
             
+            cache_info = (
+                f", cache_read={usage.cache_read_tokens}"
+                f", cache_created={usage.cache_creation_tokens}"
+                if usage.cache_read_tokens or usage.cache_creation_tokens else ""
+            )
             logger.info(
                 f"LLM response - Tokens: {usage.total_tokens} "
-                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
-                f"Cost: ${usage.cost_usd:.6f}"
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}"
+                f"{cache_info}), Cost: ${usage.cost_usd:.6f}"
             )
             
             # Extract content
@@ -289,20 +308,31 @@ class UnifiedLLMClient:
         prompt_tokens = usage.prompt_tokens or 0
         completion_tokens = usage.completion_tokens or 0
         total_tokens = usage.total_tokens or (prompt_tokens + completion_tokens)
-        
+
+        # Claude (Anthropic / Bedrock): cache_read_input_tokens, cache_creation_input_tokens
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+
+        # OpenAI (gpt-4o, o-series, etc.): usage.prompt_tokens_details.cached_tokens
+        if not cache_read:
+            details = getattr(usage, "prompt_tokens_details", None)
+            cache_read = getattr(details, "cached_tokens", 0) or 0
+
         # Calculate cost - LiteLLM's completion_cost expects the response object
         try:
             cost = completion_cost(completion_response=response)
         except Exception as e:
             logger.warning(f"Could not calculate cost: {e}")
             cost = 0.0
-        
+
         return LLMUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cost_usd=cost,
-            model=self.model
+            model=self.model,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
     
     def get_cumulative_stats(self) -> Dict[str, Any]:

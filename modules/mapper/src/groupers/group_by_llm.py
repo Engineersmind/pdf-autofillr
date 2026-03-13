@@ -2,6 +2,7 @@ import re
 import json
 import logging
 from src.groupers.base_grouper import BaseGrouper
+from src.prompts.renderer import render as render_prompt, build_messages
 
 logger = logging.getLogger(__name__)
 
@@ -49,54 +50,23 @@ class GroupByLLM(BaseGrouper):
         field_token = f"[{field_type_upper}_FIELD:X]"
         output_key = f"{self.field_type.lower()}_fields"
 
-        # Prepare the semantic keys/description section
-        keys_data_section = ""
-        if hasattr(self, "keys_data") and self.keys_data:
-            keys_data_section = (
-                "You are also provided with a dictionary of semantic keys and their descriptions:\n"
-                f"{json.dumps(self.keys_data, indent=2)}\n"
-                "- For each group, if the group’s context or label closely matches a description from this dictionary, "
-                "use the corresponding key (the dictionary key, not the description) as the group’s description (set the 'description' field to that key string exactly).\n"
-                "- If no match is found, generate a new, crisp, context-driven description for the group as before.\n"
-            )
-
-        prompt = f"""
-    You are given lines extracted from a PDF form. Some lines contain tokens like {field_token}, which represent individual {self.field_type.lower()} fields.
-
-    {keys_data_section}
-    Your task is to:
-    1. Group related {self.field_type.lower()}s together (such as titles like Mr, Mrs, or other options).
-    2. For each group, if a description from the provided keys matches the group’s context, use the corresponding key as the group's description (set the 'description' field to that key string exactly).
-    3. Otherwise, assign a short and meaningful description to each group, it should be crisp and sharp.
-    4. Only use the numeric ID (e.g., 29, 30) from each [{field_type_upper}_FIELD:X] token.
-    5. Return a clean JSON object with the following format exactly: We don't need any explanation, headers or any others things in reponse. only json output like below.
-    6. Get correct export value or subname if is it radio button for that corresponding field id else return empty list
-
-    {{
-    "group_1": {{
-        "{output_key}": [29, 30, 31],
-        "export_values" : [Mr, Mrs, Dr],
-        "description": "matched_key_or_generated_description"
-    }},
-    "group_2": {{
-        "{output_key}": [45, 46],
-        "export_values": [yes, no],
-        "description": "matched_key_or_generated_description"
-    }}
-    }}
-
-    Here is the extracted text (which may be partial and not the full page):
-
-    {text}
-    """
+        prompt = render_prompt(
+            "groupers/field_grouping.j2",
+            field_token=field_token,
+            field_type_lower=self.field_type.lower(),
+            field_type_upper=field_type_upper,
+            output_key=output_key,
+            keys_data=self.keys_data if hasattr(self, "keys_data") and self.keys_data else None,
+            text=text,
+        )
         logger.info("Starting field grouping using LLM")
-        
+
         try:
             if not self.llm:
                 raise ValueError("LLM is not initialized")
-            
+
             # Use UnifiedLLMClient - returns LLMResponse with usage tracking
-            messages = [{"role": "user", "content": prompt}]
+            messages = build_messages(self.llm.model, prompt)
             llm_response = self.llm.complete(messages)
             
             # Extract response and track cumulative usage
