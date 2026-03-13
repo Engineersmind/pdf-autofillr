@@ -36,56 +36,54 @@ class SemanticMapper:
         # Import config system
         from src.core.config import settings, get_semantic_mapper_config, get_chunking_config
         
+        from src.clients.unified_llm_client import UnifiedLLMClient
+
         # Handle legacy constructor calls vs new parameter-based calls
         if method_config is not None or chunking_section is not None:
             # Legacy mode - use provided configs
             logger.warning("Using legacy SemanticMapper constructor. Consider updating to parameter-based constructor.")
-            
+
             if method_config is None:
                 method_config = {}
             if chunking_section is None:
                 chunking_section = get_chunking_config()
-                
+
             # Extract values from legacy configs
-            llm_name = method_config.get("llm", settings.mapper_method_llm)
+            llm_name = method_config.get("llm", settings.llm_model)
             self.confidence_threshold = float(method_config.get("confidence_threshold", settings.mapper_method_confidence_threshold))
             self.include_key_variants = method_config.get("include_key_variants", settings.mapper_method_include_key_variants)
             self.include_field_name_variants = method_config.get("include_field_name_variants", settings.mapper_method_include_field_name_variants)
             self.include_description = method_config.get("include_description", settings.mapper_method_include_description)
-            
+            self.llm = UnifiedLLMClient(
+                model=llm_name,
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_tokens,
+                timeout=settings.llm_timeout,
+                max_retries=settings.llm_max_retries,
+            )
         else:
             # Modern mode - use parameters with config defaults
             semantic_config = get_semantic_mapper_config()
             chunking_section = get_chunking_config()
-            
-            llm_name = llm_provider or semantic_config["llm"]
+
             self.confidence_threshold = confidence_threshold or semantic_config["confidence_threshold"]
-            self.include_key_variants = semantic_config["include_key_variants"] 
+            self.include_key_variants = semantic_config["include_key_variants"]
             self.include_field_name_variants = semantic_config["include_field_name_variants"]
             self.include_description = semantic_config["include_description"]
-        
-        # Initialize LLM with UnifiedLLMClient (LiteLLM)
-        from src.clients.unified_llm_client import UnifiedLLMClient
-        
-        # Get LLM config from settings
-        llm_model = llm_name  # Model name in LiteLLM format
-        llm_temperature = getattr(settings, 'llm_temperature', 0.0)
-        llm_max_tokens = getattr(settings, 'llm_max_tokens', 4096)
-        llm_timeout = getattr(settings, 'llm_timeout', 120)
-        llm_max_retries = getattr(settings, 'llm_max_retries', 3)
-        
-        self.llm = UnifiedLLMClient(
-            model=llm_model,
-            temperature=llm_temperature,
-            max_tokens=llm_max_tokens,
-            timeout=llm_timeout,
-            max_retries=llm_max_retries
-        )
-        self.max_threads = settings.llm_max_threads
+            if llm_provider:
+                self.llm = UnifiedLLMClient(
+                    model=llm_provider,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_tokens,
+                    timeout=settings.llm_timeout,
+                    max_retries=settings.llm_max_retries,
+                )
+            else:
+                self.llm = UnifiedLLMClient.create_from_settings()
 
-        logger.info(f"Initialized SemanticMapper with LLM: {llm_model}, max_threads: {self.max_threads}")
-        logger.info(f"Config - temperature: {llm_temperature}, confidence_threshold: {self.confidence_threshold}")
-        logger.info(f"LLM Config - max_tokens: {llm_max_tokens}, timeout: {llm_timeout}s, max_retries: {llm_max_retries}")
+        self.max_threads = settings.llm_max_threads
+        logger.info(f"Initialized SemanticMapper with LLM: {self.llm.model}, max_threads: {self.max_threads}")
+        logger.info(f"Config - confidence_threshold: {self.confidence_threshold}")
 
         # Initialize tokenizer
         self.tokenizer = tiktoken.encoding_for_model("gpt-3.5-turbo")
