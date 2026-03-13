@@ -20,10 +20,18 @@ class TestFillWithJava:
     @patch("src.fillers.fill_pdf.subprocess.run")
     @patch("src.fillers.fill_pdf.os.path.exists")
     def test_returns_output_path_on_success(self, mock_exists, mock_sub, tmp_path):
+        import os
         embedded = str(tmp_path / "embedded.pdf")
         input_json = str(tmp_path / "data.json")
         jar = "filler.jar"
-        expected_out = f"{tmp_path}/embedded_filled.pdf"
+
+        # Mirror the source code's output path logic so the test works on
+        # both macOS (tmp_path=/private/var/...) and Linux CI (tmp_path=/tmp/...)
+        base = os.path.splitext(os.path.basename(embedded))[0]
+        if "/tmp/" in embedded:
+            expected_out = f"/tmp/{base}_filled.pdf"
+        else:
+            expected_out = f"{os.path.splitext(embedded)[0]}_filled.pdf"
 
         mock_exists.side_effect = lambda p: p in {jar, embedded, input_json, expected_out}
         mock_sub.return_value = MagicMock(returncode=0)

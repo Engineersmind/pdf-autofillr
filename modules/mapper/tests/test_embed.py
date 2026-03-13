@@ -23,14 +23,21 @@ class TestRunEmbedJavaStage:
     @patch("src.embedders.embed_keys.subprocess.run")
     @patch("src.embedders.embed_keys.os.path.exists")
     def test_returns_output_path_on_success(self, mock_exists, mock_sub, tmp_path):
+        import os
         pdf = str(tmp_path / "form.pdf")
         ext = str(tmp_path / "extracted.json")
         mapping = str(tmp_path / "mapping.json")
         radio = str(tmp_path / "radio.json")
         jar = "rebuilder.jar"
-        expected_out = f"{tmp_path}/form_embedded.pdf"
 
-        # exists returns True for jar + all inputs + the output file
+        # Mirror the source code's output path logic so the test works on
+        # both macOS (tmp_path=/private/var/...) and Linux CI (tmp_path=/tmp/...)
+        base = os.path.splitext(os.path.basename(pdf))[0]
+        if "/tmp/" in pdf:
+            expected_out = f"/tmp/{base}_embedded.pdf"
+        else:
+            expected_out = f"{os.path.splitext(pdf)[0]}_embedded.pdf"
+
         mock_exists.side_effect = lambda p: p in {jar, pdf, ext, mapping, radio, expected_out}
         mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
