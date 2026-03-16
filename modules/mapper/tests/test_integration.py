@@ -10,6 +10,7 @@ import json
 import pytest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch
+import src.handlers.operations  # ensure submodule is in sys.modules for @patch
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +45,25 @@ def _minimal_extracted(tmp_path):
     return p
 
 
-def _minimal_input_keys(tmp_path):
-    data = {"firstName": "John", "lastName": "Doe"}
-    p = str(tmp_path / "input_keys.json")
+def _minimal_global_json(tmp_path):
+    """Keys-only schema — used by the map phase."""
+    data = {"firstName": "", "lastName": ""}
+    p = str(tmp_path / "schema_keys.json")
     _write_json(p, data)
     return p
+
+
+def _minimal_user_data(tmp_path):
+    """Per-user data — used by the fill phase."""
+    data = {"firstName": "Jane", "lastName": "Doe"}
+    p = str(tmp_path / "user_data.json")
+    _write_json(p, data)
+    return p
+
+
+# Keep old name as alias so tests that used it still compile
+def _minimal_input_keys(tmp_path):
+    return _minimal_global_json(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +113,7 @@ class TestExtractMapPipeline:
 
         map_in = MagicMock()
         map_in.get_input.side_effect = lambda k: {
-            "extracted_json": extracted, "input_json": input_keys
+            "extracted_json": extracted, "global_json": input_keys   # map reads global_json
         }.get(k)
         map_out = MagicMock()
         map_out.save_output.return_value = mapped_path
@@ -235,8 +250,8 @@ class TestFullPipelineSmoke:
         r1 = self._run(handle_extract_operation(_cfg(local_extracted_json=extracted)))
         assert r1["status"] == "success"
 
-        # 2. MAP
-        mock_fh.return_value = (_in_h(extracted_json=extracted, input_json=input_keys), _out_h(mapped))
+        # 2. MAP — reads global_json (keys-only schema), NOT input_json
+        mock_fh.return_value = (_in_h(extracted_json=extracted, global_json=input_keys), _out_h(mapped))
         MockMapper.return_value.process_and_save = AsyncMock(return_value={"mapping_path": mapped, "radio_groups_path": radio, "total_fields_mapped": 1})
         r2 = self._run(handle_map_operation(
             _cfg(local_mapped_json=mapped, local_radio_json=radio),
@@ -253,7 +268,7 @@ class TestFullPipelineSmoke:
         ))
         assert r3["status"] == "success"
 
-        # 4. FILL
+        # 4. FILL — reads input_json (per-user data), NOT global_json
         mock_fh.return_value = (_in_h(embedded_pdf=embedded, input_json=input_keys), _out_h(filled))
         mock_fill_java.return_value = filled
         r4 = self._run(handle_fill_operation(_cfg(local_filled_pdf=filled)))

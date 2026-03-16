@@ -1,0 +1,143 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+# Package metadata
+# ---------------------------------------------------------------------------
+
+[project]
+name = "pdf-autofiller-mapper"
+version = "1.0.0"
+description = "Python SDK for AI-powered PDF form mapping and filling — HTTP client and embedded pipeline"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Engineersmind", email = "team@engineersmind.com" },
+]
+keywords = ["pdf", "form", "autofill", "ai", "llm", "mapper", "sdk"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business",
+]
+requires-python = ">=3.10"
+
+# Core runtime — HTTP client only, no mapper module required
+dependencies = [
+    "httpx>=0.26.0",
+]
+
+# ---------------------------------------------------------------------------
+# Optional extras
+# ---------------------------------------------------------------------------
+
+[project.optional-dependencies]
+
+# Full in-process pipeline (PDFMapper class).
+# Also needs Java 17+ on PATH for the embed and fill stages.
+embedded = [
+    "PyMuPDF>=1.24.0",
+    "openai>=1.30.0",
+    "litellm>=1.30.0",
+    "tiktoken>=0.7.0",
+    "tenacity>=8.2.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "numpy>=1.26.0",
+    "pandas>=2.1.0",
+    "aiohttp>=3.9.0",
+    "requests>=2.31.0",
+    "python-json-logger>=2.0.0",
+    "regex>=2023.12.0",
+    "tqdm>=4.66.0",
+]
+
+# AWS S3 storage backend
+aws = [
+    "boto3>=1.34.0",
+    "botocore>=1.34.0",
+]
+
+# Azure Blob storage backend
+azure = [
+    "azure-storage-blob>=12.19.0",
+    "azure-identity>=1.15.0",
+]
+
+# Google Cloud Storage backend
+gcp = [
+    "google-cloud-storage>=2.14.0",
+]
+
+# Everything (embedded pipeline + all cloud backends)
+all = [
+    "pdf-autofiller-mapper[embedded]",
+    "pdf-autofiller-mapper[aws]",
+    "pdf-autofiller-mapper[azure]",
+    "pdf-autofiller-mapper[gcp]",
+]
+
+# Development / testing
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.0.0",
+    "mypy>=1.8.0",
+]
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
+
+[project.scripts]
+pdf-autofiller-mapper = "pdf_autofiller_mapper.cli:main"
+
+# ---------------------------------------------------------------------------
+# Project URLs
+# ---------------------------------------------------------------------------
+
+[project.urls]
+Homepage = "https://github.com/Engineersmind/pdf-autofillr"
+Documentation = "https://github.com/Engineersmind/pdf-autofillr/tree/main/modules/mapper/sdk"
+Source = "https://github.com/Engineersmind/pdf-autofillr"
+"Issue Tracker" = "https://github.com/Engineersmind/pdf-autofillr/issues"
+
+# ---------------------------------------------------------------------------
+# Package discovery
+# ---------------------------------------------------------------------------
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pdf_autofiller_mapper*"]
+
+[tool.setuptools.package-data]
+pdf_autofiller_mapper = [
+    "jars/*.jar",
+]
+
+# ---------------------------------------------------------------------------
+# Tool configuration
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--tb=short -q"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]

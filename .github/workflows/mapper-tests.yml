@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: modules/mapper/requirements-full.txt
+          cache-dependency-path: modules/mapper/requirements.txt
 
       - name: Set up Java (required by mapper dependencies)
         uses: actions/setup-java@v4
@@ -43,7 +43,7 @@ jobs:
           java-version: "17"
 
       - name: Install dependencies
-        run: pip install -r requirements-full.txt
+        run: pip install -r requirements.txt
 
       - name: Run tests
         run: |

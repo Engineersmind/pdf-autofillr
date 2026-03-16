@@ -64,8 +64,10 @@ class JobContext:
 
         # ── Local processing paths (/tmp/processing/) ────────────────────
         self.local_input_pdf           = local.get('processing_input_pdf')
+        # global_json = keys-only schema → used by handle_map_operation (embed pipeline)
+        self.local_global_json         = local.get('processing_global_json')
+        # input_json  = per-user data    → used by handle_fill_operation (fill pipeline)
         self.local_input_json          = local.get('processing_input_json')
-        self.local_global_json         = local.get('processing_input_json')   # alias
         self.local_extracted_json      = local.get('extracted_json')
         self.local_mapped_json         = local.get('mapped_json')
         self.local_radio_json          = local.get('radio_groups_json')

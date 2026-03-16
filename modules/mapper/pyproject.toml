@@ -108,7 +108,7 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["*"]
-exclude = ["tests*", "adapter_src*"]
+exclude = ["tests*", "adapters*"]
 
 # =============================================================================
 # Black - Code Formatter
@@ -160,6 +160,10 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
+filterwarnings = [
+    # PyMuPDF SWIG C-extension noise — not fixable in our code
+    "ignore::DeprecationWarning:importlib._bootstrap",
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
@@ -178,7 +182,7 @@ omit = [
     "*/test_*.py",
     "*/__pycache__/*",
     "*/venv/*",
-    "*/adapter_src/*",
+    "*/adapters/*",
 ]
 
 [tool.coverage.report]

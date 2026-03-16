@@ -37,7 +37,7 @@ from src.handlers.operations import (
 
 # Import notification system
 try:
-    from adapter_src.notifier import create_pipeline_notifier
+    from adapters.notifier import create_pipeline_notifier
     NOTIFICATIONS_AVAILABLE = True
 except ImportError:
     NOTIFICATIONS_AVAILABLE = False

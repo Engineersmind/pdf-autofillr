@@ -1,8 +1,8 @@
 import os
 import subprocess
-
-
 import logging
+
+from src.utils.jar_path import find_jar
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,26 +39,8 @@ async def refresh_with_java(
         base_name = os.path.splitext(input_pdf)[0]
         refreshed_pdf = f"{base_name}_refreshed.pdf"
     
-    # JAR file path - check multiple locations in order of preference
-    possible_jar_paths = [
-        "refresher.jar",                       # Root directory (RECOMMENDED)
-        "assets/refresher.jar",                # Assets directory in root
-        "src/assets/refresher.jar",            # Assets in src directory
-        "/opt/refresher.jar",                  # Lambda layer location
-        os.path.join(os.getcwd(), "refresher.jar"),  # Current working directory
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "refresher.jar")  # Relative to this module
-    ]
-    
-    jar_path = None
-    for path in possible_jar_paths:
-        if os.path.exists(path):
-            jar_path = path
-            logger.info(f"[📦] Found Java refresher at: {jar_path}")
-            break
-    
-    if not jar_path:
-        logger.error(f"[❌] Java refresher JAR not found in any of these locations: {possible_jar_paths}")
-        raise FileNotFoundError(f"Java refresher JAR not found. Expected locations: {possible_jar_paths}")
+    jar_path = find_jar("refresher.jar")
+    logger.info(f"[📦] Found Java refresher at: {jar_path}")
     
     # Validate input file exists
     if not os.path.exists(input_pdf):

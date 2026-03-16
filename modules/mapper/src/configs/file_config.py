@@ -131,7 +131,8 @@ class FileConfig:
         # Define all pattern keys we need
         pattern_keys = [
             'processing_input_pdf',
-            'processing_input_json',
+            'processing_global_json',   # keys-only schema — embed pipeline
+            'processing_input_json',    # per-user data    — fill pipeline
             'extracted_json',
             'mapped_json',
             'radio_groups_json',
@@ -196,7 +197,11 @@ class FileConfig:
         # Get pattern
         if file_type == 'pdf':
             pattern_key = 'input_pdf_pattern'
+        elif file_type == 'global_json':
+            # Keys-only schema used by the map phase (make_embed_file pipeline)
+            pattern_key = 'global_json_pattern'
         elif file_type == 'json':
+            # Per-user data used by the fill phase
             pattern_key = 'input_json_pattern'
         else:
             raise ValueError(f"Unknown file type: {file_type}")

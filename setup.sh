@@ -318,11 +318,8 @@ echo -e "${GREEN}✅ .env file configured${NC}"
 # ============================================================================
 echo -e "\n${YELLOW}📦 Installing Python dependencies...${NC}"
 
-echo -e "   ${NC}Installing core requirements...${NC}"
+echo -e "   ${NC}Installing requirements...${NC}"
 $PIP_CMD install -r requirements.txt -q
-
-echo -e "   ${NC}Installing API server requirements...${NC}"
-$PIP_CMD install -r requirements-api.txt -q
 
 echo -e "${GREEN}✅ Dependencies installed${NC}"
 
@@ -330,7 +327,7 @@ echo -e "${GREEN}✅ Dependencies installed${NC}"
 # 6. Install SDK (Optional)
 # ============================================================================
 echo -e "\n${YELLOW}🔧 Installing Python SDK...${NC}"
-cd ../../sdks/python
+cd ../../modules/mapper/sdk
 
 # Create SDK .env
 cat > .env << EOF
@@ -378,8 +375,8 @@ if [ "$SKIP_OLLAMA" = "true" ]; then
 fi
 
 echo -e "\n${CYAN}📖 Documentation:${NC}"
-echo -e "   ${NC}- Setup Guide: modules/mapper/SETUP_GUIDE.md${NC}"
-echo -e "   ${NC}- Quick Ref: QUICK_REFERENCE.md${NC}"
-echo -e "   ${NC}- Examples: examples/QUICK_START.md${NC}"
+echo -e "   ${NC}- Setup Guide: modules/mapper/docs/setup_guide.md${NC}"
+echo -e "   ${NC}- Module README: modules/mapper/README.md${NC}"
+echo -e "   ${NC}- Examples: examples/${NC}"
 
 echo -e "\n${GREEN}🎉 Happy coding!${NC}"

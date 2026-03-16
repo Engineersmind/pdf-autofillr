@@ -92,6 +92,11 @@ def build_all_file_paths(
     paths['source_input_pdf'] = file_config.get_source_input_path(
         'pdf', user_id, session_id, pdf_doc_id
     )
+    # Global JSON schema (keys only) — used by map phase
+    paths['source_global_json'] = file_config.get_source_input_path(
+        'global_json', user_id, session_id, pdf_doc_id
+    )
+    # Per-user input JSON (actual values) — used by fill phase
     paths['source_input_json'] = file_config.get_source_input_path(
         'json', user_id, session_id, pdf_doc_id
     )
@@ -205,23 +210,25 @@ def create_storage_config_from_paths(
     # ========================================
     # INPUT PATHS (from source storage)
     # ========================================
-    config.source_input_pdf = paths.get('source_input_pdf')  # Keep original source path
-    config.source_input_json = paths.get('source_input_json')  # Keep original source path
-    config.local_input_pdf = paths.get('source_input_pdf')
-    config.local_input_json = paths.get('source_input_json')
-    config.local_global_json = paths.get('source_input_json')  # Alias
-    
+    config.source_input_pdf    = paths.get('source_input_pdf')
+    config.source_global_json  = paths.get('source_global_json')   # keys-only schema
+    config.source_input_json   = paths.get('source_input_json')    # per-user data
+    config.local_input_pdf     = paths.get('source_input_pdf')
+    config.local_global_json   = paths.get('source_global_json')   # schema → map phase
+    config.local_input_json    = paths.get('source_input_json')    # user data → fill phase
+
     # For cloud storage, set S3/Azure/GCS paths
     if source_type == 'aws':
-        config.s3_input_pdf = paths.get('source_input_pdf')
-        config.s3_input_json = paths.get('source_input_json')
-        config.s3_global_json = paths.get('source_input_json')
+        config.s3_input_pdf    = paths.get('source_input_pdf')
+        config.s3_global_json  = paths.get('source_global_json')
+        config.s3_input_json   = paths.get('source_input_json')
     
     # ========================================
     # PROCESSING PATHS (temp files in /tmp/processing/)
     # ========================================
-    config.local_input_pdf = paths.get('processing_input_pdf')  # Override with processing path for operations
-    config.local_input_json = paths.get('processing_input_json')
+    config.local_input_pdf    = paths.get('processing_input_pdf')   # override with processing path
+    config.local_global_json  = paths.get('processing_global_json') # schema → map phase
+    config.local_input_json   = paths.get('processing_input_json')  # user data → fill phase
     config.local_extracted_json = paths.get('extracted_json')
     config.local_mapped_json = paths.get('mapped_json')
     config.local_radio_json = paths.get('radio_groups_json')
@@ -282,12 +289,19 @@ def prepare_input_files(
     else:
         logger.warning(f"⚠️  Input PDF not found: {paths['source_input_pdf']}")
     
-    # Copy input JSON
-    if os.path.exists(paths['source_input_json']):
-        shutil.copy2(paths['source_input_json'], paths['processing_input_json'])
-        logger.info(f"📥 Copied input JSON: {paths['source_input_json']} → {paths['processing_input_json']}")
+    # Copy global JSON schema (keys only — used by map phase)
+    if paths.get('source_global_json') and os.path.exists(paths['source_global_json']):
+        shutil.copy2(paths['source_global_json'], paths['processing_global_json'])
+        logger.info(f"📥 Copied global JSON (schema): {paths['source_global_json']} → {paths['processing_global_json']}")
     else:
-        logger.warning(f"⚠️  Input JSON not found: {paths['source_input_json']}")
+        logger.warning(f"⚠️  Global JSON schema not found: {paths.get('source_global_json')}")
+
+    # Copy per-user input JSON (actual values — used by fill phase)
+    if paths.get('source_input_json') and os.path.exists(paths['source_input_json']):
+        shutil.copy2(paths['source_input_json'], paths['processing_input_json'])
+        logger.info(f"📥 Copied input JSON (user data): {paths['source_input_json']} → {paths['processing_input_json']}")
+    else:
+        logger.warning(f"⚠️  Input JSON not found: {paths.get('source_input_json')}")
 
 
 def cleanup_processing_directory(processing_dir: str) -> None:
