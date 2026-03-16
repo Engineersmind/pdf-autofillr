@@ -2598,63 +2598,6 @@ async def call_rag_api(
     logger.info(f"Session ID: {session_id}")
     logger.info(f"Storage Type: {getattr(storage_config, 'source_type', 'unknown')}")
 
-    # ============================================================================
-    # TEMPORARY: For testing, download existing RAG predictions from source storage
-    # TODO: Remove this and enable actual RAG API call below
-    # ============================================================================
-    logger.warning("⚠️  TESTING MODE: Downloading existing RAG predictions from source storage")
-    logger.warning("⚠️  This bypasses the RAG API call - remove this for production!")
-    
-    try:
-            
-        # Get local destination path from config
-        local_predictions_path = storage_config.local_rag_predictions
-        
-        if not local_predictions_path:
-            raise ValueError("RAG predictions local path not configured in storage_config.local_rag_predictions")
-        
-        # Construct source path based on storage type
-        # This assumes RAG predictions already exist in source storage
-        if storage_config.source_type == 'local':
-            # For local: assume file is in data/output/ or similar
-            source_rag_path = f"/app/data/modules/mapper_sample/output/{user_id}_{session_id}_{pdf_doc_id}_rag_predictions.json"
-        elif storage_config.source_type == 'aws':
-            # For S3: construct S3 path where RAG predictions are stored
-            source_rag_path = getattr(storage_config, 's3_rag_predictions', None)
-            if not source_rag_path:
-                # Fallback: construct from pattern
-                source_rag_path = f"s3://your-bucket/predictions/{user_id}/{session_id}/{pdf_doc_id}/rag_predictions.json"
-        else:
-            raise ValueError(f"Unsupported storage type for testing: {storage_config.source_type}")
-        
-        logger.info(f"📥 Downloading existing RAG predictions from: {source_rag_path}")
-        logger.info(f"   To local: {local_predictions_path}")
-        
-        # Download using InputFileHandler
-        input_handler = InputFileHandler(storage_config)
-        downloaded_path = input_handler.download_input(source_rag_path, local_predictions_path)
-        
-        if not downloaded_path or not os.path.exists(downloaded_path):
-            raise FileNotFoundError(
-                f"Failed to download RAG predictions from {source_rag_path}. "
-                "Make sure the file exists in your source storage!"
-            )
-        
-        logger.info(f"✅ RAG predictions downloaded successfully: {downloaded_path}")
-        logger.info("=" * 80)
-        
-        return downloaded_path
-        
-    except Exception as test_error:
-        logger.error(f"❌ Testing mode failed: {test_error}")
-        logger.error("   Either fix the source path or enable actual RAG API call below")
-        raise RuntimeError(f"Testing mode: Failed to download existing RAG predictions: {test_error}")
-    
-    # ============================================================================
-    # ACTUAL RAG API CALL CODE (currently disabled for testing)
-    # TODO: Remove the testing code above and enable this
-    # ============================================================================
-
     try:
         # Get output paths from config (where to save RAG input files)
         header_file_output_path = storage_config.local_header_file
@@ -2717,9 +2660,6 @@ async def call_rag_api(
             )
         if not rag_api_key:
             logger.warning("⚠️  RAG API key not configured - API may reject request")
-
-        header_file_for_api = "s3://rag-bucket-pdf-filler/predictions/553/086d6670-81e5-47f4-aecb-e4f7c3ba2a83/990/input_file/header_file.json"
-        
 
         # Prepare payload for RAG API
         payload = {
