@@ -753,20 +753,16 @@ async def handle_fill_operation(
         
         # Use configured output path
         local_filled = config.local_filled_pdf
-        storage_config = {
-            "type": "local",
-            "path": local_filled
-        }
-        
-        # Run Java filler
+
+        # Run Java filler — write directly to the processing dir path
         filled_pdf = await fill_with_java(
             embedded_pdf=local_embedded,
             input_json=local_input_json,
-            storage_config=storage_config
+            output_path=local_filled,
         )
-        
-        # Save output immediately to source storage
-        saved_path = output_handler.save_output(local_filled, 'filled_pdf')
+
+        # Upload from processing dir to destination (output_base_path for local)
+        saved_path = output_handler.save_output(filled_pdf, 'filled_pdf')
         if saved_path:
             logger.info(f"✅ Saved filled PDF to: {saved_path}")
         
@@ -805,7 +801,7 @@ async def handle_fill_operation(
         
         result = {
             "operation": "fill",
-            "output_file": local_filled,
+            "output_file": saved_path or local_filled,
             "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration
@@ -840,6 +836,7 @@ async def handle_fill_operation(
 
 async def handle_run_all_operation(
     input_pdf: str,
+    global_json: str,
     input_json: str,
     mapping_config: dict,
     user_id: Optional[int] = None,
@@ -851,28 +848,32 @@ async def handle_run_all_operation(
     """
     Run all operation - executes complete pipeline (extract → map → embed → fill).
     Works with ANY storage backend.
-    
+
     Args:
-        input_pdf: Input PDF path (s3://, gs://, azure://, or local)
-        input_json: Input JSON with user data
+        input_pdf:    Input PDF path (s3://, gs://, azure://, or local)
+        global_json:  Keys-only schema JSON — used by extract/map/embed stages
+                      (all values empty, e.g. {"firstName": "", "lastName": ""})
+        input_json:   Per-user data JSON — used by fill stage only
+                      (actual values, e.g. {"firstName": "Jane", "lastName": "Doe"})
         mapping_config: Mapping configuration
         user_id: Optional user ID
         session_id: Optional session ID
         notifier: Optional notification system
         pdf_doc_id: Optional PDF document ID
         input_json_doc_id: Optional input JSON document ID
-        
+
     Returns:
         Complete pipeline result with all output files
     """
     start_time = time.time()
     storage_type = get_storage_type(input_pdf)
-    
+
     logger.info("=" * 80)
     logger.info("RUN ALL OPERATION - COMPLETE PIPELINE")
     logger.info("=" * 80)
-    logger.info(f"Input PDF: {input_pdf}")
-    logger.info(f"Input JSON: {input_json}")
+    logger.info(f"Input PDF:   {input_pdf}")
+    logger.info(f"Global JSON: {global_json}")
+    logger.info(f"Input JSON:  {input_json}")
     logger.info(f"Storage type: {storage_type}")
     
     pipeline_results = {}
@@ -887,7 +888,7 @@ async def handle_run_all_operation(
             notifier=notifier,
             pdf_doc_id=pdf_doc_id,
             input_json_doc_id=input_json_doc_id,
-            input_json_path=input_json,
+            input_json_path=global_json,   # global_json used for pre-map estimation
             mapping_config=mapping_config
         )
         pipeline_results["extract"] = extract_result

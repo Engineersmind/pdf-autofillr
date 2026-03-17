@@ -9,18 +9,18 @@
 services:
   mapper:
     build:
-      context: ../../../../
-      dockerfile: modules/mapper/deployment/docker/Dockerfile
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
     container_name: pdf-autofiller-mapper
     ports:
       - "8000:8000"
+    env_file:
+      - ../../.env
     volumes:
       # Mount data directory for persistent storage
       - ../../../../data:/app/data
       # Mount config file (uses absolute paths for Docker)
       - ../../config.ini:/app/config.ini:ro
-      # Optional: Mount .env for development
-      - ../../.env:/app/.env:ro
     environment:
       # Server configuration
       HTTP_HOST: "0.0.0.0"

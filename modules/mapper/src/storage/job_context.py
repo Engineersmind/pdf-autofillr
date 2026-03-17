@@ -86,13 +86,16 @@ class JobContext:
         self.local_cache_registry      = path_resolver.remote_cache_registry(uid, sid, pid)
 
         # ── Remote source paths (inputs) ─────────────────────────────────
-        self.source_input_pdf  = path_resolver.remote_input_pdf(uid, sid, pid)
-        self.source_input_json = path_resolver.remote_input_json(uid, sid, pid)
+        self.source_input_pdf   = path_resolver.remote_input_pdf(uid, sid, pid)
+        # global_json = keys-only schema → used by handle_map_operation (embed pipeline)
+        self.source_global_json = path_resolver.remote_global_json(uid, sid, pid)
+        # input_json  = per-user data    → used by handle_fill_operation (fill pipeline)
+        self.source_input_json  = path_resolver.remote_input_json(uid, sid, pid)
 
         # AWS-style input aliases (operations.py uses hasattr guards on these)
         self.s3_input_pdf   = self.source_input_pdf
-        self.s3_input_json  = self.source_input_json
-        self.s3_global_json = self.source_input_json
+        self.s3_global_json = self.source_global_json   # keys-only schema (embed pipeline)
+        self.s3_input_json  = self.source_input_json    # per-user data (fill pipeline)
 
         # ── Remote destination paths (outputs) ───────────────────────────
         self.dest_extracted_json        = path_resolver.remote_extracted(uid, sid, pid)

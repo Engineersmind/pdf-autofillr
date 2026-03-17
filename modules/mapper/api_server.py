@@ -74,7 +74,8 @@ class FillRequest(BaseModel):
 
 
 class MakeEmbedRequest(BaseModel):
-    pdf_path: str = Field(..., description="Path to input PDF file")
+    pdf_path: str = Field(..., description="Path to input PDF file (local or cloud)")
+    global_json_path: str = Field(..., description="Path to global JSON schema (keys-only, empty values)")
     user_id: Optional[int] = Field(1, description="User ID")
     pdf_doc_id: Optional[int] = Field(100, description="PDF document ID")
     session_id: Optional[int] = Field(None, description="Session ID")
@@ -98,7 +99,8 @@ class CheckEmbedRequest(BaseModel):
 
 class RunAllRequest(BaseModel):
     pdf_path: str = Field(..., description="Path to input PDF")
-    input_json_path: str = Field(..., description="Path to input JSON with data")
+    global_json_path: str = Field(..., description="Path to global JSON schema (keys-only, empty values) — used by map phase")
+    input_json_path: str = Field(..., description="Path to per-user data JSON (actual values) — used by fill phase")
     user_id: Optional[int] = Field(1, description="User ID")
     session_id: Optional[int] = Field(None, description="Session ID")
     pdf_doc_id: Optional[int] = Field(100, description="PDF document ID")
@@ -170,8 +172,8 @@ async def map_fields(request: MapRequest):
         logger.info(f"API: Map request for {request.extracted_json_path}")
         
         # Load mapping config from config.ini
-        from src.core.config import get_mapping_config
-        mapping_config = get_mapping_config()
+        from src.core.config import get_mapper_config
+        mapping_config = get_mapper_config()
         
         result = await handle_map_operation(
             extracted_json_path=request.extracted_json_path,
@@ -226,10 +228,27 @@ async def fill(request: FillRequest):
     """
     try:
         logger.info(f"API: Fill request for {request.embedded_pdf_path}")
-        
+
+        # ── Pre-flight checks ────────────────────────────────────────────────
+        missing = []
+        if not os.path.isfile(request.embedded_pdf_path):
+            missing.append(f"embedded_pdf not found: {request.embedded_pdf_path}")
+        if not os.path.isfile(request.input_json_path):
+            missing.append(f"input_json not found: {request.input_json_path}")
+        if missing:
+            raise HTTPException(status_code=400, detail={"missing_files": missing})
+
+        from src.configs.file_config import get_file_config
+        from src.utils.entrypoint_helpers import create_job_context
+        file_cfg = get_file_config()
+        config = create_job_context(file_cfg, request.user_id, request.session_id, request.pdf_doc_id)
+        config.local_embedded_pdf = request.embedded_pdf_path
+        config.local_input_json   = request.input_json_path
+        config.s3_embedded_pdf    = request.embedded_pdf_path
+        config.s3_input_json      = request.input_json_path
+
         result = await handle_fill_operation(
-            embedded_pdf_path=request.embedded_pdf_path,
-            input_json_path=request.input_json_path,
+            config=config,
             user_id=request.user_id,
             session_id=request.session_id,
             pdf_doc_id=request.pdf_doc_id
@@ -252,14 +271,41 @@ async def make_embed_file(request: MakeEmbedRequest):
     """
     try:
         logger.info(f"API: Make embed file request for {request.pdf_path}")
-        
-        # Create config
-        config = LocalStorageConfig(local_input_pdf=request.pdf_path)
-        
+
+        # ── Pre-flight checks ────────────────────────────────────────────────
+        missing = []
+        if not os.path.isfile(request.pdf_path):
+            missing.append(f"input_pdf not found: {request.pdf_path}")
+        if not os.path.isfile(request.global_json_path):
+            missing.append(f"global_json not found: {request.global_json_path}")
+        if missing:
+            raise HTTPException(status_code=400, detail={"missing_files": missing})
+
+        # ── Build config (JobContext carries all pipeline paths) ─────────────
+        from src.configs.file_config import get_file_config
+        from src.utils.entrypoint_helpers import create_job_context
+        file_cfg = get_file_config()
+
+        # Ensure cache directory exists
+        source_type = file_cfg.get_source_type()
+        cache_path = file_cfg.get(source_type, 'cache_registry_path', fallback=None)
+        if cache_path and source_type == 'local':
+            Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
+
+        config = create_job_context(file_cfg, request.user_id, request.session_id, request.pdf_doc_id)
+
+        # Override source paths with the explicit paths from the request
+        config.local_input_pdf   = request.pdf_path
+        config.local_global_json = request.global_json_path
+        config.source_input_pdf  = request.pdf_path
+        config.source_global_json = request.global_json_path
+        config.s3_input_pdf      = request.pdf_path
+        config.s3_global_json    = request.global_json_path
+
         # Load mapping config
-        from src.core.config import get_mapping_config
-        mapping_config = get_mapping_config()
-        
+        from src.core.config import get_mapper_config
+        mapping_config = get_mapper_config()
+
         result = await handle_make_embed_file_operation(
             config=config,
             user_id=request.user_id,
@@ -342,13 +388,25 @@ async def run_all(request: RunAllRequest):
     """
     try:
         logger.info(f"API: Run all request for {request.pdf_path}")
-        
+
+        # ── Pre-flight checks ────────────────────────────────────────────────
+        missing = []
+        if not os.path.isfile(request.pdf_path):
+            missing.append(f"input_pdf not found: {request.pdf_path}")
+        if not os.path.isfile(request.global_json_path):
+            missing.append(f"global_json not found: {request.global_json_path}")
+        if not os.path.isfile(request.input_json_path):
+            missing.append(f"input_json not found: {request.input_json_path}")
+        if missing:
+            raise HTTPException(status_code=400, detail={"missing_files": missing})
+
         # Load mapping config
-        from src.core.config import get_mapping_config
-        mapping_config = get_mapping_config()
+        from src.core.config import get_mapper_config
+        mapping_config = get_mapper_config()
         
         result = await handle_run_all_operation(
             input_pdf=request.pdf_path,
+            global_json=request.global_json_path,
             input_json=request.input_json_path,
             mapping_config=mapping_config,
             user_id=request.user_id,

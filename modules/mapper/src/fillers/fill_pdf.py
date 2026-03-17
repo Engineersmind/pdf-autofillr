@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 async def fill_with_java(
     embedded_pdf: str,
     input_json: str,
+    output_path: str = None,
     storage_config: dict = None,
 ):
     """
@@ -19,6 +20,8 @@ async def fill_with_java(
     Args:
         embedded_pdf:   Path to the embedded PDF file (output from embed stage).
         input_json:     Path to the input JSON file with form data.
+        output_path:    Explicit output path for the filled PDF. If not provided,
+                        defaults to <embedded_pdf_base>_filled.pdf.
         storage_config: Storage configuration for output (currently unused).
 
     Returns:
@@ -30,8 +33,11 @@ async def fill_with_java(
     """
     logger.info("[🧩] Starting PDF form filling with Java Itext utility...")
 
-    # Output path: same directory as embedded PDF, with _filled suffix
-    if "/tmp/" in embedded_pdf:
+    # Use explicit output path if provided, otherwise derive from embedded PDF
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        filled_pdf = output_path
+    elif "/tmp/" in embedded_pdf:
         base_name = os.path.splitext(os.path.basename(embedded_pdf))[0]
         filled_pdf = f"/tmp/{base_name}_filled.pdf"
     else:
