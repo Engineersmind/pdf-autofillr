@@ -204,11 +204,8 @@ Write-Host "✅ .env file configured" -ForegroundColor Green
 # ============================================================================
 Write-Host "`n📦 Installing Python dependencies..." -ForegroundColor Yellow
 
-Write-Host "   Installing core requirements..." -ForegroundColor Gray
+Write-Host "   Installing requirements..." -ForegroundColor Gray
 pip install -r requirements.txt -q
-
-Write-Host "   Installing API server requirements..." -ForegroundColor Gray
-pip install -r requirements-api.txt -q
 
 Write-Host "✅ Dependencies installed" -ForegroundColor Green
 
@@ -216,7 +213,7 @@ Write-Host "✅ Dependencies installed" -ForegroundColor Green
 # 7. Install SDK (Optional)
 # ============================================================================
 Write-Host "`n🔧 Installing Python SDK..." -ForegroundColor Yellow
-Set-Location "../../sdks/python"
+Set-Location "../../modules/mapper/sdk"
 
 # Create SDK .env
 $sdkEnvContent = @"
@@ -279,8 +276,8 @@ if ($llmChoice -eq "2" -and [string]::IsNullOrWhiteSpace($openaiKey)) {
 }
 
 Write-Host "`n📖 Documentation:" -ForegroundColor Cyan
-Write-Host "   - Setup Guide: modules/mapper/SETUP_GUIDE.md" -ForegroundColor White
-Write-Host "   - Quick Ref: QUICK_REFERENCE.md" -ForegroundColor White
-Write-Host "   - Examples: examples/QUICK_START.md" -ForegroundColor White
+Write-Host "   - Setup Guide: modules/mapper/docs/setup_guide.md" -ForegroundColor White
+Write-Host "   - Module README: modules/mapper/README.md" -ForegroundColor White
+Write-Host "   - Examples: examples/" -ForegroundColor White
 
 Write-Host "`n🎉 Happy coding!" -ForegroundColor Green

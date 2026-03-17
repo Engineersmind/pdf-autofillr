@@ -1,80 +1,46 @@
-# ============================================
-# PDF Autofiller Mapper - Dockerfile
-# ============================================
-# Multi-stage build for optimized image size
-# 
-# Build: docker build -t pdf-autofiller-mapper -f deployment/docker/Dockerfile .
-# Run:   docker run -p 8000:8000 -v $(pwd)/data:/app/data pdf-autofiller-mapper
+# Mapper Module — Universal Dockerfile
+# Supports all cloud platforms: AWS, Azure, GCP, Local
+# Configure at runtime via SOURCE_TYPE environment variable
 
-# Stage 1: Base image with Python and system dependencies
-FROM python:3.11-slim as base
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+FROM python:3.11-slim AS base
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
-    libffi-dev \
-    libssl-dev \
     curl \
-    default-jre \
+    default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# Stage 2: Build dependencies
-FROM base as builder
-
-WORKDIR /build
-
-# Copy requirements first for better caching
-COPY modules/mapper/requirements.txt .
-
-# Install Python dependencies
-RUN pip install --user --no-cache-dir -r requirements.txt
-
-# Stage 3: Runtime image
-FROM base as runtime
-
-# Create app directory
 WORKDIR /app
 
-# Create directories for data
-RUN mkdir -p /app/data/input \
-             /app/data/output \
-             /app/data/cache \
-             /tmp/processing
+# Create non-root user for security
+RUN useradd -m -u 1000 mapper && chown -R mapper:mapper /app
 
-# Copy Python dependencies from builder
-COPY --from=builder /root/.local /root/.local
+# ── Dependencies layer (cached separately for fast rebuilds) ─────────────────
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY modules/mapper/ /app/
+# ── Application layer ─────────────────────────────────────────────────────────
+USER mapper
 
-# Ensure Python can find packages
-ENV PATH=/root/.local/bin:$PATH \
-    PYTHONPATH=/app:$PYTHONPATH
+COPY --chown=mapper:mapper src/           ./src/
+COPY --chown=mapper:mapper adapters/      ./adapters/
+COPY --chown=mapper:mapper api_server.py  .
+COPY --chown=mapper:mapper config.ini.example ./config.ini
 
-# Expose HTTP port
+ENV PYTHONPATH=/app/src:/app:/app/adapters
+ENV PATH=/home/mapper/.local/bin:$PATH
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
 EXPOSE 8000
 
-# Set default environment variables
-ENV HTTP_HOST=0.0.0.0 \
-    HTTP_PORT=8000 \
-    STORAGE_TYPE=local \
-    DATA_DIR=/app/data \
-    PROCESSING_DIR=/tmp/processing
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command: Run HTTP server
-CMD ["python", "-m", "entrypoints.http_server"]
+ENV SOURCE_TYPE=local \
+    LOG_LEVEL=INFO \
+    PORT=8000 \
+    PYTHONUNBUFFERED=1
 
-# Alternative commands:
-# CLI mode:    docker run ... pdf-autofiller-mapper python -m test_local_entrypoint
-# HTTP mode:   docker run ... pdf-autofiller-mapper python -m entrypoints.http_server
+CMD ["python", "-m", "uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]

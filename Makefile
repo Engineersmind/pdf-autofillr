@@ -52,11 +52,11 @@ setup:
 
 install:
 	@echo "📦 Installing dependencies..."
-	@cd modules/mapper && pip install -r requirements.txt -r requirements-api.txt
+	@cd modules/mapper && pip install -r requirements.txt
 
 install-sdk:
-	@echo "🔧 Installing Python SDK..."
-	@cd sdks/python && pip install -e .
+	@echo "🔧 Installing mapper Python SDK..."
+	@cd modules/mapper/sdk && pip install -e .
 
 check-deps:
 	@echo "🔍 Checking dependencies..."

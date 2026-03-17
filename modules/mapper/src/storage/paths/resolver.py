@@ -29,6 +29,10 @@ class PathResolver:
     def remote_input_json(self, uid, sid, pid) -> str:
         return self._cfg.get_source_input_path('json', uid, sid, pid)
 
+    def remote_global_json(self, uid, sid, pid) -> str:
+        """Keys-only schema used by the map phase (make_embed_file pipeline)."""
+        return self._cfg.get_source_input_path('global_json', uid, sid, pid)
+
     # ── Remote output paths (where results are persisted) ───────────────
 
     def remote_extracted(self, uid, sid, pid) -> str:

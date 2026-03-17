@@ -1,139 +1,60 @@
-# PDF Autofiller SDKs
+# SDKs
 
-Client libraries for PDF Autofiller APIs.
+OpenAPI specifications and non-Python client SDKs.
 
-## 📦 Available SDKs
+---
 
-### ✅ Python SDK (Ready for Mapper)
-**Status**: Complete for Mapper module  
-**Package**: `pdf-autofiller-sdk`  
-**Location**: `python/`
+## OpenAPI specs
+
+Machine-readable API contracts for each module. Used to generate clients in any language.
+
+| File | Module | Status |
+|------|--------|--------|
+| `openapi-mapper.yaml` | Mapper | Complete |
+| `openapi-chatbot.yaml` | Chatbot | Skeleton |
+| `openapi-rag.yaml` | RAG | Skeleton |
+| `openapi-upload.yaml` | PDF Upload | Skeleton |
+
+---
+
+## Python SDK
+
+The Python SDK lives **inside the mapper module**, not here.
 
 ```bash
-cd python
-pip install -e .
+pip install pdf-autofiller-mapper           # HTTP client
+pip install pdf-autofiller-mapper[embedded] # + in-process pipeline
 ```
 
-```python
-from pdf_autofiller import PDFMapperClient
-
-client = PDFMapperClient(api_key="your-key")
-result = client.mapper.extract(pdf_path="s3://bucket/file.pdf")
-```
-
-**Features**:
-- ✅ Complete mapper operations (extract, map, embed, fill)
-- ✅ Type hints
-- ✅ Context manager support
-- ✅ Examples included
+Source: [`modules/mapper/sdk/`](../modules/mapper/sdk/)
 
 ---
 
-### 🔶 TypeScript/JavaScript SDK (Skeleton)
-**Status**: Skeleton structure  
-**Package**: `@engineersmind/pdf-autofiller-sdk`  
-**Location**: `typescript/`
+## TypeScript SDK
 
-**TODO**: Generate from OpenAPI spec when ready
+Skeleton in `typescript/`. Generate from the OpenAPI spec when ready:
 
----
-
-### 🔶 Go SDK (Skeleton)
-**Status**: Placeholder  
-**Location**: `go/`
-
-**TODO**: Generate from OpenAPI spec
-
----
-
-### 🔶 Java SDK (Skeleton)
-**Status**: Placeholder  
-**Location**: `java/`
-
-**TODO**: Generate from OpenAPI spec
-
----
-
-## 🔧 SDK Generation
-
-### Prerequisites
-
-1. **OpenAPI Specifications** (Available)
-   - ✅ `openapi-mapper.yaml` - Complete for Mapper module
-   - 🔶 `openapi-rag.yaml` - Skeleton (TODO when RAG module is ready)
-   - 🔶 `openapi-orchestrator.yaml` - Skeleton (TODO)
-   - 🔶 `openapi-chatbot.yaml` - Skeleton (TODO)
-
-2. **SDK Generator Tools**
-   - [Stainless](https://www.stainlessapi.com/) - Modern, recommended
-   - [OpenAPI Generator](https://openapi-generator.tech/) - Mature, many languages
-   - [Speakeasy](https://www.speakeasyapi.dev/) - Developer-friendly
-
-### Quick Generation Commands
-
-#### TypeScript
 ```bash
+npm install @openapitools/openapi-generator-cli -g
 openapi-generator generate \
   -i openapi-mapper.yaml \
   -g typescript-axios \
-  -o typescript/
-```
-
-#### Go
-```bash
-openapi-generator generate \
-  -i openapi-mapper.yaml \
-  -g go \
-  -o go/
-```
-
-#### Java
-```bash
-openapi-generator generate \
-  -i openapi-mapper.yaml \
-  -g java \
-  -o java/
+  -o typescript/generated \
+  --additional-properties=npmName=@engineersmind/pdf-autofiller-sdk,npmVersion=1.0.0
 ```
 
 ---
 
-## 🚀 Quick Start (Python SDK)
+## Generating other language clients
 
-### Install
+Use `generate.sh` or run `openapi-generator` directly against any spec:
+
 ```bash
-cd sdks/python
-pip install -e .
+# Go
+openapi-generator generate -i openapi-mapper.yaml -g go -o go/
+
+# Java
+openapi-generator generate -i openapi-mapper.yaml -g java -o java/
 ```
 
-### Use
-```python
-from pdf_autofiller import PDFMapperClient
-
-client = PDFMapperClient(
-    api_key="your-api-key",
-    base_url="http://localhost:8000"
-)
-
-# Extract fields
-result = client.mapper.extract(pdf_path="s3://bucket/form.pdf")
-
-# Map fields
-result = client.mapper.map(
-    pdf_path="s3://bucket/form.pdf",
-    mapper_type="ensemble"
-)
-
-# Fill PDF
-result = client.mapper.fill(
-    pdf_path="s3://bucket/form.pdf",
-    data={"first_name": "John", "last_name": "Doe"}
-)
-```
-
-See `python/examples/` for more examples.
-
----
-
-## 📄 License
-
-MIT License
+Install OpenAPI Generator: `brew install openapi-generator` or `npm install @openapitools/openapi-generator-cli -g`

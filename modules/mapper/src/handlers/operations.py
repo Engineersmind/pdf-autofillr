@@ -50,7 +50,7 @@ except Exception:
 
 # Import notification system (optional)
 try:
-    from adapter_src.notifier import (
+    from adapters.notifier import (
         PipelineNotifier,
         PipelineStage,
         StageStatus,
@@ -392,45 +392,47 @@ async def handle_map_operation(
         
         # Get input files (already downloaded by entrypoint)
         local_extracted = input_handler.get_input('extracted_json')
-        local_input = input_handler.get_input('input_json')
-        
-        if not local_extracted or not local_input:
+        # global_json = keys-only schema (e.g. {"firstName": "", "lastName": ""})
+        # used to tell the semantic mapper which fields to expect
+        local_global_json = input_handler.get_input('global_json')
+
+        if not local_extracted or not local_global_json:
             raise FileNotFoundError("Required input files not available")
-        
+
         logger.info(f"Extracted JSON: {local_extracted}")
-        logger.info(f"Input JSON: {local_input}")
-        
+        logger.info(f"Global JSON (schema/keys): {local_global_json}")
+
         # Initialize mapper - use llm_model from settings (LiteLLM format)
         mapper = SemanticMapper(
             llm_provider=mapping_config.get("llm_model", settings.llm_model),
             confidence_threshold=mapping_config.get("confidence_threshold", 0.7),
             chunking_strategy=mapping_config.get("chunking_strategy", "page")
         )
-        
+
         # Use configured output paths
         local_mapping = config.local_mapped_json
         local_radio = config.local_radio_json
-        
+
         # Debug: Check if paths are set
         if not local_mapping or not local_radio:
             logger.error(f"❌ Config paths not set!")
             logger.error(f"   local_mapped_json: {local_mapping}")
             logger.error(f"   local_radio_json: {local_radio}")
             raise ValueError(f"Config missing paths: local_mapped_json={local_mapping}, local_radio_json={local_radio}")
-        
+
         logger.info(f"Output paths configured:")
         logger.info(f"   Mapping: {local_mapping}")
         logger.info(f"   Radio groups: {local_radio}")
-        
+
         storage_config = {
             "output_path": local_mapping,
             "radio_groups": local_radio
         }
-        
+
         # Perform mapping
         mapping_result = await mapper.process_and_save(
             extracted_path=local_extracted,
-            input_json_path=local_input,
+            input_json_path=local_global_json,
             original_pdf_path="",
             storage_config=storage_config,
             investor_type=investor_type
@@ -504,7 +506,7 @@ async def handle_map_operation(
                 execution_time=duration,
                 input_files={
                     "extracted_json": local_extracted,
-                    "input_keys": local_input
+                    "global_json": local_global_json,
                 },
                 output_files={
                     "mapping": local_mapping,
@@ -739,30 +741,28 @@ async def handle_fill_operation(
         
         # Get input files (already downloaded by entrypoint)
         local_embedded = input_handler.get_input('embedded_pdf')
-        local_input = input_handler.get_input('input_json')
-        
-        if not local_embedded or not local_input:
+        # input_json = per-user data (e.g. {"firstName": "Jane", "lastName": "Doe"})
+        # a subset of the global schema keys, with real values
+        local_input_json = input_handler.get_input('input_json')
+
+        if not local_embedded or not local_input_json:
             raise FileNotFoundError("Required input files not available")
-        
+
         logger.info(f"Embedded PDF: {local_embedded}")
-        logger.info(f"Input JSON: {local_input}")
+        logger.info(f"Input JSON (user data): {local_input_json}")
         
         # Use configured output path
         local_filled = config.local_filled_pdf
-        storage_config = {
-            "type": "local",
-            "path": local_filled
-        }
-        
-        # Run Java filler
+
+        # Run Java filler — write directly to the processing dir path
         filled_pdf = await fill_with_java(
             embedded_pdf=local_embedded,
-            input_json=local_input,
-            storage_config=storage_config
+            input_json=local_input_json,
+            output_path=local_filled,
         )
-        
-        # Save output immediately to source storage
-        saved_path = output_handler.save_output(local_filled, 'filled_pdf')
+
+        # Upload from processing dir to destination (output_base_path for local)
+        saved_path = output_handler.save_output(filled_pdf, 'filled_pdf')
         if saved_path:
             logger.info(f"✅ Saved filled PDF to: {saved_path}")
         
@@ -789,7 +789,7 @@ async def handle_fill_operation(
                 execution_time=duration,
                 input_files={
                     "embedded_pdf": local_embedded,
-                    "input_json": local_input
+                    "input_json": local_input_json,
                 },
                 output_files={"filled_pdf": local_filled},
                 user_input_details=user_input_details,
@@ -801,7 +801,7 @@ async def handle_fill_operation(
         
         result = {
             "operation": "fill",
-            "output_file": local_filled,
+            "output_file": saved_path or local_filled,
             "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration
@@ -836,6 +836,7 @@ async def handle_fill_operation(
 
 async def handle_run_all_operation(
     input_pdf: str,
+    global_json: str,
     input_json: str,
     mapping_config: dict,
     user_id: Optional[int] = None,
@@ -847,28 +848,32 @@ async def handle_run_all_operation(
     """
     Run all operation - executes complete pipeline (extract → map → embed → fill).
     Works with ANY storage backend.
-    
+
     Args:
-        input_pdf: Input PDF path (s3://, gs://, azure://, or local)
-        input_json: Input JSON with user data
+        input_pdf:    Input PDF path (s3://, gs://, azure://, or local)
+        global_json:  Keys-only schema JSON — used by extract/map/embed stages
+                      (all values empty, e.g. {"firstName": "", "lastName": ""})
+        input_json:   Per-user data JSON — used by fill stage only
+                      (actual values, e.g. {"firstName": "Jane", "lastName": "Doe"})
         mapping_config: Mapping configuration
         user_id: Optional user ID
         session_id: Optional session ID
         notifier: Optional notification system
         pdf_doc_id: Optional PDF document ID
         input_json_doc_id: Optional input JSON document ID
-        
+
     Returns:
         Complete pipeline result with all output files
     """
     start_time = time.time()
     storage_type = get_storage_type(input_pdf)
-    
+
     logger.info("=" * 80)
     logger.info("RUN ALL OPERATION - COMPLETE PIPELINE")
     logger.info("=" * 80)
-    logger.info(f"Input PDF: {input_pdf}")
-    logger.info(f"Input JSON: {input_json}")
+    logger.info(f"Input PDF:   {input_pdf}")
+    logger.info(f"Global JSON: {global_json}")
+    logger.info(f"Input JSON:  {input_json}")
     logger.info(f"Storage type: {storage_type}")
     
     pipeline_results = {}
@@ -883,7 +888,7 @@ async def handle_run_all_operation(
             notifier=notifier,
             pdf_doc_id=pdf_doc_id,
             input_json_doc_id=input_json_doc_id,
-            input_json_path=input_json,
+            input_json_path=global_json,   # global_json used for pre-map estimation
             mapping_config=mapping_config
         )
         pipeline_results["extract"] = extract_result

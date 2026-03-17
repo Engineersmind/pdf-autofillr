@@ -7,6 +7,7 @@ import pytest
 import asyncio
 import subprocess
 from unittest.mock import MagicMock, patch
+import src.handlers.operations  # ensure submodule is in sys.modules for @patch
 
 
 # ---------------------------------------------------------------------------
@@ -20,15 +21,15 @@ class TestRunEmbedJavaStage:
     def _exists(self, truthy_paths):
         return lambda p: p in truthy_paths
 
+    @patch("src.embedders.embed_keys.find_jar", return_value="rebuilder.jar")
     @patch("src.embedders.embed_keys.subprocess.run")
     @patch("src.embedders.embed_keys.os.path.exists")
-    def test_returns_output_path_on_success(self, mock_exists, mock_sub, tmp_path):
+    def test_returns_output_path_on_success(self, mock_exists, mock_sub, _find_jar, tmp_path):
         import os
         pdf = str(tmp_path / "form.pdf")
         ext = str(tmp_path / "extracted.json")
         mapping = str(tmp_path / "mapping.json")
         radio = str(tmp_path / "radio.json")
-        jar = "rebuilder.jar"
 
         # Mirror the source code's output path logic so the test works on
         # both macOS (tmp_path=/private/var/...) and Linux CI (tmp_path=/tmp/...)
@@ -38,58 +39,56 @@ class TestRunEmbedJavaStage:
         else:
             expected_out = f"{os.path.splitext(pdf)[0]}_embedded.pdf"
 
-        mock_exists.side_effect = lambda p: p in {jar, pdf, ext, mapping, radio, expected_out}
+        mock_exists.side_effect = lambda p: p in {pdf, ext, mapping, radio, expected_out}
         mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         from src.embedders.embed_keys import run_embed_java_stage
         result = self._run(run_embed_java_stage(pdf, ext, mapping, radio))
         assert result.endswith("_embedded.pdf")
 
-    @patch("src.embedders.embed_keys.subprocess.run")
-    @patch("src.embedders.embed_keys.os.path.exists")
-    def test_raises_when_jar_not_found(self, mock_exists, mock_sub):
-        mock_exists.return_value = False   # nothing exists
-
+    @patch("src.embedders.embed_keys.find_jar", side_effect=FileNotFoundError("rebuilder.jar not found"))
+    def test_raises_when_jar_not_found(self, _find_jar):
         from src.embedders.embed_keys import run_embed_java_stage
         with pytest.raises(FileNotFoundError, match="rebuilder"):
             self._run(run_embed_java_stage("a.pdf", "b.json", "c.json", "d.json"))
 
+    @patch("src.embedders.embed_keys.find_jar", return_value="rebuilder.jar")
     @patch("src.embedders.embed_keys.subprocess.run")
     @patch("src.embedders.embed_keys.os.path.exists")
-    def test_raises_when_input_file_missing(self, mock_exists, mock_sub):
-        # jar exists but input PDF does not
-        mock_exists.side_effect = lambda p: p == "rebuilder.jar"
+    def test_raises_when_input_file_missing(self, mock_exists, mock_sub, _find_jar):
+        # JAR found via find_jar mock; input PDF does not exist
+        mock_exists.return_value = False
 
         from src.embedders.embed_keys import run_embed_java_stage
         with pytest.raises(FileNotFoundError, match="original_pdf"):
             self._run(run_embed_java_stage("missing.pdf", "b.json", "c.json", "d.json"))
 
+    @patch("src.embedders.embed_keys.find_jar", return_value="rebuilder.jar")
     @patch("src.embedders.embed_keys.subprocess.run")
     @patch("src.embedders.embed_keys.os.path.exists")
-    def test_raises_on_java_process_failure(self, mock_exists, mock_sub, tmp_path):
+    def test_raises_on_java_process_failure(self, mock_exists, mock_sub, _find_jar, tmp_path):
         pdf = str(tmp_path / "form.pdf"); open(pdf, "wb").close()
         ext = str(tmp_path / "ext.json"); open(ext, "w").write("{}")
         mapping = str(tmp_path / "map.json"); open(mapping, "w").write("{}")
         radio = str(tmp_path / "radio.json"); open(radio, "w").write("{}")
-        jar = "rebuilder.jar"
 
-        mock_exists.side_effect = lambda p: p in {jar, pdf, ext, mapping, radio}
+        mock_exists.side_effect = lambda p: p in {pdf, ext, mapping, radio}
         mock_sub.side_effect = subprocess.CalledProcessError(1, "java", stderr="OutOfMemoryError")
 
         from src.embedders.embed_keys import run_embed_java_stage
         with pytest.raises(RuntimeError, match="OutOfMemoryError"):
             self._run(run_embed_java_stage(pdf, ext, mapping, radio))
 
+    @patch("src.embedders.embed_keys.find_jar", return_value="rebuilder.jar")
     @patch("src.embedders.embed_keys.subprocess.run")
     @patch("src.embedders.embed_keys.os.path.exists")
-    def test_raises_on_java_timeout(self, mock_exists, mock_sub, tmp_path):
+    def test_raises_on_java_timeout(self, mock_exists, mock_sub, _find_jar, tmp_path):
         pdf = str(tmp_path / "form.pdf"); open(pdf, "wb").close()
         ext = str(tmp_path / "ext.json"); open(ext, "w").write("{}")
         mapping = str(tmp_path / "map.json"); open(mapping, "w").write("{}")
         radio = str(tmp_path / "radio.json"); open(radio, "w").write("{}")
-        jar = "rebuilder.jar"
 
-        mock_exists.side_effect = lambda p: p in {jar, pdf, ext, mapping, radio}
+        mock_exists.side_effect = lambda p: p in {pdf, ext, mapping, radio}
         mock_sub.side_effect = subprocess.TimeoutExpired("java", 300)
 
         from src.embedders.embed_keys import run_embed_java_stage

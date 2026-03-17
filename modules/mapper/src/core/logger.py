@@ -1,6 +1,10 @@
 import logging
 import sys
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter as _JsonFormatter
+
+# Expose as jsonlogger.JsonFormatter for call-site compatibility
+class jsonlogger:
+    JsonFormatter = _JsonFormatter
 
 # Create a default logger instance for modules to import
 logger = logging.getLogger(__name__)

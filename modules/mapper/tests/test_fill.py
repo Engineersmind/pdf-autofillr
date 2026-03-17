@@ -7,6 +7,7 @@ import pytest
 import asyncio
 import subprocess
 from unittest.mock import MagicMock, patch
+import src.handlers.operations  # ensure submodule is in sys.modules for @patch
 
 
 # ---------------------------------------------------------------------------
@@ -17,13 +18,13 @@ class TestFillWithJava:
     def _run(self, coro):
         return asyncio.run(coro)
 
+    @patch("src.fillers.fill_pdf.find_jar", return_value="filler.jar")
     @patch("src.fillers.fill_pdf.subprocess.run")
     @patch("src.fillers.fill_pdf.os.path.exists")
-    def test_returns_output_path_on_success(self, mock_exists, mock_sub, tmp_path):
+    def test_returns_output_path_on_success(self, mock_exists, mock_sub, _find_jar, tmp_path):
         import os
         embedded = str(tmp_path / "embedded.pdf")
         input_json = str(tmp_path / "data.json")
-        jar = "filler.jar"
 
         # Mirror the source code's output path logic so the test works on
         # both macOS (tmp_path=/private/var/...) and Linux CI (tmp_path=/tmp/...)
@@ -33,44 +34,41 @@ class TestFillWithJava:
         else:
             expected_out = f"{os.path.splitext(embedded)[0]}_filled.pdf"
 
-        mock_exists.side_effect = lambda p: p in {jar, embedded, input_json, expected_out}
+        mock_exists.side_effect = lambda p: p in {embedded, input_json, expected_out}
         mock_sub.return_value = MagicMock(returncode=0)
 
         from src.fillers.fill_pdf import fill_with_java
         result = self._run(fill_with_java(embedded, input_json))
         assert result.endswith("_filled.pdf")
 
-    @patch("src.fillers.fill_pdf.subprocess.run")
-    @patch("src.fillers.fill_pdf.os.path.exists")
-    def test_raises_when_jar_not_found(self, mock_exists, mock_sub):
-        mock_exists.return_value = False
-
+    @patch("src.fillers.fill_pdf.find_jar", side_effect=FileNotFoundError("filler.jar not found"))
+    def test_raises_when_jar_not_found(self, _find_jar):
         from src.fillers.fill_pdf import fill_with_java
         with pytest.raises(FileNotFoundError, match="filler"):
             self._run(fill_with_java("emb.pdf", "data.json"))
 
+    @patch("src.fillers.fill_pdf.find_jar", return_value="filler.jar")
     @patch("src.fillers.fill_pdf.subprocess.run")
     @patch("src.fillers.fill_pdf.os.path.exists")
-    def test_raises_on_java_failure(self, mock_exists, mock_sub, tmp_path):
+    def test_raises_on_java_failure(self, mock_exists, mock_sub, _find_jar, tmp_path):
         embedded = str(tmp_path / "emb.pdf"); open(embedded, "wb").close()
         input_json = str(tmp_path / "data.json"); open(input_json, "w").write("{}")
-        jar = "filler.jar"
 
-        mock_exists.side_effect = lambda p: p in {jar, embedded, input_json}
+        mock_exists.side_effect = lambda p: p in {embedded, input_json}
         mock_sub.side_effect = subprocess.CalledProcessError(1, "java", stderr="NullPointer")
 
         from src.fillers.fill_pdf import fill_with_java
         with pytest.raises(RuntimeError, match="NullPointer"):
             self._run(fill_with_java(embedded, input_json))
 
+    @patch("src.fillers.fill_pdf.find_jar", return_value="filler.jar")
     @patch("src.fillers.fill_pdf.subprocess.run")
     @patch("src.fillers.fill_pdf.os.path.exists")
-    def test_raises_on_timeout(self, mock_exists, mock_sub, tmp_path):
+    def test_raises_on_timeout(self, mock_exists, mock_sub, _find_jar, tmp_path):
         embedded = str(tmp_path / "emb.pdf"); open(embedded, "wb").close()
         input_json = str(tmp_path / "data.json"); open(input_json, "w").write("{}")
-        jar = "filler.jar"
 
-        mock_exists.side_effect = lambda p: p in {jar, embedded, input_json}
+        mock_exists.side_effect = lambda p: p in {embedded, input_json}
         mock_sub.side_effect = subprocess.TimeoutExpired("java", 300)
 
         from src.fillers.fill_pdf import fill_with_java

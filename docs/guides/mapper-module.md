@@ -1,316 +1,107 @@
-# PDF Mapper Module
+# Mapper Module
 
 The core PDF field extraction, mapping, embedding, and filling engine.
 
-## 🚀 Quick Start
+For the full module reference see [`modules/mapper/README.md`](../../modules/mapper/README.md).
 
-### 1. Configure the Module
+---
 
-**IMPORTANT: You must configure before running!**
+## What it does
 
-```bash
-# Copy configuration templates
-cp .env.example .env
-cp config.ini.example config.ini
+| Step | Operation | Description |
+|------|-----------|-------------|
+| 1 | **extract** | Detect all form fields in a PDF |
+| 2 | **map** | LLM maps each field to a schema key |
+| 3 | **embed** | Bake the mapping metadata into the PDF |
+| 4 | **fill** | Fill the embedded PDF with user data |
 
-# Edit .env - Add your API keys
-nano .env
+Steps 1–3 run once per PDF template (`make_embed_file`).
+Step 4 runs once per user (`fill`).
 
-# Edit config.ini - Set your storage paths
-nano config.ini
-```
+---
 
-See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for detailed configuration instructions.
-
-### 2. Install Dependencies
+## Quick start
 
 ```bash
-# Core dependencies
+cd modules/mapper
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-
-# For API server
-pip install -r requirements-api.txt
+cp config.ini.example config.ini   # set llm_model + storage paths
+python api_server.py               # → http://localhost:8000
 ```
 
-### 3. Run API Server
-
-```bash
-python api_server.py
-```
-
-Server will be available at: **http://localhost:8000**
-
-Interactive docs at: **http://localhost:8000/docs**
+Full setup walkthrough: [`modules/mapper/docs/setup_guide.md`](../../modules/mapper/docs/setup_guide.md)
 
 ---
 
-## 📁 File Structure
+## Configuration
 
-```
-modules/mapper/
-├── .env.example            ← Copy to .env (add your API keys)
-├── config.ini.example      ← Copy to config.ini (configure paths)
-├── config.ini              ← Active configuration (DO NOT COMMIT)
-├── .env                    ← Active environment (DO NOT COMMIT)
-├── SETUP_GUIDE.md          ← Detailed setup instructions
-├── API_SERVER.md           ← API server documentation
-├── api_server.py           ← FastAPI server (run this!)
-├── requirements.txt        ← Python dependencies
-├── requirements-api.txt    ← API server dependencies
-├── setup.py                ← Package setup
-└── src/                    ← Core source code
-    ├── orchestrator.py     ← Main orchestration logic
-    ├── extractors/         ← PDF field extraction
-    ├── mappers/            ← Field mapping (LLM)
-    ├── embedders/          ← Metadata embedding
-    ├── fillers/            ← PDF filling
-    ├── chunkers/           ← Document chunking
-    ├── groupers/           ← Field grouping
-    ├── headers/            ← Header detection
-    ├── validators/         ← Field validation
-    └── core/               ← Configuration & logging
-```
-
----
-
-## 🎯 What This Module Does
-
-1. **Extract** - Extracts form fields from PDF files
-2. **Map** - Maps extracted fields to your data schema using LLM
-3. **Embed** - Embeds mapping metadata into PDF for reuse
-4. **Fill** - Fills embedded PDFs with actual data
-
-### Operations
-
-| Operation | Input | Output | Use Case |
-|-----------|-------|--------|----------|
-| **extract** | PDF file | Field list JSON | Discover what fields exist |
-| **map** | Extracted fields | Mapping JSON | Create field-to-schema mapping |
-| **embed** | PDF + mapping | Embedded PDF | Prepare PDF for filling |
-| **fill** | Embedded PDF + data | Filled PDF | Generate completed forms |
-| **make-embed** | PDF file | Embedded PDF | One-step: extract+map+embed |
-| **run-all** | PDF + data | Filled PDF | Complete pipeline |
-
----
-
-## 🔧 Configuration Overview
-
-### Required Configuration
-
-**In `.env`:**
-```bash
-# Choose one
-CLOUD_PROVIDER=local          # For local development
-# CLOUD_PROVIDER=aws          # For AWS deployment
-# CLOUD_PROVIDER=azure        # For Azure deployment
-
-# Add your LLM API key
-OPENAI_API_KEY=sk-your-key-here
-```
-
-**In `config.ini`:**
 ```ini
+# modules/mapper/config.ini
 [general]
-source_type = local
-
-[mapping]
-llm_model = gpt-4o
-use_second_mapper = false
+llm_model = gpt-4o-mini        # or anthropic/claude-3-5-haiku, ollama/llama3.1
+source_type = local            # local | aws | azure | gcp
 
 [local]
-cache_registry_path = /path/to/cache/hash_registry.json
-output_base_path = /path/to/output
+workspace = /path/to/data
 ```
 
-See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for complete details.
-
----
-
-## 🌐 Running as API Server
+Set your LLM key as an environment variable:
 
 ```bash
-# Start server
-python api_server.py
-
-# In another terminal, test it
-curl http://localhost:8000/health
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...   # if using Anthropic
 ```
-
-**Available endpoints:**
-- `GET /` - API info
-- `GET /health` - Health check
-- `POST /mapper/extract` - Extract fields
-- `POST /mapper/map` - Map fields
-- `POST /mapper/embed` - Embed metadata
-- `POST /mapper/fill` - Fill PDF
-- `POST /mapper/make-embed` - Extract+Map+Embed
-- `POST /mapper/fill-pdf` - Fill embedded PDF
-- `POST /mapper/check-embed-file` - Check if PDF has embeddings
-- `POST /mapper/run-all` - Complete pipeline
-
-See **[API_SERVER.md](API_SERVER.md)** for API documentation.
 
 ---
 
-## 📦 Using as Python Module
+## API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/extract` | Extract form fields |
+| POST | `/map` | LLM semantic mapping |
+| POST | `/embed` | Embed metadata into PDF |
+| POST | `/fill` | Fill embedded PDF |
+| POST | `/make-embed-file` | extract + map + embed |
+| POST | `/fill-pdf` | Alias for fill |
+| POST | `/run-all` | Full pipeline |
+| POST | `/check-embed-file` | Check if PDF has embedded metadata |
+
+Full API reference: [`modules/mapper/docs/api_server.md`](../../modules/mapper/docs/api_server.md)
+
+---
+
+## Python SDK
+
+```bash
+pip install pdf-autofiller-mapper[embedded]   # in-process
+pip install pdf-autofiller-mapper             # HTTP client only
+```
 
 ```python
-from src.orchestrator import run_extraction, run_mapping, run_embedding, run_filling
-
-# Extract fields
-extracted = run_extraction(pdf_path, user_id, pdf_doc_id)
-
-# Map fields
-mapped = run_mapping(user_id, pdf_doc_id)
-
-# Embed metadata
-embedded = run_embedding(pdf_path, user_id, pdf_doc_id)
-
-# Fill PDF
-filled = run_filling(embedded_pdf_path, user_id, pdf_doc_id, input_data)
+from pdf_autofiller_mapper import PDFMapper, PDFMapperClient
 ```
+
+SDK guide: [`modules/mapper/sdk/README.md`](../../modules/mapper/sdk/README.md)
 
 ---
 
-## 🧪 Testing
+## Tests
 
 ```bash
-# Run all tests
-pytest
-
-# Run specific test
-pytest tests/test_extract.py
-
-# With coverage
-pytest --cov=src
+cd modules/mapper
+venv/bin/python -m pytest tests/ --override-ini="addopts=" -q
+# 169 passed
 ```
 
 ---
 
-## 🐳 Deployment Options
+## Deployment
 
-### Local Development
-```bash
-python api_server.py
-```
-
-### Docker
-```bash
-docker build -t pdf-mapper .
-docker run -p 8000:8000 --env-file .env pdf-mapper
-```
-
-### AWS Lambda
-See `deployment/aws/` for Lambda deployment scripts.
-
-### Azure Functions
-See `deployment/azure/` for Azure deployment scripts.
-
-### GCP Cloud Functions
-See `deployment/gcp/` for GCP deployment scripts.
-
----
-
-## 🔗 Integration with SDK
-
-Once the API server is running, install the SDK:
-
-```bash
-cd ../../sdks/python
-pip install -e .
-
-# Use CLI
-pdf-autofiller --api-url http://localhost:8000 extract input.pdf
-
-# Or Python
-from pdf_autofiller import PDFMapperClient
-client = PDFMapperClient("http://localhost:8000")
-result = client.extract("input.pdf", 1, 100)
-```
-
----
-
-## 📚 Documentation
-
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Configuration setup
-- **[API_SERVER.md](API_SERVER.md)** - API documentation
-- **[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)** - Installation details
-- **[../../docs/](../../docs/)** - Complete project documentation
-
----
-
-## 🔍 Troubleshooting
-
-### Module 'boto3' not found
-```ini
-# In config.ini, set:
-[general]
-rag_api_url = 
-# Leave empty to disable RAG
-```
-
-### API key errors
-```bash
-# Make sure .env has your key:
-OPENAI_API_KEY=sk-your-actual-key-here
-```
-
-### Import errors
-```bash
-# Install dependencies:
-pip install -r requirements.txt
-```
-
-### Server won't start
-```bash
-# Install API dependencies:
-pip install -r requirements-api.txt
-```
-
----
-
-## ⚙️ Environment Variables
-
-Key environment variables (set in `.env`):
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `CLOUD_PROVIDER` | ✅ | `local`, `aws`, `azure`, or `gcp` |
-| `OPENAI_API_KEY` | ✅ | OpenAI API key |
-| `ANTHROPIC_API_KEY` | 🔷 | Claude/Anthropic key (if using Claude) |
-| `AWS_ACCESS_KEY_ID` | 🔷 | AWS credentials (if using AWS) |
-| `AWS_SECRET_ACCESS_KEY` | 🔷 | AWS credentials (if using AWS) |
-| `AZURE_STORAGE_CONNECTION_STRING` | 🔷 | Azure credentials (if using Azure) |
-
----
-
-## 📝 License
-
-See [LICENSE](../../LICENSE) file in project root.
-
----
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for guidelines.
-
----
-
-## Quick Command Reference
-
-```bash
-# Setup
-cp .env.example .env
-cp config.ini.example config.ini
-pip install -r requirements.txt requirements-api.txt
-
-# Run server
-python api_server.py
-
-# Test
-curl http://localhost:8000/health
-pytest
-
-# Install SDK (for client usage)
-cd ../../sdks/python && pip install -e .
-```
+- **Local**: `python api_server.py`
+- **Docker**: [`modules/mapper/deployment/docker/`](../../modules/mapper/deployment/docker/)
+- **AWS Lambda**: [`modules/mapper/entrypoints/aws_lambda.py`](../../modules/mapper/entrypoints/aws_lambda.py)
+- **Azure Function**: [`modules/mapper/entrypoints/azure_function.py`](../../modules/mapper/entrypoints/azure_function.py)
+- **GCP Function**: [`modules/mapper/entrypoints/gcp_function.py`](../../modules/mapper/entrypoints/gcp_function.py)
