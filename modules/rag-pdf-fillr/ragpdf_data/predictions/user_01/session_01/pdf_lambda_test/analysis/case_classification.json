@@ -1,0 +1,43 @@
+{
+  "user_id": "user_01",
+  "session_id": "session_01",
+  "pdf_id": "pdf_lambda_test",
+  "timestamp": "2026-03-17T12:00:45.512174Z",
+  "total_fields": 3,
+  "case_breakdown": {
+    "CASE_A": {
+      "count": 1,
+      "field_ids": [
+        "f002"
+      ],
+      "description": "Both RAG and LLM predicted same field"
+    },
+    "CASE_B": {
+      "count": 2,
+      "field_ids": [
+        "f001",
+        "f003"
+      ],
+      "description": "Both predicted different fields",
+      "selections": {
+        "rag_selected": 0,
+        "llm_selected": 2
+      }
+    },
+    "CASE_C": {
+      "count": 0,
+      "field_ids": [],
+      "description": "LLM predicted, RAG did not"
+    },
+    "CASE_D": {
+      "count": 0,
+      "field_ids": [],
+      "description": "RAG predicted, LLM did not"
+    },
+    "CASE_E": {
+      "count": 0,
+      "field_ids": [],
+      "description": "Neither predicted (below threshold)"
+    }
+  }
+}

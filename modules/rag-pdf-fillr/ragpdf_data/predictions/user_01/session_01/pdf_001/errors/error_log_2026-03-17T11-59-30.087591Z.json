@@ -1,0 +1,23 @@
+{
+  "user_id": "user_01",
+  "session_id": "session_01",
+  "pdf_id": "pdf_001",
+  "pdf_hash": "hash_abc123def456",
+  "timestamp": "2026-03-17T11:59:30.087591Z",
+  "errors": [
+    {
+      "error_type": "wrong_field_name",
+      "field_name": "investor_full_name",
+      "feedback": "Should be investor_full_legal_name",
+      "field_type": "text",
+      "page_number": 1,
+      "timestamp": "2026-03-17T11:59:30.087591Z",
+      "user_id": "user_01",
+      "session_id": "session_01",
+      "pdf_id": "pdf_001",
+      "corrected_field_name": "investor_full_name",
+      "gpt4_confidence": 0.6,
+      "gpt4_reasoning": "NoOpCorrector: original name cleaned to snake_case"
+    }
+  ]
+}

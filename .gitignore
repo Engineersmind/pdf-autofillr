@@ -45,8 +45,16 @@ MANIFEST
 # -----------------------------------------------------------------------------
 venv/
 env/
+.env
+*.env
 ENV/
 .venv/
+*.zip
+
+*.zip
+modules/**/**/*.zip
+
+modules/tbd.txt
 .ENV/
 env.bak/
 venv.bak/

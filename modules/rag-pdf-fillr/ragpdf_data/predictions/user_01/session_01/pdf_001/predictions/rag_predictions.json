@@ -1,0 +1,115 @@
+{
+  "user_id": "user_01",
+  "session_id": "session_01",
+  "pdf_id": "pdf_001",
+  "model": "rag",
+  "timestamp": "2026-03-17T11:59:29.727539Z",
+  "pdf_hash": "hash_abc123def456",
+  "predictions": {
+    "f001": {
+      "predicted_field_name": "investor_email",
+      "confidence": 0.0,
+      "vector_id": "vec_017",
+      "top_k": [
+        {
+          "field_name": "investor_email",
+          "confidence": 0.0,
+          "vector_id": "vec_017"
+        },
+        {
+          "field_name": "investor_full_name",
+          "confidence": 0.0,
+          "vector_id": "vec_016"
+        },
+        {
+          "field_name": "commitment_amount_usd",
+          "confidence": 0.0,
+          "vector_id": "vec_015"
+        },
+        {
+          "field_name": "investor_email",
+          "confidence": 0.0,
+          "vector_id": "vec_014"
+        },
+        {
+          "field_name": "investor_full_name",
+          "confidence": 0.0,
+          "vector_id": "vec_013"
+        }
+      ],
+      "similarity_margin": 0.0
+    },
+    "f002": {
+      "predicted_field_name": "investor_email",
+      "confidence": 0.0,
+      "vector_id": "vec_017",
+      "top_k": [
+        {
+          "field_name": "investor_email",
+          "confidence": 0.0,
+          "vector_id": "vec_017"
+        },
+        {
+          "field_name": "investor_full_name",
+          "confidence": 0.0,
+          "vector_id": "vec_016"
+        },
+        {
+          "field_name": "commitment_amount_usd",
+          "confidence": 0.0,
+          "vector_id": "vec_015"
+        },
+        {
+          "field_name": "investor_email",
+          "confidence": 0.0,
+          "vector_id": "vec_014"
+        },
+        {
+          "field_name": "investor_full_name",
+          "confidence": 0.0,
+          "vector_id": "vec_013"
+        }
+      ],
+      "similarity_margin": 0.0
+    },
+    "f003": {
+      "predicted_field_name": "investor_email",
+      "confidence": 0.0,
+      "vector_id": "vec_017",
+      "top_k": [
+        {
+          "field_name": "investor_email",
+          "confidence": 0.0,
+          "vector_id": "vec_017"
+        },
+        {
+          "field_name": "investor_full_name",
+          "confidence": 0.0,
+          "vector_id": "vec_016"
+        },
+        {
+          "field_name": "commitment_amount_usd",
+          "confidence": 0.0,
+          "vector_id": "vec_015"
+        },
+        {
+          "field_name": "investor_email",
+          "confidence": 0.0,
+          "vector_id": "vec_014"
+        },
+        {
+          "field_name": "investor_full_name",
+          "confidence": 0.0,
+          "vector_id": "vec_013"
+        }
+      ],
+      "similarity_margin": 0.0
+    }
+  },
+  "summary": {
+    "total_fields": 3,
+    "predicted_fields": 3,
+    "unpredicted_fields": 0,
+    "avg_confidence": 0.0
+  }
+}
