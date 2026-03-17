@@ -47,7 +47,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ \
+          python -m pytest tests/ \
             --tb=short \
             --cov=src \
             --cov-report=term-missing \

@@ -39,7 +39,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest tests/ --tb=short -q
+        run: python -m pytest tests/ --tb=short -q
 
       - name: Verify package imports cleanly
         run: |

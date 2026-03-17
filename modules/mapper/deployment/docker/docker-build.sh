@@ -18,36 +18,34 @@ IMAGE_NAME="${IMAGE_NAME:-pdf-mapper}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 FULL_IMAGE_NAME="${IMAGE_NAME}:${IMAGE_TAG}"
 
-# Get script directory and module root
+# Get script directory and module root (two levels up from deployment/docker/)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-MODULE_ROOT="$SCRIPT_DIR"
+MODULE_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
 
 echo -e "${YELLOW}📁 Module root: $MODULE_ROOT${NC}"
 echo -e "${YELLOW}🏷️  Image name: $FULL_IMAGE_NAME${NC}"
 
-# Verify Dockerfile exists
-if [ ! -f "$MODULE_ROOT/Dockerfile" ]; then
-    echo -e "${RED}❌ Error: Dockerfile not found at $MODULE_ROOT/Dockerfile${NC}"
+# Verify Dockerfile exists (lives in the deployment/docker/ folder)
+if [ ! -f "$SCRIPT_DIR/Dockerfile" ]; then
+    echo -e "${RED}❌ Error: Dockerfile not found at $SCRIPT_DIR/Dockerfile${NC}"
     exit 1
 fi
 
-# Verify requirements.txt exists
+# Verify requirements.txt exists (lives at the module root)
 if [ ! -f "$MODULE_ROOT/requirements.txt" ]; then
-    echo -e "${RED}❌ Error: requirements.txt not found${NC}"
+    echo -e "${RED}❌ Error: requirements.txt not found at $MODULE_ROOT/requirements.txt${NC}"
     exit 1
 fi
 
 echo -e "${GREEN}✅ All prerequisites found${NC}"
 echo ""
 
-# Build image from module directory
+# Build image — context is the module root, Dockerfile path is explicit
 echo -e "${GREEN}🔨 Building Docker image...${NC}"
-cd "$MODULE_ROOT"
-
 docker build \
     -t "$FULL_IMAGE_NAME" \
-    -f Dockerfile \
-    . \
+    -f "$SCRIPT_DIR/Dockerfile" \
+    "$MODULE_ROOT" \
     || { echo -e "${RED}❌ Build failed!${NC}"; exit 1; }
 
 echo ""

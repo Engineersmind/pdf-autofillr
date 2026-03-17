@@ -44,7 +44,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest tests/ --tb=short -q
+        run: python -m pytest tests/ --tb=short -q
 
   # ── Job 2: Build distribution ───────────────────────────────────────────────
   build:
