@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-03-17T11:59:30.001740Z",
+  "summary": {
+    "vectors_updated": 1,
+    "vectors_created": 2,
+    "total": 19
+  },
+  "updates": [
+    {
+      "field_id": "f002",
+      "action": "boosted",
+      "reason": "CASE_A"
+    },
+    {
+      "field_id": "f001",
+      "vector_id": "vec_018",
+      "action": "created",
+      "reason": "CASE_B LLM selected"
+    },
+    {
+      "field_id": "f003",
+      "vector_id": "vec_019",
+      "action": "created",
+      "reason": "CASE_B LLM selected"
+    }
+  ]
+}

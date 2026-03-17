@@ -1,0 +1,19 @@
+{
+  "final_predictions": {
+    "f001": {
+      "selected_field_name": "investor_full_name",
+      "selected_from": "llm",
+      "llm_confidence": 0.91
+    },
+    "f002": {
+      "selected_field_name": "investor_email",
+      "selected_from": "llm",
+      "llm_confidence": 0.88
+    },
+    "f003": {
+      "selected_field_name": "commitment_amount_usd",
+      "selected_from": "llm",
+      "llm_confidence": 0.95
+    }
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "aabbcc112233": {
+    "pdf_hash": "aabbcc112233",
+    "pdf_id": "pdf_001",
+    "category": "Private Markets",
+    "sub_category": "Private Equity",
+    "document_type": "LP Subscription Agreement",
+    "pdf_count": 3,
+    "total_submissions": 3,
+    "submissions": [
+      {
+        "submission_id": "user_01_session_01_pdf_001_1_1736496000",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_001",
+        "frequency": 1,
+        "timestamp": "2026-01-10T08:00:00Z",
+        "total_fields": 12,
+        "accuracy_llm": 1.0,
+        "accuracy_rag": 1.0,
+        "accuracy_ensemble": 1.0,
+        "errors_reported": 0
+      },
+      {
+        "submission_id": "user_02_session_03_pdf_001_2_1738694400",
+        "user_id": "user_02",
+        "session_id": "session_03",
+        "pdf_id": "pdf_001",
+        "frequency": 2,
+        "timestamp": "2026-02-04T12:00:00Z",
+        "total_fields": 12,
+        "accuracy_llm": 0.9167,
+        "accuracy_rag": 0.9167,
+        "accuracy_ensemble": 0.9167,
+        "errors_reported": 1
+      },
+      {
+        "submission_id": "user_01_session_05_pdf_001_3_1741132800",
+        "user_id": "user_01",
+        "session_id": "session_05",
+        "pdf_id": "pdf_001",
+        "frequency": 3,
+        "timestamp": "2026-03-05T09:00:00Z",
+        "total_fields": 12,
+        "accuracy_llm": 1.0,
+        "accuracy_rag": 1.0,
+        "accuracy_ensemble": 1.0,
+        "errors_reported": 0
+      }
+    ],
+    "aggregated_stats": {
+      "avg_accuracy_llm": 0.9722,
+      "avg_accuracy_rag": 0.9722,
+      "avg_accuracy_ensemble": 0.9722,
+      "avg_coverage_llm": 0.9167,
+      "avg_coverage_rag": 0.9167,
+      "total_errors": 1,
+      "consistency_score": 0.9444,
+      "improvement_trend": "stable"
+    },
+    "first_seen": "2026-01-10T08:00:00Z",
+    "last_seen": "2026-03-05T09:00:00Z"
+  },
+  "ddeeff445566": {
+    "pdf_hash": "ddeeff445566",
+    "pdf_id": "pdf_002",
+    "category": "Private Markets",
+    "sub_category": "Private Credit",
+    "document_type": "Side Letter Agreement",
+    "pdf_count": 1,
+    "total_submissions": 1,
+    "submissions": [
+      {
+        "submission_id": "user_03_session_02_pdf_002_1_1737964800",
+        "user_id": "user_03",
+        "session_id": "session_02",
+        "pdf_id": "pdf_002",
+        "frequency": 1,
+        "timestamp": "2026-01-27T10:00:00Z",
+        "total_fields": 8,
+        "accuracy_llm": 0.875,
+        "accuracy_rag": 0.75,
+        "accuracy_ensemble": 0.875,
+        "errors_reported": 1
+      }
+    ],
+    "aggregated_stats": {
+      "avg_accuracy_llm": 0.875,
+      "avg_accuracy_rag": 0.75,
+      "avg_accuracy_ensemble": 0.875,
+      "avg_coverage_llm": 0.875,
+      "avg_coverage_rag": 0.75,
+      "total_errors": 1,
+      "consistency_score": 0.8125,
+      "improvement_trend": "new"
+    },
+    "first_seen": "2026-01-27T10:00:00Z",
+    "last_seen": "2026-01-27T10:00:00Z"
+  },
+  "hash_abc123def456": {
+    "pdf_hash": "hash_abc123def456",
+    "pdf_id": "pdf_001",
+    "category": "Private Markets",
+    "sub_category": "Private Equity",
+    "document_type": "LP Subscription Agreement",
+    "pdf_count": 7,
+    "total_submissions": 7,
+    "submissions": [
+      {
+        "submission_id": "user_01_session_01_pdf_001_1_1773728823",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_001",
+        "frequency": 1,
+        "timestamp": "2026-03-17T11:57:03.168075Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "user_01_session_01_pdf_cli_test_2_1773728842",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_cli_test",
+        "frequency": 2,
+        "timestamp": "2026-03-17T11:57:22.808404Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "user_01_session_01_pdf_lambda_test_3_1773728866",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_lambda_test",
+        "frequency": 3,
+        "timestamp": "2026-03-17T11:57:46.737787Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "user_01_session_01_pdf_001_4_1773728969",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_001",
+        "frequency": 4,
+        "timestamp": "2026-03-17T11:59:29.745076Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "user_01_session_01_pdf_cli_test_5_1773728990",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_cli_test",
+        "frequency": 5,
+        "timestamp": "2026-03-17T11:59:50.991362Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "user_01_session_01_pdf_api_test_6_1773729038",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_api_test",
+        "frequency": 6,
+        "timestamp": "2026-03-17T12:00:38.315429Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "user_01_session_01_pdf_lambda_test_7_1773729045",
+        "user_id": "user_01",
+        "session_id": "session_01",
+        "pdf_id": "pdf_lambda_test",
+        "frequency": 7,
+        "timestamp": "2026-03-17T12:00:45.456984Z",
+        "total_fields": 3
+      }
+    ],
+    "first_seen": "2026-03-17T11:57:03.168075Z",
+    "last_seen": "2026-03-17T12:00:45.456984Z"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "predictions": {
+    "f001": {
+      "predicted_field_name": "investor_full_name",
+      "confidence": 0.91
+    },
+    "f002": {
+      "predicted_field_name": "investor_email",
+      "confidence": 0.88
+    },
+    "f003": {
+      "predicted_field_name": "commitment_amount_usd",
+      "confidence": 0.95
+    }
+  }
+}

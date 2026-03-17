@@ -1,0 +1,60 @@
+{
+  "user_id": "user_01",
+  "session_id": "session_01",
+  "pdf_id": "pdf_api_test",
+  "submission_id": "user_01_session_01_pdf_api_test_6_1773729038",
+  "pdf_hash": "hash_abc123def456",
+  "timestamp": "2026-03-17T12:00:41.142839Z",
+  "pdf_category": {
+    "category": "Private Markets",
+    "sub_category": "Private Equity",
+    "document_type": "LP Subscription Agreement"
+  },
+  "field_counts": {
+    "total_fields": 3,
+    "predicted_llm": 3,
+    "predicted_rag": 3,
+    "predicted_ensemble": 3,
+    "both_predicted": 3,
+    "same_predictions": 1,
+    "different_predictions": 2,
+    "llm_only": 0,
+    "rag_only": 0,
+    "neither_predicted": 0
+  },
+  "coverage": {
+    "coverage_llm": 1.0,
+    "coverage_rag": 1.0,
+    "coverage_ensemble": 1.0
+  },
+  "agreement": {
+    "agreement_rate": 0.3333,
+    "conflict_rate": 0.6667
+  },
+  "recovery": {
+    "rag_recovery": 0.0,
+    "llm_recovery": 0.0
+  },
+  "confidence": {
+    "avg_conf_llm": 0.9133,
+    "avg_conf_rag": 0.0,
+    "avg_conf_ensemble": 0.9133,
+    "confidence_margin_avg": 0.0,
+    "ambiguity_rate": 1.0
+  },
+  "accuracy": {
+    "accuracy_llm": 0.6667,
+    "accuracy_rag": 1.0,
+    "accuracy_ensemble": 0.6667,
+    "errors_llm": 1,
+    "errors_rag": 0,
+    "errors_ensemble": 1
+  },
+  "case_distribution": {
+    "CASE_A_percentage": 0.3333,
+    "CASE_B_percentage": 0.6667,
+    "CASE_C_percentage": 0.0,
+    "CASE_D_percentage": 0.0,
+    "CASE_E_percentage": 0.0
+  }
+}

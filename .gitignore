@@ -17,5 +17,13 @@ data/
 # Virtual Environment
 venv/
 env/
+.env
+*.env
 ENV/
 .venv/
+*.zip
+
+*.zip
+modules/**/**/*.zip
+
+modules/tbd.txt

@@ -1,0 +1,24 @@
+{
+  "user_id": "user_01",
+  "session_id": "session_01",
+  "pdf_id": "pdf_api_test",
+  "timestamp": "2026-03-17T12:00:41.084907Z",
+  "total_errors": 1,
+  "vectors_updated": 1,
+  "errors": [
+    {
+      "field_name": "investor_full_name",
+      "field_id": "f001",
+      "case_type": "CASE_B",
+      "vector_affected": "vec_013",
+      "gpt4_correction": "investor_full_name"
+    }
+  ],
+  "gpt4_corrections": [
+    {
+      "corrected_field_name": "investor_full_name",
+      "confidence": 0.6,
+      "reasoning": "NoOpCorrector: original name cleaned to snake_case"
+    }
+  ]
+}

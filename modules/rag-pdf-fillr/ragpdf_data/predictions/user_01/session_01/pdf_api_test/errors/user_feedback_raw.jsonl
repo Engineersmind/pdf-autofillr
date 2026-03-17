@@ -1,0 +1,1 @@
+{"timestamp": "2026-03-17T12:00:41.084907Z", "errors": [{"error_type": "wrong_field_name", "field_name": "investor_full_name", "field_type": "text", "value": null, "feedback": "Should be investor_full_legal_name", "page_number": 1, "corners": null, "timestamp": "2026-03-17T12:00:41.084907Z", "user_id": "user_01", "session_id": "session_01", "pdf_id": "pdf_api_test"}]}
