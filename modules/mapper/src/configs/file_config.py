@@ -96,19 +96,23 @@ class FileConfig:
         self,
         user_id: int,
         session_id: str,
-        pdf_doc_id: int
+        pdf_doc_id: int,
+        processing_dir: Optional[str] = None
     ) -> Dict[str, str]:
         """
         Build all processing paths for a given operation.
-        
+
         Returns dictionary with all file paths needed for processing.
         Paths are in Docker /tmp/processing/ directory.
-        
+
         Args:
             user_id: User ID
-            session_id: Session ID  
+            session_id: Session ID
             pdf_doc_id: PDF document ID
-        
+            processing_dir: Optional override for processing directory.
+                            If None, reads from config.ini [source_type] processing_dir.
+                            Pass a UUID-scoped path to isolate concurrent requests.
+
         Returns:
             Dictionary with keys:
                 - input_pdf, input_json
@@ -118,7 +122,8 @@ class FileConfig:
                 - llm_predictions, rag_predictions, etc.
         """
         source_type = self.get_source_type()
-        processing_dir = self.get(source_type, 'processing_dir', fallback='/tmp/processing')
+        if processing_dir is None:
+            processing_dir = self.get(source_type, 'processing_dir', fallback='/tmp/processing')
         
         # Build all paths
         paths = {}
@@ -238,12 +243,38 @@ class FileConfig:
         )
 
 
-# Singleton instance
+# Singleton instance — one per process lifetime
 _file_config = None
 
+
 def get_file_config(config_path: str = None) -> FileConfig:
-    """Get singleton FileConfig instance."""
+    """
+    Get singleton FileConfig instance.
+
+    The instance is cached for the lifetime of the process.
+    On Lambda warm containers this is intentional — config.ini doesn't
+    change between invocations. Call reset_file_config() in tests or
+    if you need to reload after a config change.
+    """
     global _file_config
     if _file_config is None:
         _file_config = FileConfig(config_path)
     return _file_config
+
+
+def reset_file_config() -> None:
+    """
+    Reset the FileConfig singleton.
+
+    Use in tests or when config.ini changes at runtime (e.g. hot-reload).
+    Also clears the StorageBackendFactory cache so backends are rebuilt
+    against the new config.
+    """
+    global _file_config
+    _file_config = None
+    try:
+        from src.storage.backends.factory import clear_cache
+        clear_cache()
+    except ImportError:
+        pass
+    logger.info("FileConfig singleton reset")

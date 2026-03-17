@@ -1,5 +1,7 @@
 # Python artifacts
+# Ignore __pycache__ directories at any level
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so

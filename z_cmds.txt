@@ -1,0 +1,11 @@
+# Stop container
+docker-compose down
+
+# Rebuild WITHOUT CACHE (to pick up code changes)
+docker-compose build --no-cache
+
+# Start the container
+docker-compose up -d
+
+# Watch the logs to ensure it starts properly
+docker-compose logs -f

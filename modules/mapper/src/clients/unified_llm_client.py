@@ -38,6 +38,8 @@ class LLMUsage:
     total_tokens: int
     cost_usd: float
     model: str
+    cache_read_tokens: int = 0       # Claude: tokens served from cache
+    cache_creation_tokens: int = 0   # Claude: tokens written into cache
 
 
 @dataclass
@@ -98,6 +100,45 @@ class UnifiedLLMClient:
         self.max_retries = max_retries
         self.fallback_models = fallback_models or []
         
+        # Detect if using Ollama
+        self.is_ollama = model.startswith("ollama/") or model.startswith("ollama_chat/")
+        
+        # Configure Ollama API base if needed
+        if self.is_ollama:
+            ollama_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            os.environ["OLLAMA_API_BASE"] = ollama_base
+            logger.info(f"Using Ollama API base: {ollama_base}")
+            
+            # Validate Ollama connection
+            try:
+                import requests
+                response = requests.get(f"{ollama_base}/api/tags", timeout=5)
+                if response.status_code == 200:
+                    models = [m['name'] for m in response.json().get('models', [])]
+                    model_name = model.replace("ollama/", "").replace("ollama_chat/", "")
+                    if models:
+                        logger.info(f"✅ Ollama connected. Available models: {', '.join(models)}")
+                        if model_name not in models:
+                            logger.warning(
+                                f"⚠️  Model '{model_name}' not found in Ollama. "
+                                f"Download it with: ollama pull {model_name}"
+                            )
+                    else:
+                        logger.warning("⚠️  No models found in Ollama. Download with: ollama pull <model-name>")
+                else:
+                    logger.warning(f"⚠️  Ollama responded with status {response.status_code}")
+            except requests.exceptions.ConnectionError:
+                logger.error(
+                    f"❌ Cannot connect to Ollama at {ollama_base}\n"
+                    f"   Make sure Ollama is running:\n"
+                    f"   - On host: ollama serve\n"
+                    f"   - Check with: curl {ollama_base}/api/tags\n"
+                    f"   - Docker users: Set OLLAMA_API_BASE=http://host.docker.internal:11434"
+                )
+                raise ConnectionError(f"Ollama not reachable at {ollama_base}. Please start Ollama or check OLLAMA_API_BASE configuration.")
+            except Exception as e:
+                logger.warning(f"Could not validate Ollama setup: {e}")
+        
         # Track cumulative usage
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
@@ -122,7 +163,14 @@ class UnifiedLLMClient:
         except Exception as e:
             logger.warning(f"Token estimation failed: {e}, using character count / 4")
             # Fallback: rough estimate (1 token ≈ 4 chars)
-            total_chars = sum(len(msg.get("content", "")) for msg in messages)
+            # content may be a string or a list of content blocks
+            total_chars = 0
+            for msg in messages:
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    total_chars += sum(len(b.get("text", "")) for b in content if isinstance(b, dict))
+                else:
+                    total_chars += len(content)
             return total_chars // 4
     
     def complete(
@@ -185,10 +233,15 @@ class UnifiedLLMClient:
             self.total_cost_usd += usage.cost_usd
             self.total_calls += 1
             
+            cache_info = (
+                f", cache_read={usage.cache_read_tokens}"
+                f", cache_created={usage.cache_creation_tokens}"
+                if usage.cache_read_tokens or usage.cache_creation_tokens else ""
+            )
             logger.info(
                 f"LLM response - Tokens: {usage.total_tokens} "
-                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
-                f"Cost: ${usage.cost_usd:.6f}"
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}"
+                f"{cache_info}), Cost: ${usage.cost_usd:.6f}"
             )
             
             # Extract content
@@ -264,10 +317,15 @@ class UnifiedLLMClient:
             self.total_cost_usd += usage.cost_usd
             self.total_calls += 1
             
+            cache_info = (
+                f", cache_read={usage.cache_read_tokens}"
+                f", cache_created={usage.cache_creation_tokens}"
+                if usage.cache_read_tokens or usage.cache_creation_tokens else ""
+            )
             logger.info(
                 f"LLM response - Tokens: {usage.total_tokens} "
-                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
-                f"Cost: ${usage.cost_usd:.6f}"
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}"
+                f"{cache_info}), Cost: ${usage.cost_usd:.6f}"
             )
             
             # Extract content
@@ -289,20 +347,31 @@ class UnifiedLLMClient:
         prompt_tokens = usage.prompt_tokens or 0
         completion_tokens = usage.completion_tokens or 0
         total_tokens = usage.total_tokens or (prompt_tokens + completion_tokens)
-        
+
+        # Claude (Anthropic / Bedrock): cache_read_input_tokens, cache_creation_input_tokens
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+
+        # OpenAI (gpt-4o, o-series, etc.): usage.prompt_tokens_details.cached_tokens
+        if not cache_read:
+            details = getattr(usage, "prompt_tokens_details", None)
+            cache_read = getattr(details, "cached_tokens", 0) or 0
+
         # Calculate cost - LiteLLM's completion_cost expects the response object
         try:
             cost = completion_cost(completion_response=response)
         except Exception as e:
             logger.warning(f"Could not calculate cost: {e}")
             cost = 0.0
-        
+
         return LLMUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cost_usd=cost,
-            model=self.model
+            model=self.model,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
     
     def get_cumulative_stats(self) -> Dict[str, Any]:
@@ -327,6 +396,41 @@ class UnifiedLLMClient:
         self.total_completion_tokens = 0
         self.total_cost_usd = 0.0
         self.total_calls = 0
+
+    @classmethod
+    def create_from_settings(cls) -> "UnifiedLLMClient":
+        """
+        Create a client from the [mapping] section of config.ini / Settings.
+
+        Also pre-seeds OLLAMA_API_BASE from settings.ollama_api_base when the
+        model is an Ollama model and the env var isn't already set.
+        """
+        from src.core.config import settings
+        model = settings.llm_model
+        if model.startswith("ollama/") or model.startswith("ollama_chat/"):
+            if not os.getenv("OLLAMA_API_BASE"):
+                base = getattr(settings, "ollama_api_base", "http://localhost:11434")
+                if base:
+                    os.environ["OLLAMA_API_BASE"] = base
+        return cls(
+            model=model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout,
+            max_retries=settings.llm_max_retries,
+        )
+
+    @classmethod
+    def create_headers_client(cls) -> "UnifiedLLMClient":
+        """Create a client from the [headers] section of config.ini / Settings."""
+        from src.core.config import settings
+        return cls(
+            model=settings.headers_llm_model,
+            temperature=settings.headers_temperature,
+            max_tokens=settings.headers_max_tokens,
+            timeout=settings.llm_timeout,
+            max_retries=settings.llm_max_retries,
+        )
 
 
 def create_llm_client(

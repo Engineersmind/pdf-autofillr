@@ -1,0 +1,70 @@
+name: Mapper Module Tests
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "modules/mapper/**"
+      - ".github/workflows/mapper-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "modules/mapper/**"
+      - ".github/workflows/mapper-tests.yml"
+
+jobs:
+  test:
+    name: Run Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    defaults:
+      run:
+        working-directory: modules/mapper
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: modules/mapper/requirements-full.txt
+
+      - name: Set up Java (required by mapper dependencies)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: pip install -r requirements-full.txt
+
+      - name: Run tests
+        run: |
+          pytest tests/ \
+            --tb=short \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -q
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-py${{ matrix.python-version }}
+          path: modules/mapper/coverage.xml
+
+      - name: Coverage summary
+        if: github.event_name == 'pull_request'
+        uses: orgoro/coverage@v3.2
+        with:
+          coverageFile: modules/mapper/coverage.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          thresholdAll: 0.10

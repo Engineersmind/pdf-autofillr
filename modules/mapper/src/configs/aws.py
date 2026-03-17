@@ -16,56 +16,14 @@ class AWSStorageConfig(BaseStorageConfig):
     def __init__(self):
         super().__init__(source_type="aws")
         self.s3_client = None
-        
-        # AWS-specific constants (loaded from environment)
+
+        # AWS-specific env config
         self.global_input_json_s3_uri = os.getenv(
-            'GLOBAL_INPUT_JSON_S3_URI',
-            's3://your-bucket/global_input_keys.json'
+            'GLOBAL_INPUT_JSON_S3_URI', 's3://your-bucket/global_input_keys.json'
         )
         self.rag_bucket_name = os.getenv('RAG_BUCKET_NAME', 'rag-bucket-pdf-filler')
-        self.rag_api_url = os.getenv('RAG_API_URL', '')
-        self.rag_api_key = os.getenv('RAG_API_KEY', '')
-        
-        # S3 source paths (original remote paths)
-        self.s3_input_pdf = None
-        self.s3_input_json = None
-        self.s3_global_json = None
-        self.s3_extracted_json = None
-        self.s3_mapped_json = None
-        self.s3_radio_json = None
-        self.s3_embedded_pdf = None
-        self.s3_filled_pdf = None
-        
-        # Dual mapper (RAG) S3 paths
-        self.s3_headers_with_fields = None
-        self.s3_final_form_fields = None
-        self.s3_header_file = None          # RAG API input
-        self.s3_section_file = None         # RAG API input
-        self.s3_llm_predictions = None
-        self.s3_rag_predictions = None
-        self.s3_final_predictions = None    # Combined predictions
-        self.s3_java_mapping = None         # Java-compatible mapping
-        
-        # Local file paths (operations work with these)
-        # These are set by the AWS handler after downloading files
-        self.local_input_pdf = None
-        self.local_input_json = None
-        self.local_global_json = None
-        self.local_extracted_json = None
-        self.local_mapped_json = None
-        self.local_radio_json = None
-        self.local_embedded_pdf = None
-        self.local_filled_pdf = None
-        
-        # Dual mapper (RAG) local paths
-        self.local_headers_with_fields = None
-        self.local_final_form_fields = None
-        self.local_header_file = None
-        self.local_section_file = None
-        self.local_llm_predictions = None
-        self.local_rag_predictions = None
-        self.local_final_predictions = None
-        self.local_java_mapping = None
+        self.rag_api_url     = os.getenv('RAG_API_URL', '')
+        self.rag_api_key     = os.getenv('RAG_API_KEY', '')
     
     def _get_s3_client(self):
         """Lazy load S3 client."""

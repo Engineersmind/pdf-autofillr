@@ -165,14 +165,15 @@ class Settings(BaseSettings):
     cache_registry_path: str = get_ini_value(get_source_type(), "cache_registry_path", "")
     
     # Headers Extraction Configuration (loaded from config.ini [headers] section)
-    headers_llm_provider: str = get_ini_value("headers", "headers_llm_provider", "claude")
-    headers_openai_model_id: str = get_ini_value("headers", "headers_openai_model_id", "gpt-4o")
-    headers_claude_model_id: str = get_ini_value("headers", "headers_claude_model_id", "claude-3-5-sonnet-20241022")
+    headers_llm_model: str = get_ini_value("headers", "headers_llm_model", "gpt-4o")
     headers_chunk_size: int = get_ini_int("headers", "headers_chunk_size", 5)
     headers_max_workers: int = get_ini_int("headers", "headers_max_workers", 3)
     headers_temperature: float = get_ini_float("headers", "headers_temperature", 0.0)
     headers_max_tokens: int = get_ini_int("headers", "headers_max_tokens", 8192)
     
+    # Ollama Configuration (loaded from config.ini [ollama] section)
+    ollama_api_base: str = get_ini_value("ollama", "ollama_api_base", "http://localhost:11434")
+
     # RAG API Configuration (for second mapper)
     # Read from .env file - maps RAG_API_ENDPOINT to rag_api_url
     rag_api_url: str = ""
