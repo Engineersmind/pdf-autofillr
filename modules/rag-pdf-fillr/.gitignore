@@ -1,39 +1,58 @@
-# Ignore deployment package
+# ── Project-specific ──────────────────────────────────────────
 rag-sdk.zip
-
-# Ignore test file
-ignore_this.txt
-run.txt
-
-*.zip
-
-tbd_chatbot.txt
-
-dist/
-build/
-
-venv/
-env/
-.env
-*.env
-ENV/
-.venv/
-*.zip
-
-venv/
-env/
-.venv/
-ENV/
-.env
-
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-*.zip
-
 ignore_this.txt
 run.txt
 tbd_chatbot.txt
 tbd_rag.txt
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.so
+*.egg
+*.egg-info/
+.eggs/
+
+# ── Build / dist ──────────────────────────────────────────────
+dist/
+build/
+*.zip
+*.whl
+*.tar.gz
+
+# ── Virtual environments ──────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Environment / secrets ─────────────────────────────────────
+.env
+*.env
+config.ini
+
+# ── Testing & coverage ────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ── Type checking & linting ───────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+
+# ── ragpdf runtime data (mount as volumes, never commit) ──────
+ragpdf_data/
+chroma_data/
+weaviate_data/
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
