@@ -3,18 +3,67 @@
 Command-line interface for pdf-autofillr-rag.
 
 Usage:
-    python -m entrypoints.cli system-info
-    python -m entrypoints.cli metrics --type global
-    python -m entrypoints.cli predict --user u1 --session s1 --pdf p1 \
-        --fields tests/fixtures/sample_fields.json --hash abc123 \
-        --category '{"category":"Finance","sub_category":"PE","document_type":"Sub"}'
-    python -m entrypoints.cli feedback --user u1 --session s1 --pdf p1 --errors errors.json
-    python -m entrypoints.cli error-analytics --from 2026-01-01T00:00:00Z
+    ragpdf system-info
+    ragpdf metrics --type global
+    ragpdf predict --user u1 --session s1 --pdf p1 \
+        --fields ragpdf_data/input/fields/lp_subscription_fields.json \
+        --hash abc123 \
+        --category ragpdf_data/input/pdf_category.json
+    ragpdf feedback --user u1 --session s1 --pdf p1 --errors errors.json
+    ragpdf error-analytics --from 2026-01-01T00:00:00Z
+
+  --category accepts EITHER:
+    a) a file path:  --category ragpdf_data/input/pdf_category.json   (recommended on Windows)
+    b) inline JSON:  --category '{"category":"Finance",...}'          (Linux/Mac only)
 """
 import argparse
 import json
+import os
 import sys
 from ragpdf import RAGPDFClient
+
+
+def _load_category(value: str) -> dict:
+    """
+    Accept --category as either:
+      - a path to a JSON file  (ragpdf_data/input/pdf_category.json)
+      - an inline JSON string  ({"category":"Finance",...})
+    Returns a dict. Exits with a clear message on failure.
+    """
+    if not value or value == "{}":
+        return {}
+
+    # Try as a file path first
+    if os.path.exists(value):
+        try:
+            with open(value, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                print(f"ERROR: --category file must contain a JSON object, got {type(data).__name__}", file=sys.stderr)
+                sys.exit(1)
+            return data
+        except json.JSONDecodeError as e:
+            print(f"ERROR: --category file is not valid JSON: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Otherwise treat as inline JSON string
+    try:
+        data = json.loads(value)
+        if not isinstance(data, dict):
+            print("ERROR: --category inline value must be a JSON object", file=sys.stderr)
+            sys.exit(1)
+        return data
+    except json.JSONDecodeError:
+        print(
+            f"\nERROR: --category could not be parsed.\n"
+            f"  Got: {value!r}\n\n"
+            f"  On Windows, use a file path instead:\n"
+            f"    --category ragpdf_data/input/pdf_category.json\n\n"
+            f"  On Linux/Mac, inline JSON works:\n"
+            f"    --category '{{\"category\":\"Finance\",\"sub_category\":\"PE\",\"document_type\":\"Sub\"}}'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def main():
@@ -28,7 +77,13 @@ def main():
     p.add_argument("--pdf",      required=True)
     p.add_argument("--fields",   required=True, help="Path to JSON file with fields list")
     p.add_argument("--hash",     required=True, help="PDF hash (md5/sha)")
-    p.add_argument("--category", default="{}", help="JSON string of pdf_category dict")
+    p.add_argument(
+        "--category", default="{}",
+        help=(
+            "File path (recommended on Windows): --category ragpdf_data/input/pdf_category.json  "
+            "OR inline JSON (Linux/Mac): --category '{\"category\":\"Finance\",...}'"
+        ),
+    )
 
     # system-info
     sub.add_parser("system-info", help="Show system overview")
@@ -67,11 +122,13 @@ def main():
     client = RAGPDFClient.from_env()
 
     if args.command == "predict":
-        with open(args.fields) as fh:
+        with open(args.fields, encoding="utf-8") as fh:
             fields = json.load(fh)
         if isinstance(fields, dict) and "fields" in fields:
             fields = fields["fields"]
-        cat = json.loads(args.category) if isinstance(args.category, str) else args.category
+
+        cat = _load_category(args.category)
+
         result = client.get_predictions(
             args.user, args.session, args.pdf, fields, args.hash, cat
         )
@@ -86,7 +143,7 @@ def main():
         print(json.dumps(client.get_metrics(args.metric_type, **kwargs), indent=2))
 
     elif args.command == "feedback":
-        with open(args.errors) as fh:
+        with open(args.errors, encoding="utf-8") as fh:
             errors = json.load(fh)
         if isinstance(errors, dict) and "errors" in errors:
             errors = errors["errors"]
