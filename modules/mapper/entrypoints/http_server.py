@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 
 from src.core.logger import logger
 from src.core.config import settings
-from src.configs.file_config import get_file_config
+from src.storage.storage_config import get_storage_config
 from src.handlers import operations
 from src.utils.entrypoint_helpers import (
     create_job_context,
@@ -135,9 +135,8 @@ async def process_operation(
     extra_params: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Process an operation request using JobContext (UUID-isolated, source-agnostic)."""
-    file_config = get_file_config()
     ctx = create_job_context(
-        file_config,
+        get_storage_config(),
         request_data.user_id,
         request_data.session_id,
         request_data.pdf_doc_id,

@@ -10,11 +10,18 @@ Run:
 Swagger UI: http://localhost:8000/docs
 """
 import os
+import logging
 import uvicorn
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, List, Any
 from ragpdf import RAGPDFClient
+
+# Configure logging so all ragpdf.* loggers print to stdout
+logging.basicConfig(
+    level=os.getenv("RAGPDF_LOG_LEVEL", "INFO"),
+    format="%(levelname)s | %(name)s | %(message)s",
+)
 
 app = FastAPI(title="pdf-autofillr-rag", version="0.1.1")
 

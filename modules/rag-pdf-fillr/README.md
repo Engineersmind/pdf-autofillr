@@ -97,9 +97,11 @@ result = client.get_predictions(
         "document_type": "LP Subscription Agreement",
     },
 )
+print(result["predictions"])
+# {"f001": None}   ← null on first run (empty vector DB — learns from save_filled_pdf calls)
+
 print(result["summary"])
-# {'total_fields': 1, 'predicted_fields': 0, 'unpredicted_fields': 1, 'avg_confidence': 0.0}
-# (empty on first run — vector DB learns from each submission)
+# {"total_fields": 1, "predicted_fields": 0, "unpredicted_fields": 1, "avg_confidence": 0.0}
 ```
 
 Or use environment variables:
@@ -142,8 +144,30 @@ result = client.get_predictions(
         "document_type": "LP Subscription Agreement",
     },
 )
-# Returns: submission_id, frequency, is_duplicate, summary
-# RAG predictions are saved to: predictions/{user_id}/{session_id}/{pdf_id}/predictions/rag_predictions.json
+# Returns:
+# {
+#   "submission_id": "user_001_session_abc_pdf_xyz_1_...",
+#   "frequency": 1,
+#   "is_duplicate": false,
+#   "predictions": {
+#     "f001": {
+#       "predicted_field_name": "investor_full_legal_name",
+#       "confidence": 0.91,
+#       "vector_id": "vec_003",
+#       "top_k": [...],
+#       "similarity_margin": 0.12
+#     },
+#     "f002": null    # null = no match above threshold
+#   },
+#   "summary": {
+#     "total_fields": 2,
+#     "predicted_fields": 1,
+#     "unpredicted_fields": 1,
+#     "avg_confidence": 0.91
+#   }
+# }
+# RAG predictions also saved to: predictions/{user_id}/{session_id}/{pdf_id}/predictions/rag_predictions.json
+# NOTE: predictions will be empty on first run — vector DB learns from each save_filled_pdf() call
 ```
 
 ### API 2 — `save_filled_pdf()`

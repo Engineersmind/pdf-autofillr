@@ -161,9 +161,13 @@ class Settings(BaseSettings):
     pdf_cache_bucket: str = ""  # S3 bucket for cache storage (defaults to storage_s3_bucket if empty)
     pdf_cache_prefix: str = "pdf-registry"  # S3 prefix for cache files
     
-    # Cache registry path - read from config.ini based on source_type
-    # Will use [local], [aws], [azure], or [gcp] section based on source_type in [general]
-    cache_registry_path: str = get_ini_value(get_source_type(), "cache_registry_path", "")
+    # Cache registry — always a local filesystem path regardless of MAPPER_STORAGE.
+    # Read from config.ini [general] cache_registry_path, then env var fallback.
+    cache_registry_path: str = (
+        get_ini_value("general", "cache_registry_path", "")
+        or os.environ.get("MAPPER_CACHE_REGISTRY_PATH", "")
+        or "/app/data/cache/hash_registry.json"
+    )
     
     # Headers Extraction Configuration (loaded from config.ini [headers] section)
     headers_llm_model: str = get_ini_value("headers", "headers_llm_model", "gpt-4o")

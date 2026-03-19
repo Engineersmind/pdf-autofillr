@@ -156,14 +156,110 @@ class TestMapperResource:
         captured = {}
 
         def handler(request):
+            import json as _json
             captured["path"] = request.url.path
             captured["method"] = request.method
+            captured["body"] = _json.loads(request.content)
             return httpx.Response(200, json={"status": "ok"})
 
         client = PDFMapperClient(transport=httpx.MockTransport(handler))
-        client.mapper.make_embed_file(pdf_path="s3://bucket/form.pdf")
-        assert captured["path"] == "/make-embed-file"
+        client.mapper.make_embed_file(user_id="1", session_id="1", pdf_doc_id="100")
+        assert captured["path"] == "/mapper/make-embed-file"
         assert captured["method"] == "POST"
+        assert captured["body"]["user_id"] == "1"
+        assert captured["body"]["session_id"] == "1"
+        assert captured["body"]["pdf_doc_id"] == "100"
+
+    def test_fill_posts_to_correct_path(self):
+        captured = {}
+
+        def handler(request):
+            import json as _json
+            captured["path"] = request.url.path
+            captured["body"] = _json.loads(request.content)
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = PDFMapperClient(transport=httpx.MockTransport(handler))
+        client.mapper.fill(user_id="1", session_id="1", pdf_doc_id="100")
+        assert captured["path"] == "/mapper/fill"
+        assert captured["body"]["user_id"] == "1"
+
+    def test_check_embed_file_posts_to_correct_path(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = PDFMapperClient(transport=httpx.MockTransport(handler))
+        client.mapper.check_embed_file(user_id="1", session_id="1", pdf_doc_id="100")
+        assert captured["path"] == "/mapper/check-embed-file"
+
+    def test_run_all_posts_to_correct_path(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = PDFMapperClient(transport=httpx.MockTransport(handler))
+        client.mapper.run_all(user_id="1", session_id="1", pdf_doc_id="100")
+        assert captured["path"] == "/mapper/run-all"
+
+    def test_extract_posts_to_correct_path(self):
+        captured = {}
+
+        def handler(request):
+            import json as _json
+            captured["path"] = request.url.path
+            captured["body"] = _json.loads(request.content)
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = PDFMapperClient(transport=httpx.MockTransport(handler))
+        client.mapper.extract(pdf_path="/data/input/form.pdf", user_id="1", session_id="1", pdf_doc_id="100")
+        assert captured["path"] == "/mapper/extract"
+        assert captured["body"]["pdf_path"] == "/data/input/form.pdf"
+
+    def test_upload_file_posts_to_correct_path(self, tmp_path):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["method"] = request.method
+            return httpx.Response(200, json={"status": "success", "path": "/app/data/input/1/1/100/input.pdf", "size_bytes": 8})
+
+        pdf = tmp_path / "form.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
+
+        client = PDFMapperClient(transport=httpx.MockTransport(handler))
+        result = client.mapper.upload_file(
+            user_id="1", session_id="1", pdf_doc_id="100",
+            filename="input.pdf",
+            source=str(pdf),
+        )
+        assert captured["path"] == "/upload/1/1/100/input.pdf"
+        assert captured["method"] == "POST"
+        assert result["status"] == "success"
+
+    def test_upload_file_accepts_bytes(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            return httpx.Response(200, json={"status": "success", "size_bytes": 2})
+
+        client = PDFMapperClient(transport=httpx.MockTransport(handler))
+        client.mapper.upload_file(
+            user_id="1", session_id="1", pdf_doc_id="100",
+            filename="global_schema.json",
+            source=b"{}",
+        )
+        assert captured["path"] == "/upload/1/1/100/global_schema.json"
+
+    def test_upload_file_rejects_invalid_filename(self):
+        client = PDFMapperClient()
+        with pytest.raises(ValueError, match="filename must be one of"):
+            client.mapper.upload_file("1", "1", "100", "evil.exe", b"data")
 
     def test_health_check_posts_to_health(self):
         captured = {}

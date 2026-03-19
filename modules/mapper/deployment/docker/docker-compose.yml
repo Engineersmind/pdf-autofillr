@@ -40,6 +40,9 @@ services:
       # LLM_MODEL: "ollama/llama3.1:8b"
       # LLM_TEMPERATURE: "0.05"
       # USE_SECOND_MAPPER: "true"
+
+      # RAG service URL — uses shared network so service name resolves
+      RAG_API_URL: "http://rag:8001/predict"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -49,10 +52,13 @@ services:
       start_period: 40s
     networks:
       - mapper-network
+      - pdf-autofillr-net
 
 networks:
   mapper-network:
     driver: bridge
+  pdf-autofillr-net:
+    external: true
 
 # Optional: Add volumes for better data persistence
 volumes:

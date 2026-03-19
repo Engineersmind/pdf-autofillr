@@ -84,6 +84,7 @@ class PredictionPipeline:
             "user_id": user_id, "session_id": session_id, "pdf_id": pdf_id,
             "submission_id": submission_id, "pdf_hash": pdf_hash,
             "frequency": frequency, "is_duplicate": is_duplicate,
+            "predictions": predictions,
             "summary": rag_output["summary"],
         }
 

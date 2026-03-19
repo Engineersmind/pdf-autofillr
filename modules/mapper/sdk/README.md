@@ -310,12 +310,14 @@ except PDFMapperError as e:
 ## HTTP Client (`PDFMapperClient`)
 
 Use this when the mapper runs as a separate Docker service / HTTP server.
+The server derives all file paths from `(user_id, session_id, pdf_doc_id)` using the
+`MAPPER_*` env vars — no file paths in request payloads.
 
 ### Import
 
 ```python
 from pdf_autofiller_mapper import PDFMapperClient
-from pdf_autofiller.exceptions import APIError, ConnectionError, TimeoutError
+from pdf_autofiller_mapper.exceptions import APIError, ConnectionError, TimeoutError
 ```
 
 ### Constructor
@@ -333,71 +335,190 @@ PDFMapperClient(
 ```python
 with PDFMapperClient(base_url="http://localhost:8000") as client:
     health = client.health_check()
-    print(health)   # {"status": "ok"}
+    print(health)   # {"status": "healthy"}
 ```
 
 ### Operations
 
 All methods are on `client.mapper` and return a plain `dict` (the server's JSON response).
 
+#### `upload_file` — upload an input file
+
+```python
+# Upload the PDF template
+client.mapper.upload_file(
+    user_id="1", session_id="1", pdf_doc_id="100",
+    filename="input.pdf",
+    source="/local/path/application.pdf",   # file path or raw bytes
+)
+
+# Upload the keys-only schema
+client.mapper.upload_file(
+    user_id="1", session_id="1", pdf_doc_id="100",
+    filename="global_schema.json",
+    source="/local/path/schema_keys.json",
+)
+
+# Upload per-user fill data
+client.mapper.upload_file(
+    user_id="1", session_id="1", pdf_doc_id="100",
+    filename="input_data.json",
+    source=b'{"firstName": "Jane", "lastName": "Doe"}',   # also accepts bytes
+)
+```
+
+Accepted filenames: `input.pdf`, `global_schema.json`, `input_data.json`.
+Passing any other filename raises `ValueError` before a request is made.
+
+---
+
 #### `make_embed_file` — extract + map + embed
+
+Runs the prepare pipeline once per PDF template.
+Input files must be at `MAPPER_INPUT_PATH/{user_id}/{session_id}/{pdf_doc_id}/`.
 
 ```python
 with PDFMapperClient("http://localhost:8000") as client:
     result = client.mapper.make_embed_file(
-        pdf_path="s3://my-bucket/forms/application.pdf",
-        session_id="session-abc123",   # optional
+        user_id="1",
+        session_id="1",
+        pdf_doc_id="100",
+        investor_type="individual",   # optional, default "individual"
+        use_second_mapper=False,      # optional, enables RAG second-mapper
     )
-    print(result)   # {"status": "success", "outputs": {"embedded_pdf": ...}, ...}
+    # result["output_paths"]["embedded_pdf"] → path on the server
+    print(result["status"])   # "success"
 ```
 
-#### `fill` — fill with per-user data
+#### `fill` — fill embedded PDF with per-user data
+
+`input_data.json` must be at `MAPPER_INPUT_PATH/{user_id}/{session_id}/{pdf_doc_id}/`.
+The embedded PDF must have been produced by `make_embed_file` first.
 
 ```python
 result = client.mapper.fill(
-    pdf_path="s3://my-bucket/forms/application_embedded.pdf",
-    data={"firstName": "Jane", "lastName": "Doe"},
-    session_id="session-abc123",
+    user_id="1",
+    session_id="1",
+    pdf_doc_id="100",
 )
+filled_pdf_path = result["output_paths"]["filled_pdf"]
 ```
 
-#### `extract`, `map`, `embed` — individual stages
+#### Download output files
+
+Once fill completes, download the filled PDF using the path returned in `output_paths`.
+The download endpoint accepts any storage path — local, S3, Azure, or GCS — via the `path` query parameter.
 
 ```python
-# Extract only
-result = client.mapper.extract(pdf_path="s3://bucket/form.pdf")
+import httpx
 
-# Map only
-result = client.mapper.map(
-    pdf_path="s3://bucket/form.pdf",
-    mapper_type="ensemble",   # "semantic" | "rag" | "headers" | "ensemble"
+filled_path = result["output_paths"]["filled_pdf"]
+# filled_path may be a local path or a cloud URI, e.g.:
+#   /app/data/output/1/1/100/filled.pdf
+#   s3://my-bucket/prefix/output/1/1/100/filled.pdf
+
+response = httpx.get(
+    "http://localhost:8000/download",
+    params={"path": filled_path},
 )
-
-# Embed only
-result = client.mapper.embed(pdf_path="s3://bucket/form.pdf")
+with open("filled.pdf", "wb") as f:
+    f.write(response.content)
 ```
 
-#### `check_embed_file` — verify embedded metadata exists
+Or via curl:
+```bash
+# Local
+curl -o filled.pdf "http://localhost:8000/download?path=/app/data/output/1/1/100/filled.pdf"
+
+# S3
+curl -o filled.pdf "http://localhost:8000/download?path=s3://bucket/prefix/output/1/1/100/filled.pdf"
+```
+
+#### `check_embed_file` — verify embedded PDF is ready
 
 ```python
-result = client.mapper.check_embed_file(pdf_path="s3://bucket/form.pdf")
-if result["data"]["has_metadata"]:
-    print("Ready to fill")
+result = client.mapper.check_embed_file(
+    user_id="1",
+    session_id="1",
+    pdf_doc_id="100",
+)
+print(result["status"])   # "success" when embedded PDF exists
 ```
 
 #### `run_all` — complete pipeline in one request
 
+Runs extract → map → embed → fill. All three input files must be present first.
+
 ```python
-result = client.mapper.run_all(pdf_path="s3://bucket/form.pdf")
+result = client.mapper.run_all(
+    user_id="1",
+    session_id="1",
+    pdf_doc_id="100",
+    investor_type="individual",   # optional
+)
+```
+
+#### Low-level stage methods
+
+For fine-grained control. Accept explicit file paths rather than IDs.
+
+```python
+# Extract form fields from a PDF
+result = client.mapper.extract(
+    pdf_path="/app/data/input/1/1/100/input.pdf",
+    user_id="1", session_id="1", pdf_doc_id="100",   # optional
+)
+
+# Map extracted fields to schema
+result = client.mapper.map(
+    extracted_json_path="/app/data/output/1/1/100/extracted.json",
+    input_json_path="/app/data/input/1/1/100/global_schema.json",
+    investor_type="individual",
+)
+
+# Embed field metadata into PDF
+result = client.mapper.embed(
+    original_pdf_path="/app/data/input/1/1/100/input.pdf",
+    extracted_json_path="/app/data/output/1/1/100/extracted.json",
+    mapping_json_path="/app/data/output/1/1/100/mapping.json",
+    radio_groups_path="/app/data/output/1/1/100/radio_groups.json",
+)
+```
+
+### Typical workflow
+
+```python
+with PDFMapperClient("http://localhost:8000") as client:
+
+    # Step 1 — upload inputs for the template
+    client.mapper.upload_file("1", "1", "100", "input.pdf",          source="forms/application.pdf")
+    client.mapper.upload_file("1", "1", "100", "global_schema.json", source="schemas/keys.json")
+
+    # Step 2 — prepare template (once per PDF)
+    embed = client.mapper.make_embed_file(user_id="1", session_id="1", pdf_doc_id="100")
+    assert embed["status"] == "success"
+
+    # Step 3 — upload per-user fill data
+    client.mapper.upload_file("1", "1", "100", "input_data.json", source="users/jane.json")
+
+    # Step 4 — fill for a user (once per submission)
+    fill = client.mapper.fill(user_id="1", session_id="1", pdf_doc_id="100")
+    assert fill["status"] == "success"
+
+    # Step 5 — download the filled PDF (works for local and cloud paths)
+    filled_path = fill["output_paths"]["filled_pdf"]
+    response = httpx.get("http://localhost:8000/download", params={"path": filled_path})
+    with open("jane_filled.pdf", "wb") as f:
+        f.write(response.content)
 ```
 
 ### Error handling
 
 ```python
-from pdf_autofiller.exceptions import APIError, ConnectionError, TimeoutError
+from pdf_autofiller_mapper.exceptions import APIError, ConnectionError, TimeoutError
 
 try:
-    result = client.mapper.make_embed_file(pdf_path="s3://bucket/form.pdf")
+    result = client.mapper.make_embed_file(user_id="1", session_id="1", pdf_doc_id="100")
 except ConnectionError:
     print("Server is not running or unreachable")
 except TimeoutError:

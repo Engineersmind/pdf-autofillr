@@ -16,24 +16,27 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: runtime
+    container_name: rag
     ports:
-      - "8000:8000"
+      - "8001:8001"
     volumes:
-      - ragpdf_data:/data
+      - ../ragpdf_data:/app/data/ragpdf_data
     env_file:
       - ../.env
     environment:
-      RAGPDF_DATA_PATH: /data/ragpdf_data
-      RAGPDF_CHROMA_PATH: /data/chroma_data
+      RAGPDF_DATA_PATH: /app/data/ragpdf_data
+      RAGPDF_CHROMA_PATH: /app/data/chroma_data
       RAGPDF_SERVER_HOST: 0.0.0.0
-      RAGPDF_SERVER_PORT: "8000"
+      RAGPDF_SERVER_PORT: "8001"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    networks:
+      - pdf-autofillr-net
 
   # ── Test runner ─────────────────────────────────────────────────────────────
   test:
@@ -57,7 +60,7 @@ services:
   chroma:
     image: ghcr.io/chroma-core/chroma:0.5.0
     ports:
-      - "8001:8000"
+      - "8002:8000"
     volumes:
       - chroma_data:/chroma/chroma
     environment:
@@ -82,6 +85,9 @@ services:
       - weaviate
 
 volumes:
-  ragpdf_data:
   chroma_data:
   weaviate_data:
+
+networks:
+  pdf-autofillr-net:
+    external: true

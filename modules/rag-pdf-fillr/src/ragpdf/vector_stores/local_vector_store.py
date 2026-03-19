@@ -47,7 +47,11 @@ class LocalVectorStore(VectorStoreBackend):
         if "metadata" not in data:
             data["metadata"] = {"total_count": len(data.get("vectors", [])), "last_updated": _now()}
         self._backfill_missing_fields(data["vectors"])
-        logger.info(f"Loaded {len(data['vectors'])} vectors from {self.db_file}")
+        count = len(data["vectors"])
+        logger.info(f"✅ Loaded {count} vectors from {self.db_file}")
+        if count > 0:
+            names = [v["field_name"] for v in data["vectors"][:5]]
+            logger.info(f"   First 5 field names: {names}")
         return data
 
     def _backfill_missing_fields(self, vectors: list):

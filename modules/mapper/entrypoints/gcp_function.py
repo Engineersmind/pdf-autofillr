@@ -29,6 +29,7 @@ except ImportError:
 
 from src.core.logger import setup_logging
 from src.core.config import settings
+from src.storage.storage_config import get_storage_config
 from src.configs.file_config import get_file_config
 from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
 from src.handlers import operations
@@ -95,9 +96,9 @@ async def route_operation(event: dict) -> dict:
     if pdf_doc_id is None:
         raise ValueError("Missing required parameter: pdf_doc_id")
 
-    file_config = get_file_config()
-    ctx = create_job_context(file_config, user_id, session_id, pdf_doc_id)
-    mapping_cfg = _mapping_config(file_config)
+    sc = get_storage_config()
+    ctx = create_job_context(sc, user_id, session_id, pdf_doc_id)
+    mapping_cfg = _mapping_config(get_file_config())
 
     logger.info(f"GCP op={operation} user={user_id} pdf={pdf_doc_id} storage={ctx.source_type}")
 

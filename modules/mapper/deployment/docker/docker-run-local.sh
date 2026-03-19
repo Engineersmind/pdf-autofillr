@@ -85,17 +85,18 @@ echo "  # 1. Health check"
 echo "  curl http://localhost:$PORT/health"
 echo ""
 echo "  # 2. Embed PDF template (run once per form)"
+echo "  #    Input files must be at: {input_base_path}/{user_id}/{session_id}/{pdf_doc_id}/"
 cat << 'EOF'
   curl -X POST http://localhost:8000/mapper/make-embed-file \
     -H "Content-Type: application/json" \
-    -d '{"pdf_path": "/app/data/input/small_4page.pdf", "user_id": 1, "pdf_doc_id": 100}'
+    -d '{"user_id": "1", "session_id": "1", "pdf_doc_id": "100"}'
 EOF
 echo ""
 echo "  # 3. Fill form (run once per user)"
 cat << 'EOF'
   curl -X POST http://localhost:8000/mapper/fill \
     -H "Content-Type: application/json" \
-    -d '{"embedded_pdf_path": "<path from step 2>", "input_json_path": "/app/data/input/input.json", "user_id": 1, "pdf_doc_id": 100}'
+    -d '{"user_id": "1", "session_id": "1", "pdf_doc_id": "100"}'
 EOF
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"

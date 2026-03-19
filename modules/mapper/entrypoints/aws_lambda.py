@@ -383,14 +383,14 @@ async def route_operation(event: dict, operation: str, notifier):
         if pdf_doc_id is None:
             raise ValueError("Missing required parameter: pdf_doc_id")
 
-        from src.configs.file_config import get_file_config
+        from src.storage.storage_config import get_storage_config
         from src.utils.entrypoint_helpers import create_job_context
         from src.utils.hash_cache import populate_cached_files_to_config
         from src.utils.storage_helper import upload_to_source
         from src.utils.entrypoint_helpers import cleanup_processing_directory
         import os
 
-        ctx = create_job_context(get_file_config(), user_id, session_id or '', pdf_doc_id)
+        ctx = create_job_context(get_storage_config(), user_id, session_id or '', pdf_doc_id)
 
         # Fetch S3 URL from backend API and override source path
         async with APIClient() as api_client:
@@ -482,11 +482,11 @@ async def route_operation(event: dict, operation: str, notifier):
         if pdf_doc_id is None:
             raise ValueError("Missing required parameter: pdf_doc_id")
 
-        from src.configs.file_config import get_file_config
+        from src.storage.storage_config import get_storage_config
         from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
         import os
 
-        ctx = create_job_context(get_file_config(), user_id, session_id or '', pdf_doc_id)
+        ctx = create_job_context(get_storage_config(), user_id, session_id or '', pdf_doc_id)
 
         async with APIClient() as api_client:
             pdf_s3_url = await api_client.get_document_s3_url(doc_id=pdf_doc_id)
@@ -521,11 +521,11 @@ async def route_operation(event: dict, operation: str, notifier):
         if session_id is None:
             raise ValueError("Missing required parameter: session_id")
 
-        from src.configs.file_config import get_file_config
+        from src.storage.storage_config import get_storage_config
         from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
         import os
 
-        ctx = create_job_context(get_file_config(), user_id, session_id, pdf_doc_id)
+        ctx = create_job_context(get_storage_config(), user_id, session_id, pdf_doc_id)
 
         # Fetch embedded PDF URL from API
         async with APIClient() as api_client:
@@ -569,11 +569,11 @@ async def route_operation(event: dict, operation: str, notifier):
         if pdf_doc_id is None:
             raise ValueError("Missing required parameter: pdf_doc_id")
 
-        from src.configs.file_config import get_file_config
+        from src.storage.storage_config import get_storage_config
         from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
         import os
 
-        ctx = create_job_context(get_file_config(), user_id, event.get('session_id') or '', pdf_doc_id)
+        ctx = create_job_context(get_storage_config(), user_id, event.get('session_id') or '', pdf_doc_id)
 
         async with APIClient() as api_client:
             embedded_pdf_s3_url = (

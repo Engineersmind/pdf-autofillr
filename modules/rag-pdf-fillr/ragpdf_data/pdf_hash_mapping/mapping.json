@@ -172,5 +172,108 @@
     ],
     "first_seen": "2026-03-17T11:57:03.168075Z",
     "last_seen": "2026-03-17T12:00:45.456984Z"
+  },
+  "aeff9d3d87f4ae0ae6e29d35c94ab343da09cc7d389c16508f1f1d20147183e1": {
+    "pdf_hash": "aeff9d3d87f4ae0ae6e29d35c94ab343da09cc7d389c16508f1f1d20147183e1",
+    "pdf_id": "100",
+    "category": null,
+    "sub_category": null,
+    "document_type": null,
+    "pdf_count": 10,
+    "total_submissions": 10,
+    "submissions": [
+      {
+        "submission_id": "1_1_100_1_1773932085",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 1,
+        "timestamp": "2026-03-19T14:54:47.311732Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_2_1773932538",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 2,
+        "timestamp": "2026-03-19T15:02:19.400955Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_3_1773932573",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 3,
+        "timestamp": "2026-03-19T15:02:53.258408Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_4_1773932607",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 4,
+        "timestamp": "2026-03-19T15:03:29.917898Z",
+        "total_fields": 79
+      },
+      {
+        "submission_id": "1_1_100_5_1773933871",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 5,
+        "timestamp": "2026-03-19T15:24:32.097734Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_6_1773933889",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 6,
+        "timestamp": "2026-03-19T15:24:49.708642Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_7_1773933966",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 7,
+        "timestamp": "2026-03-19T15:26:07.102186Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_8_1773934233",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 8,
+        "timestamp": "2026-03-19T15:30:34.220774Z",
+        "total_fields": 3
+      },
+      {
+        "submission_id": "1_1_100_9_1773934381",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 9,
+        "timestamp": "2026-03-19T15:33:04.438357Z",
+        "total_fields": 79
+      },
+      {
+        "submission_id": "1_1_100_10_1773935752",
+        "user_id": "1",
+        "session_id": "1",
+        "pdf_id": "100",
+        "frequency": 10,
+        "timestamp": "2026-03-19T15:55:54.859830Z",
+        "total_fields": 79
+      }
+    ],
+    "first_seen": "2026-03-19T14:54:47.311732Z",
+    "last_seen": "2026-03-19T15:55:54.859830Z"
   }
 }

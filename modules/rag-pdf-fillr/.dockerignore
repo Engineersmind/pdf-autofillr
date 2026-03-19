@@ -31,7 +31,6 @@ chroma_data/
 
 # Docs / misc
 *.md
-LICENSE
 *.txt
 *.zip
 ignore_this.txt

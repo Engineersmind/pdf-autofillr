@@ -1567,20 +1567,37 @@ async def handle_make_embed_file_operation(
         cache_hit = False
         
         # Persistent cache path (source of truth in cache/)
-        persistent_cache_path = settings.cache_registry_path
-        if not persistent_cache_path:
-            persistent_cache_path = os.path.join(settings.data_output_dir, 'cache', 'hash_registry.json')
+        # Prefer JobContext.local_cache_registry (from StorageConfig), then env fallback
+        persistent_cache_path = (
+            getattr(config, 'local_cache_registry', None)
+            or getattr(config, 'dest_cache_registry', None)
+            or settings.cache_registry_path
+            or os.path.join('/app/data/cache', 'hash_registry.json')
+        )
 
         # Working copy lives in the per-request processing dir (/tmp/processing/<uuid>/).
         # All reads/writes go to this tmp copy; it is uploaded back to persistent_cache_path
-        # after each phase. This avoids SameFileError on local storage and mirrors the
-        # cloud pattern (download → work → upload).
+        # after each phase. This avoids SameFileError on local storage and works for any
+        # storage backend (local, S3, Azure, GCP).
         _proc_dir = getattr(config, 'processing_dir', tempfile.gettempdir())
         os.makedirs(_proc_dir, exist_ok=True)
         cache_registry_path = os.path.join(_proc_dir, 'hash_registry.json')
+
+        # 1. Try to seed working copy from the persistent local cache (fast path)
         if os.path.exists(persistent_cache_path):
             shutil.copy2(persistent_cache_path, cache_registry_path)
-            logger.debug(f"Downloaded cache registry to working copy: {cache_registry_path}")
+            logger.debug(f"Seeded cache working copy from local: {persistent_cache_path}")
+        else:
+            # 2. Local file missing — try to restore from the remote destination
+            #    (covers server restarts when MAPPER_STORAGE is cloud)
+            _remote_cache = getattr(config, 'dest_cache_registry', None)
+            if _remote_cache and _remote_cache != persistent_cache_path:
+                try:
+                    config.download_file(_remote_cache, persistent_cache_path)
+                    shutil.copy2(persistent_cache_path, cache_registry_path)
+                    logger.info(f"Restored cache registry from remote: {_remote_cache}")
+                except Exception as _ce:
+                    logger.debug(f"No remote cache to restore ({_ce}); starting fresh")
         
         # Initialize variables for dual mapper (needed in all code paths)
         semantic_mapping_path = None
@@ -2570,56 +2587,46 @@ async def call_rag_api(
     session_id: Optional[str] = None
 ) -> str:
     """
-    Call RAG API to get field predictions based on headers.
-    Source-agnostic - paths come from storage_config (configured in config.ini).
-    
-    Process:
-    1. Create RAG input files (header_file.json, section_file.json) from headers
-    2. Upload them to source storage (using OutputFileHandler)
-    3. Call external RAG API with file paths
-    4. RAG API downloads files, processes them, uploads predictions
-    5. Return path to rag_predictions.json
-    
+    Call RAG API to get field predictions based on header_file.json.
+
+    Reads header_file.json from disk (produced by create_rag_api_files) and
+    sends its contents inline to RAG /predict.  The RAG response contains a
+    predictions dict which is written to rag_predictions.json locally and
+    returned as a path.
+
     Args:
-        user_id: User ID
-        pdf_doc_id: PDF document ID
-        headers_file_path: Path to final_form_fields.json (local processing path)
-        extracted_json_path: Path to extracted JSON (not used)
-        pdf_hash: PDF fingerprint hash
-        storage_config: Storage configuration with paths
-        session_id: Optional session ID (will generate if not provided)
-        
+        user_id:             User ID
+        pdf_doc_id:          PDF document ID
+        headers_file_path:   Path to final_form_fields.json (source for RAG files)
+        extracted_json_path: Path to extracted JSON (unused, kept for signature compat)
+        pdf_hash:            PDF fingerprint hash
+        storage_config:      Storage configuration with local paths
+        session_id:          Optional session ID (generated if not provided)
+
     Returns:
-        Path to rag_predictions.json (in processing dir, ready for upload)
+        Path to rag_predictions.json written in the processing dir.
     """
-    
-    # Generate session ID if not provided
+
     if not session_id:
         session_id = f"session_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
     logger.info("=" * 80)
-    logger.info("RAG API CALL - Creating Input Files & Calling External Service")
+    logger.info("RAG API CALL - Sending header_file inline to /predict")
     logger.info("=" * 80)
     logger.info(f"Session ID: {session_id}")
-    logger.info(f"Storage Type: {getattr(storage_config, 'source_type', 'unknown')}")
 
     try:
-        # Get output paths from config (where to save RAG input files)
+        # ── Step 1: produce header_file.json + section_file.json ─────────────
         header_file_output_path = storage_config.local_header_file
         section_file_output_path = storage_config.local_section_file
-        
+
         if not header_file_output_path or not section_file_output_path:
             raise ValueError(
                 "RAG input file paths not configured. "
                 "Check config.local_header_file and config.local_section_file"
             )
-        
-        logger.info("Step 1: Creating RAG input files from headers...")
-        logger.info(f"  Input: {headers_file_path}")
-        logger.info(f"  Output header_file: {header_file_output_path}")
-        logger.info(f"  Output section_file: {section_file_output_path}")
-        
-        # Create RAG API input files using configured paths
+
+        logger.info(f"Step 1: Creating RAG input files from: {headers_file_path}")
         rag_files = await create_rag_api_files(
             final_form_fields_path=headers_file_path,
             header_file_output_path=header_file_output_path,
@@ -2629,130 +2636,99 @@ async def call_rag_api(
             pdf_doc_id=pdf_doc_id,
             pdf_hash=pdf_hash
         )
-        
         header_file_local = rag_files["header_file"]
-        section_file_local = rag_files["section_file"]
-        
-        logger.info(f"✅ RAG input files created locally")
-        
-        # Step 2: Upload to source storage (so RAG API can access them)
-        logger.info("Step 2: Uploading RAG input files to source storage...")
-        output_handler = OutputFileHandler(storage_config)
-        
-        # Upload header_file (OutputFileHandler will handle local/cloud)
-        dest_header_file = output_handler.save_output(header_file_local, 'header_file')
-        dest_section_file = output_handler.save_output(section_file_local, 'section_file')
-        
-        if dest_header_file:
-            logger.info(f"📤 header_file uploaded to: {dest_header_file}")
-        if dest_section_file:
-            logger.info(f"📤 section_file uploaded to: {dest_section_file}")
-        
-        # Use destination paths for RAG API (or local if no upload happened)
-        header_file_for_api = dest_header_file if dest_header_file else header_file_local
-        section_file_for_api = dest_section_file if dest_section_file else section_file_local
-        
-        # Step 3: Call RAG API
-        logger.info("Step 3: Calling external RAG API...")
+        logger.info(f"✅ header_file written to: {header_file_local}")
+
+        # ── Step 2: read header_file and build RAG /predict payload ──────────
+        logger.info("Step 2: Reading header_file.json to build request payload...")
+        with open(header_file_local, "r") as f:
+            header_data = json.load(f)
+
+        # Strip bbox (extra field RAG doesn't accept) and add field_name default
+        fields_for_rag = [
+            {
+                "field_id":       field["field_id"],
+                "field_name":     field.get("field_name", ""),
+                "context":        field.get("context") or "",
+                "section_context": field.get("section_context") or "",
+                "headers":        field.get("headers", []),
+            }
+            for field in header_data.get("fields", [])
+        ]
+
+        payload = {
+            "user_id":      str(user_id),
+            "session_id":   str(session_id),
+            "pdf_id":       str(pdf_doc_id),
+            "pdf_hash":     header_data.get("pdf_hash", pdf_hash),
+            "pdf_category": header_data.get("pdf_category", {}),
+            "fields":       fields_for_rag,
+        }
+
+        # ── Step 3: POST to RAG /predict ─────────────────────────────────────
         rag_api_url = settings.rag_api_url
-        logger.info(f"RAG API URL from settings: {rag_api_url}")
         rag_api_key = settings.rag_api_key
-        
+
         if not rag_api_url:
             raise RuntimeError(
-                "RAG API URL not configured in settings (rag_api_url). "
-                "Set this in config.ini [api] section."
+                "RAG API URL not configured. Set RAG_API_URL in .env"
             )
         if not rag_api_key:
-            logger.warning("⚠️  RAG API key not configured - API may reject request")
+            logger.warning("⚠️  RAG_API_KEY not set – API may reject the request")
 
-        # Prepare payload for RAG API
-        payload = {
-            "api_name": "get_rag_predictions",
-            "user_id": str(user_id),
-            "session_id": session_id,
-            "pdf_id": str(pdf_doc_id),
-            "pdf_hash": pdf_hash,
-            "header_file_location": header_file_for_api,
-            "section_file_location": section_file_for_api,
-            "storage_type": getattr(storage_config, 'source_type', 'local')
-        }
-        
-        logger.info(f"📞 Calling RAG API: {rag_api_url}")
-        logger.debug(f"   Payload: {payload}")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        logger.info(f"Step 3: POST {rag_api_url}  ({len(fields_for_rag)} fields)")
+        logger.debug(f"   Payload keys: {list(payload.keys())}")
+
+        req_headers = {"Content-Type": "application/json"}
+        if rag_api_key:
+            req_headers["X-API-Key"] = rag_api_key
+
+        async with aiohttp.ClientSession() as http_session:
+            async with http_session.post(
                 rag_api_url,
                 json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": rag_api_key
-                } if rag_api_key else {"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=300)  # 5 minutes timeout
+                headers=req_headers,
+                timeout=aiohttp.ClientTimeout(total=300),
             ) as response:
-                
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"❌ RAG API failed with status {response.status}")
-                    logger.error(f"   Response: {error_text}")
-                    raise RuntimeError(f"RAG API returned status {response.status}: {error_text}")
-                
-                result = await response.json()
-                logger.info(f"✅ RAG API response status: {result.get('status')}")
-                
-                # Extract RAG predictions path from response
-                if result.get("status") == "success":
-                    # RAG API returns path in its own storage (could be different S3/Azure/GCP)
-                    rag_source_path = (
-                        result.get("rag_predictions_path") or 
-                        result.get("data", {}).get("rag_predictions") or
-                        result.get("data", {}).get("s3_paths", {}).get("rag_predictions")
+                    raise RuntimeError(
+                        f"RAG API returned HTTP {response.status}: {error_text}"
                     )
-                    
-                    if not rag_source_path:
-                        raise RuntimeError(
-                            "RAG API returned success but no predictions path found. "
-                            f"Response: {result}"
-                        )
-                    
-                    logger.info(f"✅ RAG predictions available at RAG storage: {rag_source_path}")
-                    
-                    # Download from RAG storage to local docker path
-                    # InputFileHandler automatically detects source type from path (s3://, gs://, azure://, etc.)
-                    
-                    # Get local path from config (set from config.ini pattern)
-                    local_predictions_path = storage_config.local_rag_predictions
-                    
-                    if not local_predictions_path:
-                        raise ValueError(
-                            "RAG predictions local path not configured. "
-                            "Check config.local_rag_predictions"
-                        )
-                    
-                    logger.info(f"📥 Downloading RAG predictions to local: {local_predictions_path}")
-                    logger.info(f"   Source: {rag_source_path}")
-                    
-                    # InputFileHandler detects storage type from path and downloads appropriately
-                    input_handler = InputFileHandler(storage_config)
-                    downloaded_path = input_handler.download_input(rag_source_path, local_predictions_path)
-                    
-                    
-                    if not downloaded_path or not os.path.exists(downloaded_path):
-                        raise RuntimeError(
-                            f"Failed to download RAG predictions from {rag_source_path} to {local_predictions_path}"
-                        )
-                    
-                    logger.info(f"✅ RAG predictions downloaded to local: {downloaded_path}")
-                    logger.info("=" * 80)
-                    
-                    return downloaded_path
-                else:
-                    error_message = result.get('message') or result.get('error', 'Unknown error')
-                    raise RuntimeError(f"RAG API returned error: {error_message}")
-                    
+                result = await response.json()
+
+        logger.info(f"✅ RAG API response status: {result.get('status')}")
+
+        if result.get("status") != "success":
+            error_msg = result.get("message") or result.get("error", "unknown error")
+            raise RuntimeError(f"RAG API returned error: {error_msg}")
+
+        # ── Step 4: extract predictions and write rag_predictions.json ────────
+        predictions = result.get("data", {}).get("predictions", {})
+        if not predictions:
+            raise RuntimeError(
+                f"RAG API returned success but predictions dict is empty. "
+                f"Full response: {result}"
+            )
+
+        local_predictions_path = storage_config.local_rag_predictions
+        if not local_predictions_path:
+            raise ValueError(
+                "RAG predictions local path not configured. "
+                "Check config.local_rag_predictions"
+            )
+
+        os.makedirs(os.path.dirname(local_predictions_path), exist_ok=True)
+        with open(local_predictions_path, "w") as f:
+            json.dump({"status": "success", "predictions": predictions}, f, indent=2)
+
+        logger.info(f"✅ RAG predictions written to: {local_predictions_path}")
+        logger.info(f"   {len(predictions)} field(s) predicted")
+        logger.info("=" * 80)
+        return local_predictions_path
+
     except asyncio.TimeoutError:
-        logger.error("❌ RAG API call timed out after 5 minutes")
+        logger.error("❌ RAG API timed out after 5 minutes")
         logger.error("=" * 80)
         raise RuntimeError("RAG API call timed out")
     except aiohttp.ClientError as client_error:

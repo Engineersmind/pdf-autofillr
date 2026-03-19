@@ -217,35 +217,47 @@ class FileConfig:
     def get_source_output_path(
         self,
         file_type: str,
-        user_id: int,
+        user_id,
         session_id: str,
-        pdf_doc_id: int
+        pdf_doc_id
     ) -> str:
         """
         Get output file path in source storage.
-        
+
+        Paths follow the {output_base_path}/{user_id}/{session_id}/{pdf_doc_id}/
+        hierarchy (same as RAG and chatbot).  The directory is created if it
+        does not already exist (local storage only).
+
         Args:
-            file_type: 'embedded_pdf' or 'filled_pdf'
-            user_id: User ID
+            file_type: key suffix matching an output_* entry in [file_naming]
+                       e.g. 'extracted_json', 'embedded_pdf', 'filled_pdf'
+            user_id:   User ID
             session_id: Session ID
             pdf_doc_id: PDF document ID
-        
+
         Returns:
-            Full path in source storage (e.g., /app/data/output/xxx_filled.pdf)
+            Full path in source storage, e.g.
+            /app/data/output/1/1/100/embedded.pdf
         """
         source_type = self.get_source_type()
         output_base = self.get(source_type, 'output_base_path',
-                              fallback='/app/data/output')
-        
+                               fallback='/app/data/output')
+
         pattern_key = f'output_{file_type}'
-        
-        return self.build_file_path(
+
+        full_path = self.build_file_path(
             pattern_key,
             user_id,
             session_id,
             pdf_doc_id,
             base_path=output_base
         )
+
+        # Ensure the parent directory exists for local paths
+        if not full_path.startswith(('s3://', 'azure://', 'gs://')):
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+        return full_path
 
 
 # Singleton instance — one per process lifetime

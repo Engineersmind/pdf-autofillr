@@ -19,9 +19,10 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 MODULE_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
 REPO_ROOT="$( cd "$MODULE_ROOT/../.." && pwd )"
 
-# Sample data paths (inside the container after volume mount)
-INPUT_PDF="/app/data/input/small_4page.pdf"
-INPUT_JSON="/app/data/input/input.json"
+# Test IDs — files must be at {input_base_path}/{USER_ID}/{SESSION_ID}/{PDF_DOC_ID}/
+USER_ID="1"
+SESSION_ID="1"
+PDF_DOC_ID="100"
 DATA_DIR="${DATA_DIR:-$REPO_ROOT/data/modules/mapper_sample}"
 
 # Helpers
@@ -88,32 +89,24 @@ echo ""
 echo -e "${YELLOW}[2/3] POST /mapper/make-embed-file${NC}"
 EMBED_RESPONSE=$(curl -s -X POST "$BASE_URL/mapper/make-embed-file" \
     -H "Content-Type: application/json" \
-    -d "{\"pdf_path\": \"$INPUT_PDF\", \"user_id\": 1, \"pdf_doc_id\": 100}")
+    -d "{\"user_id\": \"$USER_ID\", \"session_id\": \"$SESSION_ID\", \"pdf_doc_id\": \"$PDF_DOC_ID\"}")
 
 echo "  Response: $EMBED_RESPONSE"
 
-# Extract embedded_pdf_path from response (works with or without jq)
-if command -v jq &> /dev/null; then
-    EMBEDDED_PDF=$(echo "$EMBED_RESPONSE" | jq -r '.embedded_pdf_path // .output_path // empty')
-else
-    EMBEDDED_PDF=$(echo "$EMBED_RESPONSE" | grep -o '"embedded_pdf_path":"[^"]*"' | cut -d'"' -f4)
+if echo "$EMBED_RESPONSE" | grep -q '"error"\|"detail"'; then
+    fail "make_embed_file: error in response"
 fi
-
-if [ -z "$EMBEDDED_PDF" ]; then
-    fail "make_embed_file: no embedded_pdf_path in response"
-fi
-pass "make_embed_file succeeded → $EMBEDDED_PDF"
+pass "make_embed_file succeeded"
 
 # ── Test 3: fill ───────────────────────────────────────────────────────────
 echo ""
 echo -e "${YELLOW}[3/3] POST /mapper/fill${NC}"
 FILL_RESPONSE=$(curl -s -X POST "$BASE_URL/mapper/fill" \
     -H "Content-Type: application/json" \
-    -d "{\"embedded_pdf_path\": \"$EMBEDDED_PDF\", \"input_json_path\": \"$INPUT_JSON\", \"user_id\": 1, \"pdf_doc_id\": 100}")
+    -d "{\"user_id\": \"$USER_ID\", \"session_id\": \"$SESSION_ID\", \"pdf_doc_id\": \"$PDF_DOC_ID\"}")
 
 echo "  Response: $FILL_RESPONSE"
 
-# Check for success: response should contain a filled PDF path or success flag
 if echo "$FILL_RESPONSE" | grep -q '"error"\|"detail"'; then
     fail "fill: error in response"
 fi

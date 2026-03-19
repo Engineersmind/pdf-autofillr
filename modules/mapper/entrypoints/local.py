@@ -3,14 +3,14 @@ Local / Docker entrypoint.
 
 Flow per request:
   1. Load config.ini + .env
-  2. Build JobContext  (PathResolver + StorageBackend — from config.ini source_type)
+  2. Build JobContext  (PathResolver + StorageBackend — from MAPPER_* env vars)
   3. Download inputs from source → /tmp/processing/
   4. Call operation  (source-agnostic)
   5. Upload outputs from /tmp/processing/ → source
   6. Cleanup /tmp/processing/
   7. Return result
 
-To switch storage backend: change [general] source_type in config.ini.
+To switch storage backend: set MAPPER_STORAGE=local|aws|azure|gcp in .env.
 """
 
 import os
@@ -21,9 +21,10 @@ from typing import Dict, Any
 
 from dotenv import load_dotenv
 
-from src.configs.file_config import get_file_config
+from src.storage.storage_config import get_storage_config
 from src.handlers import operations
 from src.core.logger import logger
+from src.core.config import get_mapper_config
 from src.utils.entrypoint_helpers import (
     create_job_context,
     cleanup_processing_directory,
@@ -50,13 +51,12 @@ async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         load_dotenv()
-        file_config = get_file_config()
 
         operation, user_id, session_id, pdf_doc_id = extract_event_params(event)
         logger.info(f"Local entrypoint: op={operation} user={user_id} session={session_id} pdf={pdf_doc_id}")
 
-        # Build context: paths + backend wired from config.ini source_type
-        ctx = create_job_context(file_config, user_id, session_id, pdf_doc_id)
+        # Build context: paths + backend wired from MAPPER_* env vars
+        ctx = create_job_context(get_storage_config(), user_id, session_id, pdf_doc_id)
         logger.info(f"Storage backend: {ctx.source_type}")
 
         # Validate source inputs exist
@@ -67,7 +67,7 @@ async def handle_local_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
         # Call operation — cleanup runs even if operation raises
         try:
-            result = await _call_operation(operation, ctx, event, file_config)
+            result = await _call_operation(operation, ctx, event)
         finally:
             cleanup_processing_directory(ctx.processing_dir)
 
@@ -111,7 +111,6 @@ async def _call_operation(
     operation: str,
     ctx,
     event: Dict[str, Any],
-    file_config,
 ) -> Dict[str, Any]:
     """Dispatch to the appropriate operation handler."""
 
@@ -119,19 +118,11 @@ async def _call_operation(
     session_id = event['session_id']
     pdf_doc_id = event['pdf_doc_id']
 
-    mapping_config = {
-        "llm_model":            file_config.get('mapping', 'llm_model',            fallback='gpt-4o'),
-        "llm_temperature":      float(file_config.get('mapping', 'llm_temperature', fallback='0.05')),
-        "llm_max_tokens":       int(file_config.get('mapping',   'llm_max_tokens',  fallback='8192')),
-        "confidence_threshold": float(file_config.get('mapping', 'confidence_threshold', fallback='0.7')),
-        "chunking_strategy":    file_config.get('mapping', 'chunking_strategy',    fallback='page'),
-    }
+    mapping_config = get_mapper_config()
 
     if operation == "make_embed_file":
-        use_second_mapper_default = (
-            file_config.get('mapping', 'use_second_mapper', fallback='false').lower() == 'true'
-        )
-        use_second_mapper = event.get('use_second_mapper', use_second_mapper_default)
+        from src.core.config import settings
+        use_second_mapper = event.get('use_second_mapper', getattr(settings, 'use_second_mapper', False))
         logger.info(f"Dual mapper: {use_second_mapper}")
 
         return await operations.handle_make_embed_file_operation(
