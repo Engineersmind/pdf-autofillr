@@ -1,0 +1,19 @@
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "email": "john.doe@example.com",
+  "phone": "+1-555-0123",
+  "address": {
+    "street": "123 Main St",
+    "city": "San Francisco",
+    "state": "CA",
+    "zip": "94102"
+  },
+  "date_of_birth": "1990-01-15",
+  "ssn": "123-45-6789",
+  "employment": {
+    "employer": "Tech Company Inc",
+    "position": "Software Engineer",
+    "annual_income": "120000"
+  }
+}

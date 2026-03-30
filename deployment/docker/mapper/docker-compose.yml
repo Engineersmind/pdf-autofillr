@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Mapper service - Universal image
+  mapper:
+    build:
+      context: ../../..
+      dockerfile: deployment/docker/mapper/Dockerfile
+    container_name: pdf-mapper
+    ports:
+      - "8000:8000"
+    environment:
+      # Configure source type (local, aws, azure, gcp)
+      SOURCE_TYPE: ${SOURCE_TYPE:-local}
+      
+      # LLM Configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      
+      # AWS Configuration (if SOURCE_TYPE=aws)
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      
+      # Azure Configuration (if SOURCE_TYPE=azure)
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+      
+      # GCP Configuration (if SOURCE_TYPE=gcp)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      
+      # Notification Configuration (optional)
+      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
+      TEAMS_NOTIFICATIONS_ENABLED: ${TEAMS_NOTIFICATIONS_ENABLED:-false}
+      
+      # Performance Configuration
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-300}
+      MAX_CONCURRENT_OPERATIONS: ${MAX_CONCURRENT_OPERATIONS:-5}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    
+    volumes:
+      # Mount local data directory (for SOURCE_TYPE=local)
+      - ../../../data:/data
+      
+      # Mount custom config.ini if needed
+      - ../../../modules/mapper/config.ini:/app/config.ini:ro
+      
+      # Mount GCP credentials if needed
+      - ${GOOGLE_APPLICATION_CREDENTIALS_FILE:-/dev/null}:/app/gcp-key.json:ro
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    restart: unless-stopped
+    
+    networks:
+      - pdf-network
+
+  # Optional: Add other modules here (chatbot, rag, etc.)
+  # chatbot:
+  #   build:
+  #     context: ../../..
+  #     dockerfile: deployment/docker/chatbot/Dockerfile
+  #   ...
+
+networks:
+  pdf-network:
+    driver: bridge

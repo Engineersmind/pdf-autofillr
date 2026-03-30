@@ -1,0 +1,93 @@
+# ======================
+# Python cache / build
+# ======================
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/*.so
+**/*.egg
+**/*.egg-info/
+
+# ======================
+# Testing / coverage
+# ======================
+**/.pytest_cache/
+**/.mypy_cache/
+**/.coverage
+htmlcov/
+
+# ======================
+# Virtual environments
+# ======================
+venv/
+env/
+.venv/
+ENV/
+*.env
+.env
+
+# ======================
+# IDE / Editor
+# ======================
+.vscode/
+.idea/
+
+# ======================
+# OS junk
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# Data / temp folders
+# ======================
+rough_docs/
+data/
+**/data/cache/
+**/data/output/
+**/data/input/*.pdf
+
+# ======================
+# Logs
+# ======================
+*.log
+
+# ======================
+# ZIP / Build artifacts
+# ======================
+*.zip
+modules/**/**/*.zip
+
+# VERY IMPORTANT (your repo issue)
+modules-final-1/
+modules0/
+modules1/
+modules2/
+modules3/
+
+# ======================
+# Java build artifacts (YOU HAVE THESE)
+# ======================
+**/target/
+**/*.jar
+**/*.class
+
+# ======================
+# Python packaging
+# ======================
+build/
+dist/
+
+# ======================
+# Secrets
+# ======================
+*.key
+*.pem
+
+# ======================
+# Misc
+# ======================
+*.tmp
+*.bak
