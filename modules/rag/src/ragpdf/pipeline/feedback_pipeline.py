@@ -15,7 +15,7 @@ class FeedbackPipeline:
     """
     Orchestrates API 4: user_feedback.
     1. Tag + save raw feedback
-    2. GPT-4/LLM → corrected field names
+    2. GPT-4/LLM -> corrected field names
     3. Route each error to responsible vector
     4. Negative confidence update + embedding regeneration
     5. Recalculate metrics + time series

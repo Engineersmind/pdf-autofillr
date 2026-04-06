@@ -1,9 +1,9 @@
 """
-Tests for the chatbot → mapper in-process integration path.
+Tests for the chatbot -> mapper in-process integration path.
 
 Verifies that when MAPPER_API_URL is not set, MapperPDFFiller
 correctly instantiates InProcessMapperFiller and the full
-prepare → check_ready → fill flow works end-to-end with mocks.
+prepare -> check_ready -> fill flow works end-to-end with mocks.
 """
 import json
 import os

@@ -36,7 +36,7 @@ def http_filler(tmp_path):
 def inprocess_filler(tmp_path):
     """MapperPDFFiller in in-process mode with a mocked InProcessMapperFiller."""
     from chatbot.pdf.mapper_filler import MapperPDFFiller
-    # No MAPPER_API_URL → in-process mode
+    # No MAPPER_API_URL -> in-process mode
     f = MapperPDFFiller(mapper_api_url="", config_dir=str(tmp_path))
     mock_impl = MagicMock()
     f._impl = mock_impl

@@ -5,10 +5,10 @@ load_dotenv()
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 # RAGPDF_STORAGE: where ALL prediction files, metrics, feedback go
-#   local   → ./data/rag (or RAGPDF_DATA_PATH)
-#   s3      → AWS S3 bucket
-#   azure   → Azure Blob Storage
-#   gcs     → Google Cloud Storage
+#   local   -> ./data/rag (or RAGPDF_DATA_PATH)
+#   s3      -> AWS S3 bucket
+#   azure   -> Azure Blob Storage
+#   gcs     -> Google Cloud Storage
 RAGPDF_STORAGE   = os.getenv("RAGPDF_STORAGE",   "local")
 RAGPDF_DATA_PATH = os.getenv("RAGPDF_DATA_PATH", "./data/rag")
 
@@ -28,10 +28,10 @@ RAGPDF_GCS_PREFIX = os.getenv("RAGPDF_GCS_PREFIX", "ragpdf/")
 
 # ── Embedding Backend ─────────────────────────────────────────────────────────
 # RAGPDF_EMBEDDING_BACKEND: what generates vector embeddings for field context
-#   sentence_transformer  → local model, no API key (default, matches rag-lambda)
-#   openai                → OpenAI text-embedding-* models
-#   litellm               → any LiteLLM provider (Azure, Cohere, Bedrock, Ollama, etc.)
-#   noop                  → zero vectors, for unit tests only — DO NOT USE IN PROD
+#   sentence_transformer  -> local model, no API key (default, matches rag-lambda)
+#   openai                -> OpenAI text-embedding-* models
+#   litellm               -> any LiteLLM provider (Azure, Cohere, Bedrock, Ollama, etc.)
+#   noop                  -> zero vectors, for unit tests only — DO NOT USE IN PROD
 RAGPDF_EMBEDDING_BACKEND      = os.getenv("RAGPDF_EMBEDDING_BACKEND",      "sentence_transformer")
 RAGPDF_ST_MODEL               = os.getenv("RAGPDF_ST_MODEL",               "all-MiniLM-L6-v2")
 OPENAI_API_KEY                = os.getenv("OPENAI_API_KEY",                "")
@@ -46,13 +46,13 @@ RAGPDF_LITELLM_EMBEDDING_MODEL = os.getenv("RAGPDF_LITELLM_EMBEDDING_MODEL", "op
 
 # ── Vector Store Backend ──────────────────────────────────────────────────────
 # RAGPDF_VECTOR_STORE: where the vector database lives
-#   local    → flat JSON file on disk (matches rag-lambda default)
-#   s3       → flat JSON file in S3 (same logic, cloud persistence)
-#   azure    → flat JSON file in Azure Blob
-#   gcs      → flat JSON file in GCS
-#   pinecone → Pinecone managed vector DB
-#   chroma   → ChromaDB (local embedded or server)
-#   weaviate → Weaviate
+#   local    -> flat JSON file on disk (matches rag-lambda default)
+#   s3       -> flat JSON file in S3 (same logic, cloud persistence)
+#   azure    -> flat JSON file in Azure Blob
+#   gcs      -> flat JSON file in GCS
+#   pinecone -> Pinecone managed vector DB
+#   chroma   -> ChromaDB (local embedded or server)
+#   weaviate -> Weaviate
 RAGPDF_VECTOR_STORE       = os.getenv("RAGPDF_VECTOR_STORE",       "local")
 
 PINECONE_API_KEY          = os.getenv("PINECONE_API_KEY",          "")
@@ -69,10 +69,10 @@ RAGPDF_WEAVIATE_CLASS     = os.getenv("RAGPDF_WEAVIATE_CLASS",     "RagpdfVector
 # ── LLM Corrector Backend ─────────────────────────────────────────────────────
 # RAGPDF_CORRECTOR_BACKEND: LLM used during feedback (API 4) to generate
 #   corrected snake_case field names from user error reports
-#   noop       → no LLM call, cleans field name to snake_case (safe default)
-#   openai     → GPT-4 (matches rag-lambda default)
-#   anthropic  → Claude
-#   litellm    → any LiteLLM provider
+#   noop       -> no LLM call, cleans field name to snake_case (safe default)
+#   openai     -> GPT-4 (matches rag-lambda default)
+#   anthropic  -> Claude
+#   litellm    -> any LiteLLM provider
 RAGPDF_CORRECTOR_BACKEND  = os.getenv("RAGPDF_CORRECTOR_BACKEND",  "noop")
 RAGPDF_OPENAI_MODEL       = os.getenv("RAGPDF_OPENAI_MODEL",       "gpt-4-turbo-preview")
 RAGPDF_OPENAI_TEMPERATURE = float(os.getenv("RAGPDF_OPENAI_TEMPERATURE", "0.3"))

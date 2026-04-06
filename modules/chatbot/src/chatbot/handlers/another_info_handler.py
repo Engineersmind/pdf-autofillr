@@ -4,9 +4,9 @@
 
 # Mid-collection yes/no checkpoint after every DATA_COLLECTION turn.
 
-#   yes  → "Alright! Please enter details..." → DATA_COLLECTION
-#   no   → delegate directly to MissingFieldsHandler (no intermediate message)
-#   free-form text → extract, loop back
+#   yes  -> "Alright! Please enter details..." -> DATA_COLLECTION
+#   no   -> delegate directly to MissingFieldsHandler (no intermediate message)
+#   free-form text -> extract, loop back
 # """
 # from __future__ import annotations
 

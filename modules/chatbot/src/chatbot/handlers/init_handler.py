@@ -31,7 +31,7 @@ class InitHandler(BaseHandler):
                 msg = "Alright! Feel free to come back whenever you're ready. Goodbye!"
                 self._log_turn(session, user_input, msg, state)
                 return msg, State.COMPLETE
-            # Any affirmative or unclear → proceed to saved info check
+            # Any affirmative or unclear -> proceed to saved info check
             return self._proceed_to_saved_info(session, user_input, state, user_id)
 
         # SAVED_INFO_CHECK state

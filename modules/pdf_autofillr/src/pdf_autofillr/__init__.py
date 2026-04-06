@@ -4,7 +4,7 @@ pdf-autofillr — umbrella package for the PDF form-filling ecosystem.
 Modules
 -------
 chatbot     Conversational form filling via LLM dialogue
-doc_upload  Batch extraction from PDF/DOCX/XLSX/CSV/JSON/MD/TXT → fill PDF
+doc_upload  Batch extraction from PDF/DOCX/XLSX/CSV/JSON/MD/TXT -> fill PDF
 mapper      PDF field extraction, semantic mapping, embedding and filling engine
 rag         Self-learning RAG predictions that improve over time
 

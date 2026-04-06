@@ -74,7 +74,7 @@ class TestInProcessMapperFillerInterface:
         assert filler.check_document_ready("/nonexistent/path.pdf") is False
 
     def test_prepare_document_calls_pipeline_stages(self, configs_dir, tmp_path):
-        """prepare_document should call extract → map → embed in sequence."""
+        """prepare_document should call extract -> map -> embed in sequence."""
         from pdf_autofillr_mapper.inprocess_filler import InProcessMapperFiller
 
         fake_pdf = str(tmp_path / "blank.pdf")

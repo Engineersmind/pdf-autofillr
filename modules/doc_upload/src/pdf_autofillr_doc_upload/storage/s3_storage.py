@@ -101,8 +101,8 @@ class S3Storage(StorageBackend):
     def load_schema(self, schema_path: str) -> dict:
         """
         schema_path can be:
-          - s3://bucket/path/to/form_keys.json   → used as-is
-          - a bare filename "form_keys.json"      → loaded from config_bucket
+          - s3://bucket/path/to/form_keys.json   -> used as-is
+          - a bare filename "form_keys.json"      -> loaded from config_bucket
         """
         if schema_path.startswith("s3://"):
             bucket, key = _parse_s3_uri(schema_path)

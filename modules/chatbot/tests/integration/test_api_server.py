@@ -5,7 +5,7 @@ These tests spin up the app with TestClient (no real server required)
 and cover the full HTTP layer with mocked LLM responses.
 
 Marked as 'integration' because they exercise the full stack:
-    HTTP → FastAPI → chatbotClient → ConversationEngine → LocalStorage
+    HTTP -> FastAPI -> chatbotClient -> ConversationEngine -> LocalStorage
 """
 import pytest
 from unittest.mock import patch

@@ -9,8 +9,8 @@ Usage:
     storage = AzureStorage(conn_str="DefaultEndpointsProtocol=https;...")
 
 Credentials (pick one):
-  - RAGPDF_AZURE_CONN_STR  → connection string (easiest for local dev)
-  - RAGPDF_AZURE_ACCOUNT   → account name + DefaultAzureCredential (managed identity / CLI login)
+  - RAGPDF_AZURE_CONN_STR  -> connection string (easiest for local dev)
+  - RAGPDF_AZURE_ACCOUNT   -> account name + DefaultAzureCredential (managed identity / CLI login)
 """
 import json
 import logging

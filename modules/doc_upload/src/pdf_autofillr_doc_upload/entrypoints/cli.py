@@ -1,4 +1,4 @@
-# extractor/entrypoints/cli.py
+# modules/doc_upload/src/pdf_autofillr_doc_upload/entrypoints/cli.py
 """
 Command-line interface.
 
@@ -7,28 +7,67 @@ Usage::
     doc-upload-cli --document investor.pdf --schema configs/form_keys.json
     doc-upload-cli --document doc.docx --output filled.json --report
     doc-upload-cli --help
-
-Options:
-    --document     PATH    Source document (PDF/DOCX/PPTX/XLSX/CSV/JSON/MD/TXT)
-    --schema       PATH    Schema JSON path (default: configs/form_keys.json)
-    --output       PATH    Save extracted JSON to file
-    --job-id       ID      Job identifier (auto-generated if omitted)
-    --report               Print execution summary at end
-    --log-level    LEVEL   DEBUG | INFO | WARNING | ERROR (default: WARNING)
 """
 from __future__ import annotations
+
+import os
+import sys
+
+# ── UTF-8 fix for Windows ─────────────────────────────────────────────────────
+os.environ.setdefault("PYTHONUTF8", "1")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import argparse
 import json
 import logging
-import os
-import sys
 import uuid
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
+
+
+def _setup_logging(log_level: str = "WARNING") -> None:
+    log_dir = Path(os.getcwd()) / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "doc_upload.log"
+
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s"
+    ))
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(file_handler)
+
+    for name in [
+        "LiteLLM", "litellm", "httpx", "httpcore", "openai",
+        "pdf_autofillr_doc_upload", "ragpdf", "urllib3", "asyncio",
+    ]:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    for name in [
+        "pdf_autofillr_mapper",
+        "pdf_autofillr_mapper.mappers.semantic_mapper",
+        "pdf_autofillr_mapper.extractors.detailed_fitz",
+        "pdf_autofillr_mapper.orchestrator.PDFPipeline",
+        "pdf_autofillr_mapper.embedders.embed_keys",
+        "pdf_autofillr_mapper.groupers.group_by_llm",
+        "pdf_autofillr_mapper.clients.unified_llm_client",
+        "pdf_autofillr_mapper.utils.storage",
+        "pdf_autofillr_mapper.chunkers",
+        "pdf_autofillr_mapper.inprocess_filler",
+    ]:
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+    console = logging.StreamHandler(sys.stderr)
+    console.setLevel(logging.WARNING)
+    root.addHandler(console)
 
 
 def _build_client():
@@ -39,10 +78,9 @@ def _build_client():
 
     storage = StorageFactory.create()
     extractor = Extractor(llm_client=LLMClient())
-
-    pdf_filler = None  # DocUploadClient._build_default_filler handles this from env
-
-    return DocUploadClient(storage=storage, extractor=extractor, pdf_filler=pdf_filler)
+    # Do NOT pass pdf_filler=None — let DocUploadClient._build_default_filler()
+    # read DOC_UPLOAD_PDF_FILLER from env and wire up the correct filler automatically.
+    return DocUploadClient(storage=storage, extractor=extractor)
 
 
 def _parse_args():
@@ -58,7 +96,7 @@ def _parse_args():
 
 def main():
     args = _parse_args()
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.WARNING))
+    _setup_logging(args.log_level)
 
     client = _build_client()
     job_id = args.job_id or str(uuid.uuid4())
@@ -77,7 +115,6 @@ def main():
 
     if args.report:
         log = client.storage.get_execution_log(job_id) or {}
-        summary = log.get("summary", {})
         print(f"\nJob ID  : {job_id}")
         print(f"Fields  : {len(result['output_flat'])}")
         print(f"Success : {result['success']}")

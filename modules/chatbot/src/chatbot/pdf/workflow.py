@@ -16,6 +16,8 @@ Copy with clean name also written to:
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 import shutil
 import threading
@@ -26,6 +28,8 @@ from typing import Optional
 
 from chatbot.pdf.interface import PDFFillerInterface
 from chatbot.storage.base import StorageBackend
+
+logger = logging.getLogger(__name__)
 
 
 class PDFWorkflowManager:
@@ -134,7 +138,7 @@ class PDFWorkflowManager:
                       investor_type: str, data_flat: dict) -> None:
         threading.Thread(target=self._fill_worker,
                          args=(user_id, session_id, pdf_path, investor_type, data_flat),
-                         daemon=True).start()
+                         daemon=False).start()
 
     # ------------------------------------------------------------------
     # Workers
@@ -217,8 +221,134 @@ class PDFWorkflowManager:
                     session["filled_pdf_output"] = output_copy_path
                 self.storage.save_session_state(user_id, session_id, session)
 
+                # ── RAG API 2: post-fill vector learning ──────────────────
+                # Runs after every successful fill to update vector confidence
+                # scores and create new vectors from LLM predictions.
+                # Fully non-blocking — a failure here never affects the fill result.
+                self._call_rag_api2(user_id, session_id, data_flat)
+
         except Exception as e:
             self._log_step(user_id, session_id, "fill", success=False, error=str(e))
+
+    # ------------------------------------------------------------------
+    # RAG API 2 — post-fill learning
+    # ------------------------------------------------------------------
+
+    def _call_rag_api2(self, user_id: str, session_id: str, data_flat: dict) -> None:
+        """
+        Call RAGPDFClient.save_filled_pdf() (API 2) after a successful fill.
+
+        This runs the full post-fill processing pipeline:
+            1. Case classification  (RAG vs LLM vs both vs neither per field)
+            2. Metrics calculation
+            3. Vector confidence updates (boost correct, decay wrong)
+            4. New vector creation for fields the RAG missed but LLM got right
+            5. Time series update
+
+        Reads llm_predictions.json and final_predictions.json from the mapper's
+        session_dir (written there by InProcessMapperFiller._prepare_with_rag).
+        These files are only present when rag_enabled=True — if they don't exist
+        (RAG disabled or plain orchestrator path), this method exits silently.
+
+        All exceptions are caught and logged — a RAG failure must never surface
+        to the user or abort the fill result.
+        """
+        # Only runs when RAG was enabled for this filler
+        if not self._is_rag_enabled():
+            return
+
+        try:
+            from ragpdf import RAGPDFClient
+        except ImportError:
+            logger.debug(
+                "_call_rag_api2: ragpdf SDK not installed — skipping post-fill learning"
+            )
+            return
+
+        try:
+            # Get prediction file paths from the filler (InProcessMapperFiller exposes them)
+            pred_paths = self._get_prediction_paths(user_id, session_id)
+            if not pred_paths:
+                logger.debug(
+                    "_call_rag_api2: no prediction paths available (RAG may not have run) — skip"
+                )
+                return
+
+            llm_path   = pred_paths.get("llm_predictions")
+            final_path = pred_paths.get("final_predictions")
+            rag_uid    = pred_paths.get("user_id", user_id)
+            rag_sid    = pred_paths.get("session_id", session_id)
+            rag_pid    = pred_paths.get("pdf_id", session_id)
+
+            if not llm_path or not final_path:
+                logger.debug(
+                    "_call_rag_api2: llm_predictions=%s final_predictions=%s — "
+                    "one or both missing, skipping API 2",
+                    llm_path, final_path,
+                )
+                return
+
+            if not Path(llm_path).exists() or not Path(final_path).exists():
+                logger.debug(
+                    "_call_rag_api2: prediction files do not exist on disk — "
+                    "RAG step likely did not run (rag_enabled may be false in mapper config)"
+                )
+                return
+
+            with open(llm_path, "r", encoding="utf-8") as f:
+                llm_predictions = json.load(f)
+            with open(final_path, "r", encoding="utf-8") as f:
+                final_predictions = json.load(f)
+
+            logger.info(
+                "_call_rag_api2: calling save_filled_pdf — user=%s session=%s pdf=%s",
+                rag_uid, rag_sid, rag_pid,
+            )
+
+            client = RAGPDFClient.from_env()
+            result = client.save_filled_pdf(
+                user_id=str(rag_uid),
+                session_id=str(rag_sid),
+                pdf_id=str(rag_pid),
+                llm_predictions=llm_predictions,
+                final_predictions=final_predictions,
+                filled_pdf_location=None,
+            )
+
+            vectors_created = (result.get("vector_updates") or {}).get("vectors_created", 0)
+            vectors_updated = (result.get("vector_updates") or {}).get("vectors_updated", 0)
+            logger.info(
+                "_call_rag_api2: done — vectors_created=%d vectors_updated=%d",
+                vectors_created, vectors_updated,
+            )
+
+        except Exception as e:
+            # Non-fatal — log at WARNING level and continue
+            logger.warning(
+                "_call_rag_api2: post-fill RAG learning failed (non-fatal): %s",
+                e, exc_info=True,
+            )
+
+    def _is_rag_enabled(self) -> bool:
+        """Return True if the filler has RAG enabled."""
+        # Check the filler itself (InProcessMapperFiller exposes _mapper_config)
+        mapper_config = getattr(self.filler, "_mapper_config", None)
+        if mapper_config is not None:
+            return bool(getattr(mapper_config, "rag_enabled", False))
+        # Fallback: read the env var directly
+        return os.getenv("RAG_ENABLED", "false").lower() == "true"
+
+    def _get_prediction_paths(self, user_id: str, session_id: str) -> Optional[dict]:
+        """
+        Retrieve prediction file paths from the filler.
+
+        InProcessMapperFiller exposes get_rag_prediction_paths() after
+        prepare_document() completes.  Returns None if not available.
+        """
+        get_paths = getattr(self.filler, "get_rag_prediction_paths", None)
+        if callable(get_paths):
+            return get_paths()
+        return None
 
     # ------------------------------------------------------------------
     # Filler call helpers — graceful fallback for old/HTTP filler signatures

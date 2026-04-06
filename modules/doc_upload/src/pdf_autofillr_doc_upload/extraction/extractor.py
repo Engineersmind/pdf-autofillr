@@ -1,6 +1,6 @@
 # pdf_autofillr_doc_upload/extraction/extractor.py
 """
-Extractor — orchestrates document reading → prompt → LLM → schema enforcement.
+Extractor — orchestrates document reading -> prompt -> LLM -> schema enforcement.
 
 This is the heart of the module, porting the Lambda extractor_logic.py into a
 clean, reusable class with:
@@ -29,7 +29,7 @@ def _build_prompt(document_text: str, schema: dict) -> str:
 STRICT RULES:
 - Follow the schema exactly — preserve all nested objects and keys.
 - Extract every piece of information present in the document.
-- Missing fields → use "" for strings, false for booleans.
+- Missing fields -> use "" for strings, false for booleans.
 - No hallucination — only extract what is explicitly present.
 - Return ONLY the JSON object shown below, fully populated.
 
@@ -66,7 +66,7 @@ def _normalize_address(full: str):
     """
     Split a full address string into line1 / line2.
 
-    "123 Main St, Apt 4, London" → ("123 Main St, Apt 4", "London")
+    "123 Main St, Apt 4, London" -> ("123 Main St, Apt 4", "London")
     """
     if not full or not isinstance(full, str):
         return "", ""
@@ -112,8 +112,8 @@ def flatten_dict(d: dict, parent_key: str = "", sep: str = ".") -> dict:
 
 class Extractor:
     """
-    Full extraction pipeline: read document → build prompt → call LLM →
-    enforce schema → normalize addresses.
+    Full extraction pipeline: read document -> build prompt -> call LLM ->
+    enforce schema -> normalize addresses.
 
     Args:
         llm_client: LLMClient instance. Created from env vars if not provided.

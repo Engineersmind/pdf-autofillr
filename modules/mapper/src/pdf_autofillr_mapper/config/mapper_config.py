@@ -56,13 +56,13 @@ class MapperConfig:
     use_second_mapper: bool = False
 
     # rag_enabled: master switch for the RAG pipeline
-    #   false (default) → LLM mapping only, RAG block is never entered
-    #   true            → RAG runs as second predictor after LLM
+    #   false (default) -> LLM mapping only, RAG block is never entered
+    #   true            -> RAG runs as second predictor after LLM
     rag_enabled: bool = False
 
     # rag_mode: how the RAG pipeline is invoked
-    #   "inprocess" → call installed ragpdf SDK directly (no HTTP, same process)
-    #   "http"      → call remote RAG API (Lambda/FastAPI), set rag_api_url + rag_api_key
+    #   "inprocess" -> call installed ragpdf SDK directly (no HTTP, same process)
+    #   "http"      -> call remote RAG API (Lambda/FastAPI), set rag_api_url + rag_api_key
     rag_mode: str = "inprocess"
 
     # Remote API credentials (only used when rag_mode = "http")

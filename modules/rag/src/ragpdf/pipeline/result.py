@@ -31,7 +31,7 @@ class PredictionResult:
     pdf_hash: str
     frequency: int
     is_duplicate: bool
-    predictions: dict[str, Optional[FieldPrediction]]  # field_id → prediction or None
+    predictions: dict[str, Optional[FieldPrediction]]  # field_id -> prediction or None
     summary: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
 

@@ -5,8 +5,8 @@ Handles CONTINUE_PROMPT state.
 A lightweight "do you want to keep going?" checkpoint, used when
 the conversation has been going for many turns or after a natural
 pause. The user can:
-  - yes / continue → go back to DATA_COLLECTION
-  - no / done / exit → go to OPTIONAL_FIELDS_PROMPT to wrap up
+  - yes / continue -> go back to DATA_COLLECTION
+  - no / done / exit -> go to OPTIONAL_FIELDS_PROMPT to wrap up
 """
 from __future__ import annotations
 from typing import Optional, Tuple

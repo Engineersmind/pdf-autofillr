@@ -9,16 +9,68 @@ After `pip install pdf-autofillr-chatbot`:
 """
 from __future__ import annotations
 
+import os
+import sys
+
+# ── UTF-8 fix for Windows ─────────────────────────────────────────────────────
+os.environ.setdefault("PYTHONUTF8", "1")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import argparse
 import json
 import logging
-import os
-import sys
 import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# ── Logging: all detail to file, terminal stays clean ────────────────────────
+def _setup_logging(log_level: str = "WARNING") -> None:
+    log_dir = Path(os.getcwd()) / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "chatbot.log"
+
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s"
+    ))
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(file_handler)
+
+    # Silence on terminal — WARNING level
+    for name in [
+        "LiteLLM", "litellm", "httpx", "httpcore", "openai",
+        "chatbot", "ragpdf", "urllib3", "asyncio",
+    ]:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    # Mapper is very noisy — suppress to ERROR only
+    for name in [
+        "pdf_autofillr_mapper",
+        "pdf_autofillr_mapper.mappers.semantic_mapper",
+        "pdf_autofillr_mapper.extractors.detailed_fitz",
+        "pdf_autofillr_mapper.orchestrator.PDFPipeline",
+        "pdf_autofillr_mapper.embedders.embed_keys",
+        "pdf_autofillr_mapper.groupers.group_by_llm",
+        "pdf_autofillr_mapper.clients.unified_llm_client",
+        "pdf_autofillr_mapper.utils.storage",
+        "pdf_autofillr_mapper.chunkers",
+        "pdf_autofillr_mapper.inprocess_filler",
+    ]:
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+    # Only show WARNING+ on terminal
+    console = logging.StreamHandler(sys.stderr)
+    console.setLevel(logging.WARNING)
+    root.addHandler(console)
+
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +107,6 @@ def _build_client():
         )
 
     return chatbotClient(
-        # api_key read from CHATBOT_LLM_API_KEY env var automatically
         storage=storage,
         form_config=form_config,
         pdf_filler=pdf_filler,
@@ -119,7 +170,7 @@ def _run_interactive(args, client, session_id):
 
 def main():
     args = _parse_args()
-    logging.basicConfig(level=args.log_level)
+    _setup_logging(args.log_level)
     try:
         client = _build_client()
         session_id = args.session_id or str(uuid.uuid4())

@@ -3,7 +3,7 @@
 Handles MAILING_ADDRESS_CHECK state.
 
 Asks the user whether their mailing address is the same as their
-registered address. If yes, copies all registered → mailing fields.
+registered address. If yes, copies all registered -> mailing fields.
 If no, returns to DATA_COLLECTION for the user to provide mailing details.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ class MailingCheckHandler(BaseHandler):
         live_fill = session.get("live_fill_flat", {})
 
         if is_affirmative(user_input):
-            # Copy registered → mailing
+            # Copy registered -> mailing
             copied = copy_registered_to_mailing(live_fill)
             session["live_fill_flat"] = live_fill
             session["_mailing_checked"] = True

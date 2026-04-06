@@ -17,9 +17,9 @@ class UpdateExistingHandler(BaseHandler):
     """
     User is asked whether to load their previously saved profile data.
 
-    - yes  → keep _pending_existing_data in session, go to investor type select
-    - no   → clear it, go to investor type select
-    - anything else → re-prompt
+    - yes  -> keep _pending_existing_data in session, go to investor type select
+    - no   -> clear it, go to investor type select
+    - anything else -> re-prompt
     """
 
     def handle(self, session, user_input, user_id, session_id, debug=None):

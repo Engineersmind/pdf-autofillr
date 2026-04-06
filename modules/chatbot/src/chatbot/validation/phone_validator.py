@@ -50,8 +50,8 @@
 #     never shown directly to the user.
 
 #     Examples:
-#         +1 212 555 1234  → {country_code: "1", part1: "212", part2: "555", part3: "1234"}
-#         +44 20 7946 0958 → {country_code: "44", part1: "20", part2: "7946", part3: "0958"}
+#         +1 212 555 1234  -> {country_code: "1", part1: "212", part2: "555", part3: "1234"}
+#         +44 20 7946 0958 -> {country_code: "44", part1: "20", part2: "7946", part3: "0958"}
 #     """
 #     cleaned = value.strip().lstrip("+")
 #     # Remove all non-digit/space/dash chars except keep structure
@@ -164,8 +164,8 @@ def split_phone_parts(value: str) -> dict:
     never shown directly to the user.
 
     Examples:
-        +1 212 555 1234  → {country_code: "1", part1: "212", part2: "555", part3: "1234"}
-        +44 20 7946 0958 → {country_code: "44", part1: "20", part2: "7946", part3: "0958"}
+        +1 212 555 1234  -> {country_code: "1", part1: "212", part2: "555", part3: "1234"}
+        +44 20 7946 0958 -> {country_code: "44", part1: "20", part2: "7946", part3: "0958"}
     """
     cleaned = value.strip().lstrip("+")
     # Remove all non-digit/space/dash chars except keep structure

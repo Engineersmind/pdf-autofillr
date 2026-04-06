@@ -38,7 +38,7 @@ def main() -> None:
     host      = os.getenv("HOST", "0.0.0.0")
     log_level = os.getenv("MAPPER_LOG_LEVEL", "info").lower()
 
-    print(f"\npdf-autofillr-mapper API → http://{host}:{port}")
+    print(f"\npdf-autofillr-mapper API -> http://{host}:{port}")
     print(f"  Docs:   http://localhost:{port}/docs")
     print(f"  Health: http://localhost:{port}/health\n")
 

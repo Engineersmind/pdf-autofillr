@@ -126,7 +126,7 @@ class RAGPDFClient:
     ) -> dict:
         """
         Store the filled PDF and run the full processing pipeline:
-        case classification → metrics → vector updates → time series.
+        case classification -> metrics -> vector updates -> time series.
 
         Args:
             llm_predictions   : {"predictions": {"field_id": {"predicted_field_name": ..., "confidence": ...}}}
@@ -178,13 +178,13 @@ class RAGPDFClient:
         """
         Retrieve metrics. metric_type options:
 
-            "pdf"         → user_id, session_id, pdf_id
-            "category"    → category
-            "subcategory" → category, subcategory
-            "doctype"     → category, subcategory, doctype
-            "global"      → (no params) — full LLM vs RAG comparison + time series
-            "compare"     → pdfs=[{user_id, session_id, pdf_id}, ...]
-            "pdf_hash"    → pdf_hash — all submissions for this PDF hash
+            "pdf"         -> user_id, session_id, pdf_id
+            "category"    -> category
+            "subcategory" -> category, subcategory
+            "doctype"     -> category, subcategory, doctype
+            "global"      -> (no params) — full LLM vs RAG comparison + time series
+            "compare"     -> pdfs=[{user_id, session_id, pdf_id}, ...]
+            "pdf_hash"    -> pdf_hash — all submissions for this PDF hash
 
         Example:
             client.get_metrics("global")

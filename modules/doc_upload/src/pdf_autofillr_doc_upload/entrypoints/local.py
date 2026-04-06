@@ -1,4 +1,4 @@
-# extractor/entrypoints/local.py
+# modules/doc_upload/src/pdf_autofillr_doc_upload/entrypoints/local.py
 """
 Local deployment entrypoint — interactive CLI for development.
 
@@ -24,27 +24,37 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# ── UTF-8 fix for Windows ─────────────────────────────────────────────────────
+os.environ.setdefault("PYTHONUTF8", "1")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Suppress Python warnings
 warnings.filterwarnings("ignore")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 load_dotenv()
 
-# Force UTF-8 output on Windows so Unicode arrows/emoji in log messages don't crash
-import sys as _sys
-if hasattr(_sys.stdout, 'reconfigure'):
-    try:
-        _sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
-
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("pdf_autofillr_doc_upload").setLevel(
-    logging.DEBUG if os.getenv("DOC_UPLOAD_DEBUG_LOGGING", "").lower() == "true" else logging.INFO
+    logging.DEBUG if os.getenv("DOC_UPLOAD_DEBUG_LOGGING", "").lower() == "true" else logging.WARNING
 )
-logging.getLogger("pdf_autofillr_mapper").setLevel(logging.ERROR)
-logging.getLogger("pymupdf").setLevel(logging.ERROR)
-logging.getLogger("fitz").setLevel(logging.ERROR)
+for _name in [
+    "pdf_autofillr_mapper",
+    "pdf_autofillr_mapper.mappers.semantic_mapper",
+    "pdf_autofillr_mapper.extractors.detailed_fitz",
+    "pdf_autofillr_mapper.orchestrator.PDFPipeline",
+    "pdf_autofillr_mapper.embedders.embed_keys",
+    "pdf_autofillr_mapper.groupers.group_by_llm",
+    "pdf_autofillr_mapper.clients.unified_llm_client",
+    "pdf_autofillr_mapper.utils.storage",
+    "pdf_autofillr_mapper.chunkers",
+    "pdf_autofillr_mapper.inprocess_filler",
+    "LiteLLM", "litellm", "pymupdf", "fitz",
+]:
+    logging.getLogger(_name).setLevel(logging.ERROR)
 
 
 # ── Silence PyMuPDF advisory print ──────────────────────────────────────────
@@ -58,9 +68,6 @@ class _FitzSilencer:
     def write(self, s):
         if self._NOISE in s:
             return len(s)
-        # On Windows the console may be cp1252 which cannot encode Unicode
-        # arrows/emoji used in log messages. Encode to UTF-8 and replace
-        # unmappable chars rather than crashing.
         try:
             return self._wrapped.write(s)
         except (UnicodeEncodeError, UnicodeDecodeError):
@@ -107,10 +114,7 @@ def _build_client():
     llm = LLMClient()
     extractor = Extractor(llm_client=llm)
 
-    # pdf_filler is built automatically by DocUploadClient from env vars
-    # DOC_UPLOAD_PDF_FILLER=mapper + MAPPER_API_URL set   → HTTP filler
-    # DOC_UPLOAD_PDF_FILLER=mapper + MAPPER_API_URL empty → in-process filler
-    pdf_filler = None  # DocUploadClient._build_default_filler handles this
+    pdf_filler = None
 
     telemetry_mode = os.getenv("DOC_UPLOAD_TELEMETRY", "off").lower()
     telemetry = TelemetryCollector(

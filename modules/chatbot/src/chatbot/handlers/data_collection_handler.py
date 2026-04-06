@@ -124,7 +124,7 @@
 #         missing_text = self._get_missing_text_mandatory(live_fill, mandatory_flat)
 #         missing_bool_groups = self._get_missing_bool_groups(live_fill, mandatory_flat, investor_type, session)
 
-#         # If all mandatory done → missing_fields_prompt (which handles bool groups then optional)
+#         # If all mandatory done -> missing_fields_prompt (which handles bool groups then optional)
 #         if not missing_text and not missing_bool_groups:
 #             msg = "Thank you! I have all the required information. Let me review everything."
 #             self._log_turn(session, user_input, msg, state)

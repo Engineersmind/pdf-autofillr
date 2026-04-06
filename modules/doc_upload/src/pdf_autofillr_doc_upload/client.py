@@ -11,8 +11,8 @@ Pipeline (mirrors Lambda main.process_pdf exactly):
         2. Download / locate document
 
     Parallel:
-        Thread A — Extract text → LLM → upload output (nested + flat)
-        Thread B — make_embed_file → check_embed_file (poll)
+        Thread A — Extract text -> LLM -> upload output (nested + flat)
+        Thread B — make_embed_file -> check_embed_file (poll)
 
     Sequential (after both threads):
         7. fill_pdf
@@ -93,10 +93,10 @@ class DocUploadClient:
         """
         Build the PDF filler from env config — exact mirror of chatbot behaviour.
 
-        DOC_UPLOAD_PDF_FILLER=mapper  +  MAPPER_API_URL set   → HTTP mapper filler
-        DOC_UPLOAD_PDF_FILLER=mapper  +  MAPPER_API_URL empty → in-process mapper filler
-        DOC_UPLOAD_PDF_FILLER=managed                         → in-process mapper filler (stub)
-        DOC_UPLOAD_PDF_FILLER=none (default)                  → no filling
+        DOC_UPLOAD_PDF_FILLER=mapper  +  MAPPER_API_URL set   -> HTTP mapper filler
+        DOC_UPLOAD_PDF_FILLER=mapper  +  MAPPER_API_URL empty -> in-process mapper filler
+        DOC_UPLOAD_PDF_FILLER=managed                         -> in-process mapper filler (stub)
+        DOC_UPLOAD_PDF_FILLER=none (default)                  -> no filling
         """
         mode = settings.pdf_filler
         if mode not in ("mapper", "managed"):

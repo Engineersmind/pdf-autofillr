@@ -66,6 +66,7 @@ modules0/
 modules1/
 modules2/
 modules3/
+modules/pypi.txt
 
 # ======================
 # Java build artifacts (YOU HAVE THESE)

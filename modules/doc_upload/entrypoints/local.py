@@ -108,8 +108,8 @@ def _build_client():
     extractor = Extractor(llm_client=llm)
 
     # pdf_filler is built automatically by DocUploadClient from env vars
-    # DOC_UPLOAD_PDF_FILLER=mapper + MAPPER_API_URL set   → HTTP filler
-    # DOC_UPLOAD_PDF_FILLER=mapper + MAPPER_API_URL empty → in-process filler
+    # DOC_UPLOAD_PDF_FILLER=mapper + MAPPER_API_URL set   -> HTTP filler
+    # DOC_UPLOAD_PDF_FILLER=mapper + MAPPER_API_URL empty -> in-process filler
     pdf_filler = None  # DocUploadClient._build_default_filler handles this
 
     telemetry_mode = os.getenv("DOC_UPLOAD_TELEMETRY", "off").lower()

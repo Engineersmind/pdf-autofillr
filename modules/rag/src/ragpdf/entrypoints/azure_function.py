@@ -3,7 +3,7 @@ Azure Function HTTP trigger for pdf-autofillr-rag.
 
 Set the function entry point to: entrypoints.azure_function.main
 
-Required env vars (set in Azure Function App → Configuration):
+Required env vars (set in Azure Function App -> Configuration):
     RAGPDF_STORAGE=s3 (or azure)
     RAGPDF_VECTOR_STORE=s3 (or azure)
     RAGPDF_S3_BUCKET=your-bucket       (if using S3)

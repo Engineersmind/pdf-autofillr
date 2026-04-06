@@ -36,7 +36,7 @@ INVESTOR_TYPES = [
     "Education Institutions",
 ]
 
-# Map investor type display name → form_keys filename
+# Map investor type display name -> form_keys filename
 INVESTOR_TYPE_FILES = {
     "Individual":               "form_keys_individual.json",
     "Partnership":              "form_keys_partnership.json",
@@ -50,7 +50,7 @@ INVESTOR_TYPE_FILES = {
     "Education Institutions":   "form_keys_education_institutions.json",
 }
 
-# Investor type → boolean field auto-set in live_fill_flat
+# Investor type -> boolean field auto-set in live_fill_flat
 # Mirrors Lambda's auto-fill of e.g. investor_type.individual_check = True
 INVESTOR_TYPE_BOOLEAN_FIELD = {
     "Individual":               "investor_type.individual_check",

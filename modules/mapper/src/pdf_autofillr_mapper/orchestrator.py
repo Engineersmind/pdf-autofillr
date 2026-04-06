@@ -414,7 +414,7 @@ class PDFPipeline:
         keep_intermediates: bool = True
     ) -> Dict[str, Any]:
         """
-        Complete pipeline: Extract → Map → Embed → Fill
+        Complete pipeline: Extract -> Map -> Embed -> Fill
         
         ALL arguments are LOCAL file paths.
         

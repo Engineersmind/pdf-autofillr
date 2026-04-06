@@ -49,7 +49,7 @@ def run_status(dest_str: str = ".") -> None:
             installed_combo.add(label)
             print(f"  ✅  {label:<12} v{ver}")
         else:
-            print(f"  ✗   {label:<12} not installed  →  pip install {install_name}")
+            print(f"  ✗   {label:<12} not installed  ->  pip install {install_name}")
 
     if not installed_combo:
         print("\n  No modules installed. Run: pip install pdf-autofillr[all]")
@@ -122,10 +122,10 @@ def run_status(dest_str: str = ".") -> None:
         mapper_url = _env("MAPPER_API_URL", "")
         rag_enabled = _env("RAG_ENABLED", "false")
         rag_mode = _env("RAG_MODE", "inprocess")
-        mode_str = "inprocess" if not mapper_url else f"http → {mapper_url}"
+        mode_str = "inprocess" if not mapper_url else f"http -> {mapper_url}"
         print(f"  mapper    connection: {mode_str}")
         if rag_enabled.lower() == "true":
-            print(f"  mapper→rag  enabled  mode: {rag_mode}")
+            print(f"  mapper->rag  enabled  mode: {rag_mode}")
         else:
             if "rag" in installed_combo:
                 warnings.append("rag is installed but RAG_ENABLED=false — set RAG_ENABLED=true in .env to activate")
@@ -142,16 +142,16 @@ def run_status(dest_str: str = ".") -> None:
     print("-" * 64)
     mapper_url = _env("MAPPER_API_URL", "")
     if "chatbot" in installed_combo and "mapper" in installed_combo:
-        mode = "inprocess" if not mapper_url else f"http → {mapper_url}"
-        print(f"  chatbot → mapper   {mode}")
+        mode = "inprocess" if not mapper_url else f"http -> {mapper_url}"
+        print(f"  chatbot -> mapper   {mode}")
     if "doc_upload" in installed_combo and "mapper" in installed_combo:
-        mode = "inprocess" if not mapper_url else f"http → {mapper_url}"
-        print(f"  doc_upload → mapper   {mode}")
+        mode = "inprocess" if not mapper_url else f"http -> {mapper_url}"
+        print(f"  doc_upload -> mapper   {mode}")
     if "mapper" in installed_combo and "rag" in installed_combo:
         rag_enabled = _env("RAG_ENABLED", "false").lower() == "true"
         rag_mode = _env("RAG_MODE", "inprocess")
         status = f"ENABLED ({rag_mode})" if rag_enabled else "DISABLED (set RAG_ENABLED=true)"
-        print(f"  mapper → rag   {status}")
+        print(f"  mapper -> rag   {status}")
 
     # ── Warnings ──────────────────────────────────────────────────
     if warnings:

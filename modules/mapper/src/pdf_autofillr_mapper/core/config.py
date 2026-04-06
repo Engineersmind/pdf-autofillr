@@ -176,7 +176,7 @@ class Settings(BaseSettings):
     cache_registry_path: str = get_ini_value(get_source_type(), "cache_registry_path", "")
     
     # Headers Extraction Configuration (loaded from config.ini [headers] section)
-    headers_llm_provider: str = get_ini_value("headers", "headers_llm_provider", "claude")
+    headers_llm_provider: str = get_ini_value("headers", "headers_llm_provider", "")
     headers_openai_model_id: str = get_ini_value("headers", "headers_openai_model_id", "gpt-4o")
     headers_claude_model_id: str = get_ini_value("headers", "headers_claude_model_id", "claude-3-5-sonnet-20241022")
     headers_chunk_size: int = get_ini_int("headers", "headers_chunk_size", 5)

@@ -61,12 +61,12 @@
 #                 live_fill[key] = (i in numbered)
 #             any_filled = True
 #         elif is_negative(user_input) or user_input.strip().lower() == "none":
-#             # "no" or "none" → all False
+#             # "no" or "none" -> all False
 #             for key in fields:
 #                 live_fill[key] = False
 #             any_filled = True
 #         elif is_affirmative(user_input):
-#             # "yes" to entire group → all True
+#             # "yes" to entire group -> all True
 #             for key in fields:
 #                 live_fill[key] = True
 #             any_filled = True
