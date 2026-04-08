@@ -38,6 +38,8 @@ class LLMUsage:
     total_tokens: int
     cost_usd: float
     model: str
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 @dataclass
@@ -185,10 +187,15 @@ class UnifiedLLMClient:
             self.total_cost_usd += usage.cost_usd
             self.total_calls += 1
             
+            cache_info = (
+                f", cache_read={usage.cache_read_tokens}"
+                f", cache_created={usage.cache_creation_tokens}"
+                if usage.cache_read_tokens or usage.cache_creation_tokens else ""
+            )
             logger.info(
                 f"LLM response - Tokens: {usage.total_tokens} "
-                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
-                f"Cost: ${usage.cost_usd:.6f}"
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}"
+                f"{cache_info}), Cost: ${usage.cost_usd:.6f}"
             )
             
             # Extract content
@@ -264,10 +271,15 @@ class UnifiedLLMClient:
             self.total_cost_usd += usage.cost_usd
             self.total_calls += 1
             
+            cache_info = (
+                f", cache_read={usage.cache_read_tokens}"
+                f", cache_created={usage.cache_creation_tokens}"
+                if usage.cache_read_tokens or usage.cache_creation_tokens else ""
+            )
             logger.info(
                 f"LLM response - Tokens: {usage.total_tokens} "
-                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}), "
-                f"Cost: ${usage.cost_usd:.6f}"
+                f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}"
+                f"{cache_info}), Cost: ${usage.cost_usd:.6f}"
             )
             
             # Extract content
@@ -289,20 +301,29 @@ class UnifiedLLMClient:
         prompt_tokens = usage.prompt_tokens or 0
         completion_tokens = usage.completion_tokens or 0
         total_tokens = usage.total_tokens or (prompt_tokens + completion_tokens)
-        
-        # Calculate cost - LiteLLM's completion_cost expects the response object
+
+        # Anthropic prompt caching tokens
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        # OpenAI cached tokens (different field name)
+        if not cache_read:
+            cache_read = getattr(usage, "cached_tokens", 0) or 0
+
+        # Calculate cost
         try:
             cost = completion_cost(completion_response=response)
         except Exception as e:
             logger.warning(f"Could not calculate cost: {e}")
             cost = 0.0
-        
+
         return LLMUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cost_usd=cost,
-            model=self.model
+            model=self.model,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
     
     def get_cumulative_stats(self) -> Dict[str, Any]:
@@ -358,3 +379,59 @@ def create_llm_client(
         max_tokens=max_tokens,
         **kwargs
     )
+
+
+# ── Prompt caching helpers ────────────────────────────────────────────────────
+
+_CACHE_SPLIT_MARKER = "##CACHE_SPLIT##"
+
+
+def _is_claude(model: str) -> bool:
+    """Return True for any Anthropic / Bedrock Claude model."""
+    m = model.lower()
+    return "claude" in m or "anthropic" in m
+
+
+def build_messages(model: str, prompt: str, system: str = None) -> list:
+    """
+    Build an LLM messages list with Anthropic prompt caching for Claude models.
+
+    For Claude (Anthropic direct or Bedrock):
+      - System message gets cache_control so it is cached once.
+      - User prompt is split at ##CACHE_SPLIT## into a cached static block
+        (instructions) and an uncached dynamic block (per-job data).
+
+    For OpenAI / other models:
+      - Returns plain message dicts — OpenAI auto-caches identical prefixes
+        >= 1024 tokens with no extra config needed.
+      - cache_control is NOT added; litellm.drop_params=True removes it anyway.
+
+    If ##CACHE_SPLIT## is absent the full prompt is sent as a single message.
+    """
+    msgs = []
+
+    if system:
+        if _is_claude(model):
+            msgs.append({
+                "role": "system",
+                "content": [{"type": "text", "text": system,
+                             "cache_control": {"type": "ephemeral"}}],
+            })
+        else:
+            msgs.append({"role": "system", "content": system})
+
+    if _is_claude(model) and _CACHE_SPLIT_MARKER in prompt:
+        static, dynamic = prompt.split(_CACHE_SPLIT_MARKER, 1)
+        msgs.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": static.rstrip(),
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": dynamic.lstrip()},
+            ],
+        })
+    else:
+        msgs.append({"role": "user",
+                     "content": prompt.replace(_CACHE_SPLIT_MARKER, "")})
+
+    return msgs

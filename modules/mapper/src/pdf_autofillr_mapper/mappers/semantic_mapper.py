@@ -17,6 +17,7 @@ from pdf_autofillr_mapper.chunkers import get_chunker
 from pdf_autofillr_mapper.utils.storage import save_json
 
 from pdf_autofillr_mapper.groupers.group_by_llm import GroupByLLM
+from pdf_autofillr_mapper.clients.unified_llm_client import build_messages
 
 
 
@@ -1246,13 +1247,12 @@ Guidelines:
 
 
 
+        # Static sections are grouped first so they can be cached (##CACHE_SPLIT##
+        # tells build_messages() where the cacheable prefix ends).
+        # Dynamic sections (change per job) come after the marker.
         return "\n".join([
 
             instructions_header,
-
-            pdf_context_section,
-
-            input_keys_section,
 
             spacing_layout_section,
 
@@ -1264,15 +1264,9 @@ Guidelines:
 
             table_cell_field_section,
 
-            fid_range_info,
-
             task_description,
 
             formatting_rules,
-
-            key_matching_rules,
-
-            field_name_section,
 
             semantic_tips,
 
@@ -1280,7 +1274,19 @@ Guidelines:
 
             output_format,
 
-            closing_note
+            closing_note,
+
+            "##CACHE_SPLIT##",
+
+            pdf_context_section,
+
+            input_keys_section,
+
+            fid_range_info,
+
+            key_matching_rules,
+
+            field_name_section,
 
         ])
 
@@ -1573,9 +1579,8 @@ Guidelines:
 
                 
 
-                # Use UnifiedLLMClient - returns LLMResponse with usage tracking
-
-                messages = [{"role": "user", "content": prompt}]
+                # Use UnifiedLLMClient with prompt caching for Claude models
+                messages = build_messages(self.llm.model, prompt)
 
                 llm_response = await asyncio.to_thread(self.llm.complete, messages)
 

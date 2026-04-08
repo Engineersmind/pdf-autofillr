@@ -30,7 +30,7 @@ from pdf_autofillr_mapper.core.config import settings
 
 # S3Client imported conditionally where needed (only for AWS mode)
 
-from pdf_autofillr_mapper.clients.unified_llm_client import UnifiedLLMClient
+from pdf_autofillr_mapper.clients.unified_llm_client import UnifiedLLMClient, build_messages
 
 
 
@@ -1168,19 +1168,10 @@ async def process_chunk(chunk_pages: List[dict], chunk_num: int, is_first: bool)
 
         try:
 
-            # Prepare messages for LLM
-
+            # Prepare messages with prompt caching for Claude models
             system_message_content = "Expert PDF form analyzer. Extract hierarchy with field placeholders. Split multiple fields on same line. Handle tables (H3 columns, H4 cells) and checkboxes/radios (H3 question, H4 options). For H2 sections, generate section_context (max 10 words) that includes the key entity/role from H1 (investor, patient, entity, co-investor, spouse, etc.) combined with the H2 topic. Return minimal JSON with a single fid per section."
 
-            
-
-            messages = [
-
-                {"role": "system", "content": system_message_content},
-
-                {"role": "user", "content": prompt}
-
-            ]
+            messages = build_messages(model_id, prompt, system=system_message_content)
 
             
 
