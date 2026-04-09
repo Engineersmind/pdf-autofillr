@@ -68,7 +68,7 @@ from pdf_autofillr_mapper.utils.map_time_estimator import estimate_map_stage_tim
 
 try:
 
-    from pdf_autofillr_mapper.adapter_src.notifier import (
+    from adapter_src.notifier import (
 
         PipelineNotifier,
 
