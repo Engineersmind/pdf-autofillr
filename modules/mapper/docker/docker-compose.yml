@@ -1,0 +1,28 @@
+services:
+  mapper:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pdf-autofiller-mapper
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    environment:
+      DEPLOY_MODE: "fastapi"
+      RAG_API_URL: "http://rag:8001/predict"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - pdf-autofillr-net
+
+networks:
+  pdf-autofillr-net:
+    external: true
