@@ -165,7 +165,18 @@ async def save_hash_cache(
         if cache_key in entries:
             logger.info(f"Cache entry already exists for key: {cache_key[:32]}... Updating with new mappers if provided.")
             existing_entry = entries[cache_key]
-            
+
+            # Always update core files if provided (embedded_pdf starts as null, gets set after embed)
+            if embedded_pdf:
+                existing_entry["reference_files"]["embedded_pdf"] = embedded_pdf
+                logger.info(f"Updated cache entry with embedded_pdf: {embedded_pdf}")
+            if mapping_json:
+                existing_entry["reference_files"]["mapping_json"] = mapping_json
+                logger.info(f"Updated cache entry with mapping_json")
+            if radio_groups:
+                existing_entry["reference_files"]["radio_groups"] = radio_groups
+                logger.info(f"Updated cache entry with radio_groups")
+
             # Update RAG predictions if provided (dual mapper was run later)
             if rag_predictions:
                 existing_entry["reference_files"]["rag_predictions"] = rag_predictions

@@ -5,30 +5,22 @@ PDF field extraction, semantic mapping, embedding and filling engine.
 
 Quick start::
 
-    from pdf_autofillr_mapper import PDFPipeline, MapperConfig, copy_sample_configs
+    from pdf_autofillr_mapper import PDFPipeline
 
-    # 1. Copy sample configs once (run once after pip install)
-    copy_sample_configs(".")
-
-    # 2. Build config
-    cfg = MapperConfig.from_directory("./configs")
-
-    # 3. Run the pipeline
     import asyncio
-    pipeline = PDFPipeline(mapper_config=cfg)
+    pipeline = PDFPipeline()
     result = asyncio.run(pipeline.run_all(
         input_pdf_path="./blank_form.pdf",
-        input_data_path="./configs/form_keys.json",
+        input_data_path="./form_keys.json",
     ))
     print(result["final_output"])  # path to filled PDF
 """
 from __future__ import annotations
 
 from pdf_autofillr_mapper.orchestrator import PDFPipeline
-from pdf_autofillr_mapper.config.mapper_config import MapperConfig
 
 __version__ = "1.0.0"
-__all__ = ["PDFPipeline", "MapperConfig", "copy_sample_configs"]
+__all__ = ["PDFPipeline"]
 
 
 def copy_sample_configs(destination: str = ".") -> None:

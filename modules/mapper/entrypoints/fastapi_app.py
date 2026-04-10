@@ -59,33 +59,44 @@ class OperationRequest(BaseModel):
 
 
 class ExtractRequest(OperationRequest):
-    """Request model for extract operation."""
     pass
 
 
 class MapRequest(OperationRequest):
-    """Request model for map operation."""
     mapper_type: Optional[str] = Field("ensemble", description="Mapper type: semantic, rag, headers, ensemble")
 
 
 class EmbedRequest(OperationRequest):
-    """Request model for embed operation."""
     pass
 
 
-class FillRequest(OperationRequest):
-    """Request model for fill operation."""
-    data: Dict[str, Any] = Field(..., description="Data to fill into PDF")
+class FillRequest(BaseModel):
+    """Request model for fill_pdf operation."""
+    user_id: int = Field(..., description="User ID")
+    pdf_doc_id: int = Field(..., description="PDF document ID")
+    session_id: str = Field(..., description="Session ID")
+    env: str = Field(..., description="Environment label: Local_user | DEV_user | prod_user")
+    developer_id: Optional[str] = Field(None, description="Developer ID — sets user_type=sdk-user when present")
 
 
-class MakeEmbedFileRequest(OperationRequest):
+class MakeEmbedFileRequest(BaseModel):
     """Request model for make_embed_file operation."""
-    pass
+    user_id: int = Field(..., description="User ID")
+    pdf_doc_id: int = Field(..., description="PDF document ID")
+    session_id: str = Field(..., description="Session ID")
+    env: str = Field(..., description="Environment label: Local_user | DEV_user | prod_user")
+    developer_id: Optional[str] = Field(None, description="Developer ID — sets user_type=sdk-user when present")
+    investor_type: str = Field("individual", description="Investor type (e.g. Individual, Corporation)")
+    use_second_mapper: bool = Field(False, description="Enable Phase 2 RAG mapper")
 
 
-class CheckEmbedFileRequest(OperationRequest):
+class CheckEmbedFileRequest(BaseModel):
     """Request model for check_embed_file operation."""
-    pass
+    user_id: int = Field(..., description="User ID")
+    pdf_doc_id: int = Field(..., description="PDF document ID")
+    session_id: str = Field(..., description="Session ID")
+    env: str = Field(..., description="Environment label: Local_user | DEV_user | prod_user")
+    developer_id: Optional[str] = Field(None, description="Developer ID — sets user_type=sdk-user when present")
 
 
 class OperationResponse(BaseModel):
@@ -199,17 +210,24 @@ else:
             raise HTTPException(status_code=500, detail=str(e))
 
 
-    @app.post("/fill", response_model=OperationResponse)
+    @app.post("/fill-pdf", response_model=OperationResponse)
     async def fill_pdf(
         request: FillRequest,
         api_key: str = Depends(verify_api_key)
     ):
-        """Fill PDF form with data."""
+        """Fill PDF with collected investor data."""
         try:
-            result = handle_fill_pdf_operation(request.dict())
+            import asyncio
+            result = await handle_fill_pdf_operation(
+                user_id=request.user_id,
+                pdf_doc_id=request.pdf_doc_id,
+                session_id=request.session_id,
+                env=request.env,
+                developer_id=request.developer_id,
+            )
             return OperationResponse(success=True, data=result)
         except Exception as e:
-            logger.error(f"Fill operation failed: {str(e)}", exc_info=True)
+            logger.error(f"fill_pdf failed: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -218,12 +236,20 @@ else:
         request: MakeEmbedFileRequest,
         api_key: str = Depends(verify_api_key)
     ):
-        """Extract + Map + Embed in one operation."""
+        """Extract + Map + Embed pipeline (Phase 1, optionally Phase 2 RAG)."""
         try:
-            result = handle_make_embed_file_operation(request.dict())
+            result = await handle_make_embed_file_operation(
+                user_id=request.user_id,
+                pdf_doc_id=request.pdf_doc_id,
+                session_id=request.session_id,
+                env=request.env,
+                developer_id=request.developer_id,
+                investor_type=request.investor_type,
+                use_second_mapper=request.use_second_mapper,
+            )
             return OperationResponse(success=True, data=result)
         except Exception as e:
-            logger.error(f"Make embed file operation failed: {str(e)}", exc_info=True)
+            logger.error(f"make_embed_file failed: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -232,12 +258,18 @@ else:
         request: CheckEmbedFileRequest,
         api_key: str = Depends(verify_api_key)
     ):
-        """Check if PDF has embedded metadata."""
+        """Check if the embedded PDF is ready (chatbot polls this)."""
         try:
-            result = handle_check_embed_file_operation(request.dict())
+            result = await handle_check_embed_file_operation(
+                user_id=request.user_id,
+                pdf_doc_id=request.pdf_doc_id,
+                session_id=request.session_id,
+                env=request.env,
+                developer_id=request.developer_id,
+            )
             return OperationResponse(success=True, data=result)
         except Exception as e:
-            logger.error(f"Check embed file operation failed: {str(e)}", exc_info=True)
+            logger.error(f"check_embed_file failed: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
 

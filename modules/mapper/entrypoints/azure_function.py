@@ -110,35 +110,69 @@ def main(req: "func.HttpRequest") -> "func.HttpResponse":
         )
 
 
+import asyncio as _asyncio
+
+
+def _require(payload, key, op):
+    val = payload.get(key)
+    if val is None:
+        raise ValueError(f"Missing required parameter: {key} for {op} operation")
+    return val
+
+
 def route_operation(operation: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Route the operation to the appropriate handler.
-    
-    Args:
-        operation: Operation type
-        payload: Request payload
-        
-    Returns:
-        Handler response
     """
-    handlers = {
-        "extract": handle_extract_operation,
-        "map": handle_map_operation,
-        "embed": handle_embed_operation,
-        "fill": handle_fill_operation,
-        "run_all": handle_run_all_operation,
-        "refresh": handle_refresh_operation,
-        "make_embed_file": handle_make_embed_file_operation,
-        "make_form_fields_data_points": handle_make_form_fields_data_points,
-        "fill_pdf": handle_fill_pdf_operation,
-        "check_embed_file": handle_check_embed_file_operation,
-    }
-    
-    handler = handlers.get(operation)
-    if not handler:
-        raise ValueError(f"Unknown operation: {operation}")
-    
-    return handler(payload)
+    if operation == 'make_embed_file':
+        return _asyncio.get_event_loop().run_until_complete(
+            handle_make_embed_file_operation(
+                user_id=_require(payload, 'user_id', operation),
+                pdf_doc_id=_require(payload, 'pdf_doc_id', operation),
+                session_id=_require(payload, 'session_id', operation),
+                env=_require(payload, 'env', operation),
+                developer_id=payload.get('developer_id'),
+                investor_type=payload.get('investor_type', 'individual'),
+                use_second_mapper=payload.get('use_second_mapper', False),
+            )
+        )
+
+    elif operation == 'fill_pdf':
+        return _asyncio.get_event_loop().run_until_complete(
+            handle_fill_pdf_operation(
+                user_id=_require(payload, 'user_id', operation),
+                pdf_doc_id=_require(payload, 'pdf_doc_id', operation),
+                session_id=_require(payload, 'session_id', operation),
+                env=_require(payload, 'env', operation),
+                developer_id=payload.get('developer_id'),
+            )
+        )
+
+    elif operation == 'check_embed_file':
+        return _asyncio.get_event_loop().run_until_complete(
+            handle_check_embed_file_operation(
+                user_id=_require(payload, 'user_id', operation),
+                pdf_doc_id=_require(payload, 'pdf_doc_id', operation),
+                session_id=_require(payload, 'session_id', operation),
+                env=_require(payload, 'env', operation),
+                developer_id=payload.get('developer_id'),
+            )
+        )
+
+    else:
+        legacy_handlers = {
+            "extract": handle_extract_operation,
+            "map": handle_map_operation,
+            "embed": handle_embed_operation,
+            "fill": handle_fill_operation,
+            "run_all": handle_run_all_operation,
+            "refresh": handle_refresh_operation,
+            "make_form_fields_data_points": handle_make_form_fields_data_points,
+        }
+        handler = legacy_handlers.get(operation)
+        if not handler:
+            raise ValueError(f"Unknown operation: {operation}")
+        return handler(payload)
 
 
 # =============================================================================

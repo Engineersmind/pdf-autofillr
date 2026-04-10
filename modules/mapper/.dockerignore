@@ -58,13 +58,9 @@ tmp/
 temp/
 
 # Module-specific excludes
-entrypoints/
 modules/
 setup.py
-pyproject.toml
-requirements.txt
 requirements-aws.txt
 requirements-azure.txt
 requirements-gcp.txt
 requirements-api.txt
-# Keep requirements-full.txt for Docker build

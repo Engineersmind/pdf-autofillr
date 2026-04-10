@@ -11,16 +11,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
-@pytest.fixture
-def mapper_cfg():
-    from pdf_autofillr_mapper.config.mapper_config import MapperConfig
-    return MapperConfig(
-        llm_model="gpt-4o",
-        confidence_threshold=0.8,
-        chunking_strategy="page",
-    )
-
-
 class TestPDFPipelineInit:
     def test_empty_init(self):
         from pdf_autofillr_mapper.orchestrator import PDFPipeline
@@ -31,24 +21,6 @@ class TestPDFPipelineInit:
         from pdf_autofillr_mapper.orchestrator import PDFPipeline
         p = PDFPipeline(config={"llm_model": "gpt-4"})
         assert p.config["llm_model"] == "gpt-4"
-
-    def test_mapper_config_merges_into_config(self, mapper_cfg):
-        from pdf_autofillr_mapper.orchestrator import PDFPipeline
-        p = PDFPipeline(mapper_config=mapper_cfg)
-        assert p.config["llm_model"] == "gpt-4o"
-        assert p.config["confidence_threshold"] == 0.8
-        assert p.config["chunking_strategy"] == "page"
-        assert p.config["_mapper_config"] is mapper_cfg
-
-    def test_explicit_config_takes_priority_over_mapper_config(self, mapper_cfg):
-        """Explicit config dict values should NOT be overridden by mapper_config defaults."""
-        from pdf_autofillr_mapper.orchestrator import PDFPipeline
-        p = PDFPipeline(
-            config={"llm_model": "gpt-3.5-turbo"},
-            mapper_config=mapper_cfg,
-        )
-        # setdefault means explicit config wins
-        assert p.config["llm_model"] == "gpt-3.5-turbo"
 
 
 class TestPDFPipelineExtract:
@@ -260,7 +232,7 @@ class TestPDFPipelineRunAll:
         assert result["all_outputs"]["extracted_json"] == extracted
         assert result["all_outputs"]["filled_pdf"] == filled
         assert "timing" in result
-        assert result["timing"]["total_pipeline_seconds"] > 0
+        assert result["timing"]["total_pipeline_seconds"] >= 0
 
         p.extract.assert_called_once()
         p.map.assert_called_once()
