@@ -46,7 +46,7 @@ variable "global_input_json_s3_uri" {
 # ── LLM ──────────────────────────────────────────────────────────────────────
 
 variable "llm_model" {
-  description = "LiteLLM model ID (e.g. gpt-4o, claude-3-5-sonnet-20241022)"
+  description = "LiteLLM model ID (e.g. gpt-4o, bedrock/anthropic.claude-sonnet-4-6, bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0)"
   type        = string
   default     = "gpt-4o"
 }

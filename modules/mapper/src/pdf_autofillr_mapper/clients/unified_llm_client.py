@@ -394,33 +394,32 @@ def _is_claude(model: str) -> bool:
 
 def build_messages(model: str, prompt: str, system: str = None) -> list:
     """
-    Build an LLM messages list with Anthropic prompt caching for Claude models.
+    Build an LLM messages list with prompt caching for Claude and OpenAI models.
 
     For Claude (Anthropic direct or Bedrock):
       - System message gets cache_control so it is cached once.
       - User prompt is split at ##CACHE_SPLIT## into a cached static block
         (instructions) and an uncached dynamic block (per-job data).
 
-    For OpenAI / other models:
-      - Returns plain message dicts — OpenAI auto-caches identical prefixes
-        >= 1024 tokens with no extra config needed.
-      - cache_control is NOT added; litellm.drop_params=True removes it anyway.
+    For OpenAI / other models (gpt-4.1, gpt-4o, etc.):
+      - System message gets cache_control (ephemeral) — supported since Nov 2024
+      - User prompt is split at ##CACHE_SPLIT## into cached static + dynamic blocks
+      - Note: litellm.drop_params=True no longer removes cache_control for OpenAI
 
     If ##CACHE_SPLIT## is absent the full prompt is sent as a single message.
     """
     msgs = []
 
     if system:
-        if _is_claude(model):
-            msgs.append({
-                "role": "system",
-                "content": [{"type": "text", "text": system,
-                             "cache_control": {"type": "ephemeral"}}],
-            })
-        else:
-            msgs.append({"role": "system", "content": system})
+        # Both Claude and OpenAI support prompt caching now
+        msgs.append({
+            "role": "system",
+            "content": [{"type": "text", "text": system,
+                         "cache_control": {"type": "ephemeral"}}],
+        })
 
-    if _is_claude(model) and _CACHE_SPLIT_MARKER in prompt:
+    # Split prompt caching for both Claude and OpenAI
+    if _CACHE_SPLIT_MARKER in prompt:
         static, dynamic = prompt.split(_CACHE_SPLIT_MARKER, 1)
         msgs.append({
             "role": "user",

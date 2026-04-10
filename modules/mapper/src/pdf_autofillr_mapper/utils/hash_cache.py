@@ -67,7 +67,9 @@ async def check_hash_cache(
         
         entry = entries[cache_key]
         logger.info(f"Cache HIT for key: {cache_key[:32]}... (usage_count={entry.get('usage_count', 0)})")
-        
+        if entry.get('pdf_category'):
+            logger.info(f"  pdf_category: {entry.get('pdf_category')}")
+
         # Update usage statistics
         entry['usage_count'] = entry.get('usage_count', 0) + 1
         entry['last_used_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())

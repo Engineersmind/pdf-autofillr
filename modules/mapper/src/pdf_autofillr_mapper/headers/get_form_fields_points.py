@@ -180,7 +180,19 @@ async def get_form_fields_points(
 
         duration = round(end_time - start_time, 2)
 
-        
+        # Extract LLM usage and log summary
+        llm_usage = headers_result.get("llm_usage", {})
+
+        logger.info("")
+        logger.info("💰 PHASE 2 (HEADERS EXTRACTION) - LLM USAGE SUMMARY:")
+        logger.info(f"   🤖 Model: {llm_usage.get('model', 'unknown')}")
+        logger.info(f"   📞 Total LLM calls: {llm_usage.get('total_chunks', 0)}")
+        logger.info(f"   📊 Tokens - Prompt: {llm_usage.get('total_prompt_tokens', 0):,}, Completion: {llm_usage.get('total_completion_tokens', 0):,}, Total: {llm_usage.get('total_tokens', 0):,}")
+        logger.info(f"   💵 Total cost: ${llm_usage.get('total_cost_usd', 0):.6f}")
+        if llm_usage.get('total_chunks', 0) > 0:
+            logger.info(f"   💰 Avg cost per call: ${llm_usage.get('avg_cost_per_chunk', 0):.6f}")
+            logger.info(f"   💎 Cost per section: ${llm_usage.get('cost_per_section', 0):.6f}")
+        logger.info("")
 
         result = {
 
@@ -234,11 +246,20 @@ async def get_form_fields_points(
 
             },
 
-            "llm_usage": headers_result.get("llm_usage", {})
+            "llm_usage": {
+                "model": llm_usage.get("model", "unknown"),
+                "total_calls": llm_usage.get("total_chunks", 0),
+                "total_prompt_tokens": llm_usage.get("total_prompt_tokens", 0),
+                "total_completion_tokens": llm_usage.get("total_completion_tokens", 0),
+                "total_tokens": llm_usage.get("total_tokens", 0),
+                "total_cost_usd": round(llm_usage.get("total_cost_usd", 0), 6),
+                "avg_cost_per_call": round(llm_usage.get("avg_cost_per_chunk", 0), 6),
+                "cost_per_section": round(llm_usage.get("cost_per_section", 0), 6)
+            }
 
         }
 
-        
+
 
         logger.info(f"Form fields data points extraction completed in {duration} seconds")
 
@@ -1547,7 +1568,7 @@ You must output a clean hierarchy of headings and field labels:
 
   - h4: Options / table cells belonging to an h3
 
-
+##CACHE_SPLIT##
 
 PAGES_DATA (JSON):
 
