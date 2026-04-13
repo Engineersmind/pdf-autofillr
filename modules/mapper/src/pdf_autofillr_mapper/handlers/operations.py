@@ -51,6 +51,284 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 1: Source-Agnostic Helper Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def get_path_resolver(config, user_id: int, session_id: int, pdf_doc_id: int):
+    """
+    Get PathResolver instance from config (source-agnostic).
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    The returned resolver automatically constructs correct paths for the configured backend.
+
+    Args:
+        config: Storage config (abstracts backend details)
+        user_id: User ID for path construction
+        session_id: Session ID for path construction
+        pdf_doc_id: PDF document ID for path construction
+
+    Returns:
+        PathResolver instance ready to use
+
+    Raises:
+        ValueError: If config._sc (StorageConfig) is not available
+    """
+    if not hasattr(config, '_sc') or config._sc is None:
+        raise ValueError(
+            "config._sc (StorageConfig) not available. "
+            "Cannot construct file paths for this operation."
+        )
+    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+    return PathResolver(config._sc)
+
+
+async def save_llm_predictions_to_rag(
+    output_handler,
+    config,
+    local_path: str
+) -> Optional[str]:
+    """
+    Save LLM predictions to RAG bucket using preconfigured destination path.
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    Destination path is preconfigured in entry function (config.dest_llm_predictions_json).
+    Single source of truth: entry function builds all paths upfront.
+
+    Args:
+        output_handler: OutputFileHandler (abstracts backend)
+        config: Storage config with dest_llm_predictions_json already set
+        local_path: Path to local llm_predictions.json file
+
+    Returns:
+        Destination path where file was saved, or None if save failed
+    """
+    try:
+        destination_path = getattr(config, 'dest_llm_predictions_json', None)
+        if not destination_path:
+            logger.warning("❌ config.dest_llm_predictions_json not set by entry function")
+            return None
+
+        saved_path = output_handler.save_output(
+            local_path,
+            'llm_predictions_json',
+            destination_path=destination_path
+        )
+
+        if saved_path:
+            logger.info(f"✅ Saved LLM predictions to RAG bucket: {saved_path}")
+        else:
+            logger.warning(f"❌ Failed to save LLM predictions to RAG bucket")
+
+        return saved_path
+
+    except Exception as e:
+        logger.error(f"Error saving LLM predictions to RAG bucket: {e}", exc_info=True)
+        return None
+
+
+async def save_final_predictions_to_rag(
+    output_handler,
+    config,
+    local_path: str
+) -> Optional[str]:
+    """
+    Save final predictions to RAG bucket using preconfigured destination path.
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    Destination path is preconfigured in entry function (config.dest_final_predictions_json).
+    Single source of truth: entry function builds all paths upfront.
+
+    Args:
+        output_handler: OutputFileHandler (abstracts backend)
+        config: Storage config with dest_final_predictions_json already set
+        local_path: Path to local final_predictions.json file
+
+    Returns:
+        Destination path where file was saved, or None if save failed
+    """
+    try:
+        destination_path = getattr(config, 'dest_final_predictions_json', None)
+        if not destination_path:
+            logger.warning("❌ config.dest_final_predictions_json not set by entry function")
+            return None
+
+        saved_path = output_handler.save_output(
+            local_path,
+            'final_predictions_json',
+            destination_path=destination_path
+        )
+
+        if saved_path:
+            logger.info(f"✅ Saved final predictions to RAG bucket: {saved_path}")
+        else:
+            logger.warning(f"❌ Failed to save final predictions to RAG bucket")
+
+        return saved_path
+
+    except Exception as e:
+        logger.error(f"Error saving final predictions to RAG bucket: {e}", exc_info=True)
+        return None
+
+
+class FileDownloadManager:
+    """
+    Centralized file download manager (source-agnostic).
+
+    Handles all file downloads in the pipeline:
+    - Mapping files (mapped_json, radio_groups)
+    - Header files (headers_with_fields, final_form_fields)
+    - RAG predictions
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    Downloads use InputFileHandler which abstracts backend differences.
+    Falls back to get_input() when files are pre-downloaded in processing directory.
+    """
+
+    def __init__(self, input_handler, config):
+        """Initialize download manager with file handlers."""
+        self.input_handler = input_handler
+        self.config = config
+
+    async def download_or_get_mapping(
+        self, source_path: Optional[str], local_path: str
+    ) -> str:
+        """
+        Download mapping file from source storage or use local cached copy.
+
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            source_path: Path in source storage (or None if using config)
+            local_path: Local path where file should be downloaded
+
+        Returns:
+            Path to the downloaded/cached mapping file
+        """
+        if source_path and not source_path.startswith('/tmp/processing'):
+            try:
+                # Download from source storage using InputFileHandler
+                downloaded = self.input_handler.download_input(source_path, local_path)
+                logger.info(f"📥 Downloaded mapping from source: {source_path} → {local_path}")
+                return downloaded
+            except Exception as e:
+                logger.warning(f"Could not download mapping from {source_path}: {e}, using local cache")
+
+        # Fallback: use pre-cached file in processing directory
+        cached = self.input_handler.get_input('mapped_json')
+        if cached:
+            logger.info(f"📦 Using cached mapping: {cached}")
+            return cached
+
+        raise FileNotFoundError(f"Could not locate mapping file: {source_path} or cached")
+
+    async def download_or_get_radio(
+        self, source_path: Optional[str], local_path: str
+    ) -> str:
+        """
+        Download radio groups file from source storage or use local cached copy.
+
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            source_path: Path in source storage (or None if using config)
+            local_path: Local path where file should be downloaded
+
+        Returns:
+            Path to the downloaded/cached radio groups file
+        """
+        if source_path and not source_path.startswith('/tmp/processing'):
+            try:
+                # Download from source storage using InputFileHandler
+                downloaded = self.input_handler.download_input(source_path, local_path)
+                logger.info(f"📥 Downloaded radio groups from source: {source_path} → {local_path}")
+                return downloaded
+            except Exception as e:
+                logger.warning(f"Could not download radio groups from {source_path}: {e}, using local cache")
+
+        # Fallback: use pre-cached file in processing directory
+        cached = self.input_handler.get_input('radio_json')
+        if cached:
+            logger.info(f"📦 Using cached radio groups: {cached}")
+            return cached
+
+        raise FileNotFoundError(f"Could not locate radio groups file: {source_path} or cached")
+
+    async def download_cached_headers(
+        self,
+        headers_source: Optional[str],
+        headers_local: str,
+        fields_source: Optional[str],
+        fields_local: str
+    ) -> tuple[str, str]:
+        """
+        Download cached header files from source storage to processing directory.
+
+        Used when Phase 2 cache hit occurs and we need to reuse extracted headers.
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            headers_source: Path to headers_with_fields in source storage
+            headers_local: Local destination path
+            fields_source: Path to final_form_fields in source storage
+            fields_local: Local destination path
+
+        Returns:
+            Tuple of (headers_path, fields_path)
+        """
+        downloaded_headers = None
+        downloaded_fields = None
+
+        try:
+            if headers_source and not headers_source.startswith('/tmp/processing'):
+                downloaded_headers = self.input_handler.download_input(headers_source, headers_local)
+                logger.info(f"📥 Downloaded cached headers_with_fields: {headers_source} → {headers_local}")
+            else:
+                downloaded_headers = headers_local
+        except Exception as e:
+            logger.warning(f"Could not download headers_with_fields: {e}")
+            downloaded_headers = headers_local
+
+        try:
+            if fields_source and not fields_source.startswith('/tmp/processing'):
+                downloaded_fields = self.input_handler.download_input(fields_source, fields_local)
+                logger.info(f"📥 Downloaded cached final_form_fields: {fields_source} → {fields_local}")
+            else:
+                downloaded_fields = fields_local
+        except Exception as e:
+            logger.warning(f"Could not download final_form_fields: {e}")
+            downloaded_fields = fields_local
+
+        return downloaded_headers, downloaded_fields
+
+    async def download_rag_predictions(
+        self, source_path: str, local_path: str
+    ) -> str:
+        """
+        Download RAG predictions from source storage.
+
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            source_path: Path to rag_predictions.json in source storage
+            local_path: Local destination path
+
+        Returns:
+            Path to the downloaded RAG predictions file
+        """
+        try:
+            downloaded = self.input_handler.download_input(source_path, local_path)
+            logger.info(f"📥 Downloaded RAG predictions: {source_path} → {local_path}")
+            return downloaded
+        except Exception as e:
+            logger.error(f"Failed to download RAG predictions: {e}")
+            raise
+
 
 async def safe_notify(notifier, operation_name: str, *args, **kwargs) -> bool:
     """Safely send notification without failing the pipeline."""
@@ -1037,6 +1315,453 @@ async def run_semantic_api_mapper(
 # ==============================================================================
 
 
+async def _handle_cache_phase(
+    cache_result: Dict[str, Any],
+    use_second_mapper: bool,
+    extracted_json: str,
+    file_config: Optional[Dict],
+    config,
+    user_id: int,
+    session_id: int,
+    pdf_doc_id: int,
+    pdf_hash: Optional[str],
+    cache_registry_path: str,
+    env: str,
+    developer_id: Optional[str],
+    notifier,
+    pipeline_results: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Handle cache hit phase - load cached files and optionally extract/cache Phase 2 headers.
+
+    Source-agnostic - works with any storage backend.
+
+    Args:
+        cache_result: Results from check_hash_cache()
+        use_second_mapper: Whether to use RAG mapper (Phase 2)
+        extracted_json: Path to extracted JSON
+        file_config: Optional file configuration for structured paths
+        config: Storage config
+        user_id, session_id, pdf_doc_id: IDs for tracking
+        pdf_hash: PDF content hash for caching
+        cache_registry_path: Path to cache registry
+        env: Environment name
+        developer_id: Developer ID
+        notifier: Notification system
+        pipeline_results: Pipeline results dictionary to update
+
+    Returns:
+        {
+            'semantic_mapping_path': str,
+            'radio_groups': str,
+            'headers_with_fields_path': str,
+            'final_form_fields_path': str,
+            'mapping_json': str,
+            'combined_mapping_path': str,
+            'saved_java_mapping': str,
+            'dest_headers_with_fields': str,
+            'dest_final_form_fields': str,
+            'rag_api_failed': bool,
+            'pdf_category': str,
+            'embedded_pdf': str,
+            'dest_embedded_pdf': str,
+            'dest_semantic_mapping': str,
+            'dest_radio_groups': str
+        }
+    """
+    logger.info(f"🎯 CACHE HIT! Using cached semantic mapping (saves ~45s + LLM costs)")
+
+    # Initialize result dict
+    cache_phase_result = {
+        'rag_api_failed': False,
+        'pdf_category': None,
+        'embedded_pdf': None,
+        'dest_embedded_pdf': None,
+        'dest_semantic_mapping': None,
+        'dest_radio_groups': None,
+        'dest_headers_with_fields': None,
+        'dest_final_form_fields': None,
+        'mapping_json': None,
+        'combined_mapping_path': None,
+        'saved_java_mapping': None
+    }
+
+    try:
+        # Get cached files from cache registry
+        ref_files = cache_result["reference_files"]
+        from pdf_autofillr_mapper.handlers.input_handler import InputFileHandler
+        _ih = InputFileHandler(config)
+        download_manager = FileDownloadManager(_ih, config)
+
+        # Download cached mapping and radio groups (source-agnostic)
+        _mapping_src = ref_files.get("mapping_json")
+        semantic_mapping_path = await download_manager.download_or_get_mapping(_mapping_src, config.local_mapped_json)
+        _radio_src = ref_files.get("radio_groups")
+        radio_groups = await download_manager.download_or_get_radio(_radio_src, config.local_radio_json)
+        logger.info(f"✅ Loaded cached files — mapping: {semantic_mapping_path}, radio: {radio_groups}")
+
+        # Get cached paths for Phase 2
+        embedded_pdf = cache_result["reference_files"].get("embedded_pdf")
+        dest_embedded_pdf = cache_result["reference_files"].get("embedded_pdf")
+        dest_semantic_mapping = cache_result["reference_files"].get("mapping_json")
+        dest_radio_groups = cache_result["reference_files"].get("radio_groups")
+
+        # Get cached headers if available
+        cached_headers_from_registry = cache_result["reference_files"].get("headers_with_fields")
+        cached_final_fields_from_registry = cache_result["reference_files"].get("final_form_fields")
+        headers_with_fields_path = (
+            config.cached_headers_with_fields if hasattr(config, 'cached_headers_with_fields') and config.cached_headers_with_fields
+            else cached_headers_from_registry
+        )
+        final_form_fields_path = (
+            config.cached_final_form_fields if hasattr(config, 'cached_final_form_fields') and config.cached_final_form_fields
+            else cached_final_fields_from_registry
+        )
+
+        # Phase 2: RAG Mapper (if enabled)
+        if use_second_mapper:
+            # If headers not cached, extract them now
+            if not headers_with_fields_path or not final_form_fields_path:
+                logger.info("\n" + "-" * 80)
+                logger.info("MAPPER PHASE 2: RAG API Mapper - Extracting Headers (Cache Hit)")
+                logger.info("-" * 80)
+                from pdf_autofillr_mapper.headers.get_form_fields_points import get_form_fields_points
+                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+
+                # Get header file paths from config
+                if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
+                    headers_output_path = config.local_headers_with_fields
+                    final_fields_output_path = config.local_final_form_fields
+                elif file_config and "headers" in file_config:
+                    headers_output_path = file_config["headers"]["headers_with_fields_path"]
+                    final_fields_output_path = file_config["headers"]["final_form_fields_path"]
+                else:
+                    raise ValueError("Missing header paths configuration")
+
+                # Extract headers
+                headers_result = await get_form_fields_points(
+                    extracted_json_path=extracted_json,
+                    headers_output_path=headers_output_path,
+                    final_fields_output_path=final_fields_output_path
+                )
+                headers_with_fields_path = headers_output_path
+                final_form_fields_path = final_fields_output_path
+                cache_phase_result['pdf_category'] = headers_result.get("pdf_category")
+
+                # Upload headers to source storage (source-agnostic)
+                output_handler = OutputFileHandler(config)
+                cache_phase_result['dest_headers_with_fields'] = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
+                cache_phase_result['dest_final_form_fields'] = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
+
+                # Track headers extraction with S3 paths
+                pipeline_results["headers"] = {
+                    "headers_with_fields": cache_phase_result['dest_headers_with_fields'],
+                    "final_form_fields": cache_phase_result['dest_final_form_fields'],
+                    "llm_usage": headers_result.get("llm_usage", {})
+                }
+
+                logger.info(f"✅ Headers extracted: {final_form_fields_path}")
+                if cache_phase_result['pdf_category']:
+                    logger.info(f"📋 PDF Category: {cache_phase_result['pdf_category']}")
+
+                # Cache Phase 2 results
+                if pdf_hash:
+                    try:
+                        from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
+                        logger.info("💾 Updating cache with Phase 2 results...")
+                        cache_headers = cache_phase_result['dest_headers_with_fields'] or headers_with_fields_path
+                        cache_final_fields = cache_phase_result['dest_final_form_fields'] or final_form_fields_path
+                        cache_mapping = dest_semantic_mapping or semantic_mapping_path
+                        cache_radio = dest_radio_groups or radio_groups
+                        cache_embedded = dest_embedded_pdf or embedded_pdf
+
+                        await save_hash_cache(
+                            pdf_hash=pdf_hash,
+                            cache_registry_path=cache_registry_path,
+                            embedded_pdf=cache_embedded,
+                            mapping_json=cache_mapping,
+                            radio_groups=cache_radio,
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            headers_with_fields=cache_headers,
+                            final_form_fields=cache_final_fields,
+                            pdf_category=cache_phase_result['pdf_category']
+                        )
+
+                        # Persist cache registry
+                        if os.path.exists(cache_registry_path):
+                            cache_output_handler = OutputFileHandler(config)
+                            cache_dest = cache_output_handler.save_output(cache_registry_path, 'cache_registry_json')
+                            if cache_dest:
+                                logger.info(f"📤 Cache registry persisted to: {cache_dest}")
+                        logger.info("✅ Phase 2 cached: headers_with_fields, final_form_fields")
+                    except Exception as cache_error:
+                        logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
+            else:
+                logger.info("\n" + "-" * 80)
+                logger.info("MAPPER PHASE 2: RAG API Mapper - Using Cached Headers")
+                logger.info("-" * 80)
+                logger.info("🔀 Using cached headers from cache registry")
+
+                # Download cached headers if needed
+                if headers_with_fields_path and final_form_fields_path:
+                    if not headers_with_fields_path.startswith('/tmp/processing'):
+                        input_handler = InputFileHandler(config)
+                        download_mgr = FileDownloadManager(input_handler, config)
+
+                        if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
+                            proc_headers = config.local_headers_with_fields
+                            proc_final_fields = config.local_final_form_fields
+                        elif file_config and "headers" in file_config:
+                            proc_headers = file_config["headers"]["headers_with_fields_path"]
+                            proc_final_fields = file_config["headers"]["final_form_fields_path"]
+                        else:
+                            raise ValueError("Missing header paths configuration")
+
+                        headers_with_fields_path, final_form_fields_path = await download_mgr.download_cached_headers(
+                            headers_source=headers_with_fields_path,
+                            headers_local=proc_headers,
+                            fields_source=final_form_fields_path,
+                            fields_local=proc_final_fields
+                        )
+
+                        # Record persistent paths
+                        if cached_headers_from_registry and not cached_headers_from_registry.startswith('/tmp'):
+                            cache_phase_result['dest_headers_with_fields'] = cached_headers_from_registry
+                        if cached_final_fields_from_registry and not cached_final_fields_from_registry.startswith('/tmp'):
+                            cache_phase_result['dest_final_form_fields'] = cached_final_fields_from_registry
+
+                # Track cached headers in pipeline results with S3 paths
+                pipeline_results["headers"] = {
+                    "headers_with_fields": cache_phase_result.get('dest_headers_with_fields') or headers_with_fields_path,
+                    "final_form_fields": cache_phase_result.get('dest_final_form_fields') or final_form_fields_path,
+                    "llm_usage": {}  # No LLM usage for cached headers (already cached from previous run)
+                }
+
+        # Set return values
+        cache_phase_result.update({
+            'semantic_mapping_path': semantic_mapping_path,
+            'radio_groups': radio_groups,
+            'headers_with_fields_path': headers_with_fields_path,
+            'final_form_fields_path': final_form_fields_path,
+            'embedded_pdf': embedded_pdf,
+            'dest_embedded_pdf': dest_embedded_pdf,
+            'dest_semantic_mapping': dest_semantic_mapping,
+            'dest_radio_groups': dest_radio_groups
+        })
+
+        logger.info(f"✅ Cache phase completed. MAP stage skipped.")
+        return cache_phase_result
+
+    except Exception as cache_error:
+        logger.error(f"Failed to process cached files: {cache_error}. Running MAP stage.")
+        raise
+
+
+async def _handle_map_phase(
+    use_second_mapper: bool,
+    extracted_json: str,
+    input_json_s3: str,
+    file_config: Optional[Dict],
+    config,
+    user_id: int,
+    session_id: int,
+    pdf_doc_id: int,
+    pdf_hash: Optional[str],
+    cache_registry_path: str,
+    env: str,
+    developer_id: Optional[str],
+    investor_type: str,
+    notifier,
+    pipeline_results: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Handle MAP phase (cache miss) - run semantic mapper, extract headers, call RAG API.
+
+    Source-agnostic - works with any storage backend.
+
+    Args:
+        use_second_mapper: Whether to use RAG mapper (Phase 2)
+        extracted_json: Path to extracted JSON
+        input_json_s3: Path to input JSON
+        file_config: Optional file configuration for structured paths
+        config: Storage config
+        user_id, session_id, pdf_doc_id: IDs for tracking
+        pdf_hash: PDF content hash for caching
+        cache_registry_path: Path to cache registry
+        env: Environment name
+        developer_id: Developer ID
+        investor_type: Investor type for mapping
+        notifier: Notification system
+        pipeline_results: Pipeline results dictionary to update
+
+    Returns:
+        {
+            'semantic_mapping_path': str,
+            'radio_groups': str,
+            'headers_with_fields_path': str,
+            'final_form_fields_path': str,
+            'mapping_json': str,
+            'combined_mapping_path': str,
+            'saved_java_mapping': str,
+            'dest_headers_with_fields': str,
+            'dest_final_form_fields': str,
+            'rag_api_failed': bool,
+            'pdf_category': str,
+            'dest_semantic_mapping': str,
+            'dest_radio_groups': str,
+            'dest_embedded_pdf': str
+        }
+    """
+    if pdf_hash:
+        logger.info(f"📭 CACHE MISS. Running semantic mapper...")
+    else:
+        logger.info("📭 No PDF hash available. Running semantic mapper...")
+
+    map_phase_result = {
+        'rag_api_failed': False,
+        'pdf_category': None,
+        'dest_headers_with_fields': None,
+        'dest_final_form_fields': None,
+        'mapping_json': None,
+        'combined_mapping_path': None,
+        'saved_java_mapping': None,
+        'dest_embedded_pdf': None
+    }
+
+    try:
+        # Phase 1: Semantic Mapper
+        logger.info("\n" + "-" * 80)
+        logger.info("MAPPER PHASE 1: Semantic API Mapper")
+        logger.info("-" * 80)
+        semantic_result = await run_semantic_api_mapper(
+            extracted_json_path=extracted_json,
+            input_json_path=getattr(config, 'local_global_json', None) or input_json_s3,
+            storage_config=config,
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            session_id=session_id,
+            pdf_hash=pdf_hash,
+            cache_registry_path=cache_registry_path,
+            investor_type=investor_type,
+            mapping_config={},
+            notifier=notifier
+        )
+        semantic_mapping_path = semantic_result["semantic_mapping_path"]
+        radio_groups = semantic_result["radio_groups_path"]
+        dest_semantic_mapping = semantic_result["dest_semantic_mapping"]
+        dest_radio_groups = semantic_result["dest_radio_groups"]
+        logger.info(f"✅ Semantic mapper completed")
+        logger.info(f"   Semantic mapping: {semantic_mapping_path}")
+        logger.info(f"   Radio groups: {radio_groups}")
+
+        # Phase 2: RAG Mapper (optional - if use_second_mapper is True)
+        if use_second_mapper:
+            logger.info("\n" + "-" * 80)
+            logger.info("MAPPER PHASE 2: RAG API Mapper")
+            logger.info("-" * 80)
+            # Extract headers (required by RAG API)
+            from pdf_autofillr_mapper.headers.get_form_fields_points import get_form_fields_points
+            from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+
+            # Get header file paths from config
+            if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
+                headers_output_path = config.local_headers_with_fields
+                final_fields_output_path = config.local_final_form_fields
+            elif file_config and "headers" in file_config:
+                headers_output_path = file_config["headers"]["headers_with_fields_path"]
+                final_fields_output_path = file_config["headers"]["final_form_fields_path"]
+            else:
+                raise ValueError("Missing header paths configuration")
+
+            logger.info("📝 Extracting headers for RAG API...")
+            headers_result = await get_form_fields_points(
+                extracted_json_path=extracted_json,
+                headers_output_path=headers_output_path,
+                final_fields_output_path=final_fields_output_path
+            )
+            headers_with_fields_path = headers_output_path
+            final_form_fields_path = final_fields_output_path
+            pdf_category = headers_result.get("pdf_category")
+
+            logger.info(f"✅ Headers extracted: {final_form_fields_path}")
+            if pdf_category:
+                logger.info(f"📋 PDF Category: {pdf_category}")
+
+            # Upload header files to source storage (source-agnostic)
+            output_handler = OutputFileHandler(config)
+            map_phase_result['dest_headers_with_fields'] = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
+            map_phase_result['dest_final_form_fields'] = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
+
+            # Track headers extraction in pipeline results with S3 paths
+            pipeline_results["headers"] = {
+                "headers_with_fields": map_phase_result['dest_headers_with_fields'],
+                "final_form_fields": map_phase_result['dest_final_form_fields'],
+                "llm_usage": headers_result.get("llm_usage", {})
+            }
+
+            if map_phase_result['dest_headers_with_fields']:
+                logger.info(f"📤 Uploaded headers to: {map_phase_result['dest_headers_with_fields']}")
+            if map_phase_result['dest_final_form_fields']:
+                logger.info(f"📤 Uploaded final fields to: {map_phase_result['dest_final_form_fields']}")
+
+            # Cache Phase 2 results
+            if pdf_hash:
+                try:
+                    from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
+                    logger.info("💾 Updating cache with Phase 2 results...")
+                    cache_headers = map_phase_result['dest_headers_with_fields'] or headers_with_fields_path
+                    cache_final_fields = map_phase_result['dest_final_form_fields'] or final_form_fields_path
+                    cache_mapping = dest_semantic_mapping or semantic_mapping_path
+                    cache_radio = dest_radio_groups or radio_groups
+
+                    await save_hash_cache(
+                        pdf_hash=pdf_hash,
+                        cache_registry_path=cache_registry_path,
+                        embedded_pdf=None,  # Pending embed stage
+                        mapping_json=cache_mapping,
+                        radio_groups=cache_radio,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        headers_with_fields=cache_headers,
+                        final_form_fields=cache_final_fields,
+                        pdf_category=pdf_category
+                    )
+
+                    # Persist cache registry
+                    if os.path.exists(cache_registry_path):
+                        cache_output_handler = OutputFileHandler(config)
+                        cache_dest = cache_output_handler.save_output(cache_registry_path, 'cache_registry_json')
+                        if cache_dest:
+                            logger.info(f"📤 Cache registry persisted to: {cache_dest}")
+                    logger.info("✅ Phase 2 cached")
+                except Exception as cache_error:
+                    logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
+
+            map_phase_result['pdf_category'] = pdf_category
+        else:
+            headers_with_fields_path = None
+            final_form_fields_path = None
+
+        # Set return values
+        map_phase_result.update({
+            'semantic_mapping_path': semantic_mapping_path,
+            'radio_groups': radio_groups,
+            'headers_with_fields_path': headers_with_fields_path,
+            'final_form_fields_path': final_form_fields_path,
+            'dest_semantic_mapping': dest_semantic_mapping,
+            'dest_radio_groups': dest_radio_groups,
+            'phase1_llm_usage': semantic_result.get("llm_usage", {})  # Phase 1 (Semantic Mapper) token costs
+        })
+
+        logger.info(f"✅ MAP phase completed. Ready for RAG API or embedding.")
+        return map_phase_result
+
+    except Exception as map_error:
+        logger.error(f"Failed in MAP phase: {map_error}. Aborting.")
+        raise
+
+
 async def run_rag_api_mapper(
     extracted_json_path: str,
     headers_file_path: str,
@@ -1371,187 +2096,39 @@ async def handle_make_embed_file_operation(
             logger.info(f"🎯 CACHE HIT! Using cached semantic mapping (saves ~45s + LLM costs)")
             cache_hit = True
             try:
-                # Get cached files from entrypoint or copy them
-                # Download cached files from wherever they live (S3 or local)
-                # using InputFileHandler so S3 URIs are properly downloaded to /tmp
-                ref_files = cache_result["reference_files"]
-                from pdf_autofillr_mapper.handlers.input_handler import InputFileHandler
-                _ih = InputFileHandler(config)
-                # mapping_json → config.local_mapped_json
-                _mapping_src = ref_files.get("mapping_json")
-                if _mapping_src and not _mapping_src.startswith("/tmp"):
-                    semantic_mapping_path = _ih.download_input(_mapping_src, config.local_mapped_json)
-                elif _mapping_src and os.path.exists(_mapping_src):
-                    semantic_mapping_path = _mapping_src
-                else:
-                    semantic_mapping_path = _ih.get_input('mapped_json')
-                # radio_groups → config.local_radio_json
-                _radio_src = ref_files.get("radio_groups")
-                if _radio_src and not _radio_src.startswith("/tmp"):
-                    radio_groups = _ih.download_input(_radio_src, config.local_radio_json)
-                elif _radio_src and os.path.exists(_radio_src):
-                    radio_groups = _radio_src
-                else:
-                    radio_groups = _ih.get_input('radio_json')
-                logger.info(f"✅ Loaded cached files — mapping: {semantic_mapping_path}, radio: {radio_groups}")
-                logger.info(f"   Semantic mapping: {semantic_mapping_path}")
-                logger.info(f"   Radio groups: {radio_groups}")
-                # Get embedded_pdf path from cache (needed for Phase 2 caching)
-                embedded_pdf = cache_result["reference_files"].get("embedded_pdf")
-                # Also get dest paths from cache_result for Phase 2 caching
-                dest_embedded_pdf = cache_result["reference_files"].get("embedded_pdf")
-                dest_semantic_mapping = cache_result["reference_files"].get("mapping_json")
-                dest_radio_groups = cache_result["reference_files"].get("radio_groups")
-                # Get cached headers if available (for dual mapper)
-                # Check cache_result first (from hash registry), then config (from entrypoint)
-                cached_headers_from_registry = cache_result["reference_files"].get("headers_with_fields")
-                cached_final_fields_from_registry = cache_result["reference_files"].get("final_form_fields")
-                logger.info(f"🔍 DEBUG: Checking Phase 2 cache:")
-                logger.info(f"   cached_headers_from_registry: {cached_headers_from_registry}")
-                logger.info(f"   cached_final_fields_from_registry: {cached_final_fields_from_registry}")
-                logger.info(f"   config.cached_headers_with_fields: {getattr(config, 'cached_headers_with_fields', None)}")
-                logger.info(f"   config.cached_final_form_fields: {getattr(config, 'cached_final_form_fields', None)}")
-                headers_with_fields_path = (
-                    config.cached_headers_with_fields if hasattr(config, 'cached_headers_with_fields') and config.cached_headers_with_fields
-                    else cached_headers_from_registry
+                # Call extracted _handle_cache_phase() function (source-agnostic, consolidated)
+                cache_phase_result = await _handle_cache_phase(
+                    cache_result=cache_result,
+                    use_second_mapper=use_second_mapper,
+                    extracted_json=extracted_json,
+                    file_config=file_config,
+                    config=config,
+                    user_id=user_id,
+                    session_id=session_id,
+                    pdf_doc_id=pdf_doc_id,
+                    pdf_hash=pdf_hash,
+                    cache_registry_path=cache_registry_path,
+                    env=env,
+                    developer_id=developer_id,
+                    notifier=notifier,
+                    pipeline_results=pipeline_results
                 )
-                final_form_fields_path = (
-                    config.cached_final_form_fields if hasattr(config, 'cached_final_form_fields') and config.cached_final_form_fields
-                    else cached_final_fields_from_registry
-                )
-                logger.info(f"   Final headers_with_fields_path: {headers_with_fields_path}")
-                logger.info(f"   Final final_form_fields_path: {final_form_fields_path}")
-                # Track if we need to cache Phase 2 (headers just created)
-                phase2_needs_caching = False
-                # Phase 2: RAG Mapper (if enabled)
+
+                # Unpack results from cache phase
+                semantic_mapping_path = cache_phase_result['semantic_mapping_path']
+                radio_groups = cache_phase_result['radio_groups']
+                headers_with_fields_path = cache_phase_result['headers_with_fields_path']
+                final_form_fields_path = cache_phase_result['final_form_fields_path']
+                embedded_pdf = cache_phase_result['embedded_pdf']
+                dest_embedded_pdf = cache_phase_result['dest_embedded_pdf']
+                dest_semantic_mapping = cache_phase_result['dest_semantic_mapping']
+                dest_radio_groups = cache_phase_result['dest_radio_groups']
+                dest_headers_with_fields = cache_phase_result['dest_headers_with_fields']
+                dest_final_form_fields = cache_phase_result['dest_final_form_fields']
+                pdf_category = cache_phase_result['pdf_category']
+
+                # Call RAG mapper if enabled (runs for both cache hit and MAP phase)
                 if use_second_mapper:
-                    # If headers not cached, extract them now
-                    if not headers_with_fields_path or not final_form_fields_path:
-                        phase2_needs_caching = True  # Mark that headers will be freshly created
-                        logger.info("\n" + "-" * 80)
-                        logger.info("MAPPER PHASE 2: RAG API Mapper - Extracting Headers")
-                        logger.info("-" * 80)
-                        logger.info("📝 Headers not cached, extracting headers for RAG API...")
-                        # from pdf_autofillr_mapper.headers import get_form_fields_points
-                        from pdf_autofillr_mapper.headers.get_form_fields_points import get_form_fields_points
-                        # Get header file paths from config
-                        if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
-                            headers_output_path = config.local_headers_with_fields
-                            final_fields_output_path = config.local_final_form_fields
-                        elif file_config and "headers" in file_config:
-                            headers_output_path = file_config["headers"]["headers_with_fields_path"]
-                            final_fields_output_path = file_config["headers"]["final_form_fields_path"]
-                        else:
-                            raise ValueError("Missing header paths configuration")
-                        headers_result = await get_form_fields_points(
-                            extracted_json_path=extracted_json,
-                            headers_output_path=headers_output_path,
-                            final_fields_output_path=final_fields_output_path
-                        )
-                        headers_with_fields_path = headers_output_path
-                        final_form_fields_path = final_fields_output_path
-                        pdf_category = headers_result.get("pdf_category")
-                        # Track headers extraction in pipeline results (Phase 2 LLM costs)
-                        pipeline_results["headers"] = {
-                            "headers_with_fields": headers_output_path,
-                            "final_form_fields": final_fields_output_path,
-                            "llm_usage": headers_result.get("llm_usage", {})
-                        }
-                        # Upload header files to source storage
-                        from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
-                        output_handler = OutputFileHandler(config)
-                        dest_headers_with_fields = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
-                        dest_final_form_fields = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
-                        if dest_headers_with_fields:
-                            logger.info(f"📤 Uploaded headers_with_fields to: {dest_headers_with_fields}")
-                        if dest_final_form_fields:
-                            logger.info(f"📤 Uploaded final_form_fields to: {dest_final_form_fields}")
-                        logger.info(f"✅ Headers extracted: {final_form_fields_path}")
-                        if pdf_category:
-                            logger.info(f"� PDF Category: {pdf_category}")
-                        # CACHE PHASE 2 RESULTS immediately after headers extraction completes
-                        # This updates the existing cache entry with headers_with_fields and final_form_fields
-                        if pdf_hash and phase2_needs_caching:
-                            try:
-                                from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
-                                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
-                                logger.info("💾 Updating cache with Phase 2 results (headers_with_fields + final_form_fields)...")
-                                # Use destination paths for cache (persistent storage)
-                                cache_headers = dest_headers_with_fields if dest_headers_with_fields else headers_with_fields_path
-                                cache_final_fields = dest_final_form_fields if dest_final_form_fields else final_form_fields_path
-                                # Get cached Phase 1 paths (embedded_pdf, mapping, radio were already cached)
-                                cache_mapping = dest_semantic_mapping if dest_semantic_mapping else semantic_mapping_path
-                                cache_radio = dest_radio_groups if dest_radio_groups else radio_groups
-                                cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
-                                await save_hash_cache(
-                                    pdf_hash=pdf_hash,
-                                    cache_registry_path=cache_registry_path,
-                                    embedded_pdf=cache_embedded,
-                                    mapping_json=cache_mapping,
-                                    radio_groups=cache_radio,
-                                    user_id=user_id,
-                                    pdf_doc_id=pdf_doc_id,
-                                    headers_with_fields=cache_headers,
-                                    final_form_fields=cache_final_fields,
-                                    pdf_category=pdf_category
-                                )
-                                logger.info("✅ Phase 2 cached locally")
-                                # IMPORTANT: Upload cache registry to source storage so it persists
-                                if os.path.exists(cache_registry_path):
-                                    cache_output_handler = OutputFileHandler(config)
-                                    cache_dest = cache_output_handler.save_output(
-                                        cache_registry_path, 
-                                        'cache_registry_json'
-                                    )
-                                    if cache_dest:
-                                        logger.info(f"📤 Cache registry persisted to: {cache_dest}")
-                                    else:
-                                        logger.warning("⚠️  Cache registry not uploaded (local storage mode)")
-                                logger.info("✅ Phase 2 cached: headers_with_fields, final_form_fields")
-                            except Exception as cache_error:
-                                logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
-                        elif not phase2_needs_caching:
-                            logger.info("⏭️  Phase 2 already cached - skipping cache update")
-                        else:
-                            logger.info("⚠️  No pdf_hash available, skipping Phase 2 cache")
-                    else:
-                        logger.info("\n" + "-" * 80)
-                        logger.info("MAPPER PHASE 2: RAG API Mapper - Using Cached Headers")
-                        logger.info("-" * 80)
-                        logger.info("🔀 Using cached headers from cache registry")
-                        # Copy cached header files to processing directory if needed
-                        if headers_with_fields_path and final_form_fields_path:
-                            # If paths point to source storage, download to processing
-                            if not headers_with_fields_path.startswith('/tmp/processing'):
-                                from pdf_autofillr_mapper.handlers.input_handler import InputFileHandler
-                                input_handler = InputFileHandler(config)
-                                # Get processing paths from config
-                                if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
-                                    processing_headers_path = config.local_headers_with_fields
-                                    processing_final_fields_path = config.local_final_form_fields
-                                elif file_config and "headers" in file_config:
-                                    processing_headers_path = file_config["headers"]["headers_with_fields_path"]
-                                    processing_final_fields_path = file_config["headers"]["final_form_fields_path"]
-                                else:
-                                    raise ValueError("Missing header paths configuration")
-                                # Download files from source to processing using InputFileHandler
-                                downloaded_headers = input_handler.download_input(headers_with_fields_path, processing_headers_path)
-                                logger.info(f"📥 Downloaded cached headers to: {downloaded_headers}")
-                                downloaded_final_fields = input_handler.download_input(final_form_fields_path, processing_final_fields_path)
-                                logger.info(f"📥 Downloaded cached final_form_fields to: {downloaded_final_fields}")
-                                # Update paths to processing directory
-                                headers_with_fields_path = downloaded_headers
-                                final_form_fields_path = downloaded_final_fields
-                            # Record persistent storage paths for output reporting.
-                            # cached_*_from_registry holds the non-local path already in storage.
-                            if cached_headers_from_registry and not cached_headers_from_registry.startswith('/tmp'):
-                                dest_headers_with_fields = cached_headers_from_registry
-                            if cached_final_fields_from_registry and not cached_final_fields_from_registry.startswith('/tmp'):
-                                dest_final_form_fields = cached_final_fields_from_registry
-                            logger.info(f"   Headers: {headers_with_fields_path}")
-                            logger.info(f"   Final fields: {final_form_fields_path}")
-                        pdf_category = cache_result.get("pdf_category")
-                    # Call RAG mapper (with its own cache check)
                     rag_result = await run_rag_api_mapper(
                         extracted_json_path=extracted_json,
                         headers_file_path=final_form_fields_path,
@@ -1568,7 +2145,7 @@ async def handle_make_embed_file_operation(
                     if rag_result["success"]:
                         logger.info(f"✅ RAG predictions: {rag_result['rag_predictions_path']}")
                         rag_predictions_path = rag_result["rag_predictions_path"]
-                        # Save LLM predictions (from semantic mapping) for comparison
+                        # Save LLM predictions for comparison
                         logger.info("📋 Saving LLM predictions for comparison...")
                         llm_predictions_path = await save_llm_predictions_to_rag_bucket(
                             semantic_mapping_path=semantic_mapping_path,
@@ -1577,11 +2154,10 @@ async def handle_make_embed_file_operation(
                             storage_config=config,
                             session_id=session_id
                         )
-                        # Upload LLM predictions to source storage
+                        # Upload LLM predictions to RAG bucket
                         from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
                         from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
                         output_handler = OutputFileHandler(config)
-                        # Save llm_predictions.json to RAG bucket predictions folder
                         if hasattr(config, '_sc'):
                             pr = PathResolver(config._sc)
                             uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
@@ -1594,8 +2170,6 @@ async def handle_make_embed_file_operation(
                         else:
                             dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
                         logger.info(f"✅ LLM predictions saved and uploaded")
-                        logger.info(f"   Local: {llm_predictions_path}")
-                        logger.info(f"   Uploaded: {dest_llm_predictions}")
                         # Combine semantic + RAG
                         logger.info("🔄 Combining semantic + RAG predictions...")
                         mapping_json, combined_mapping_path = await combine_mappings(
@@ -1607,22 +2181,13 @@ async def handle_make_embed_file_operation(
                             session_id=session_id
                         )
                         logger.info(f"✅ Combined mapping created")
-                        # Upload java mapping and final predictions to RAG bucket predictions folder
-                        from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
-                        output_handler = OutputFileHandler(config)
+                        # Save to RAG bucket
                         saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                        # Save final_predictions.json to RAG bucket predictions folder
-                        if hasattr(config, '_sc'):
-                            pr = PathResolver(config._sc)
-                            uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
-                            rag_predictions_path = pr.remote_final_predictions(uid, sid, pid)
-                            saved_final_predictions = output_handler.save_output(
-                                combined_mapping_path,
-                                'final_predictions_json',
-                                destination_path=rag_predictions_path
-                            )
-                        else:
-                            saved_final_predictions = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
+                        saved_final_predictions = await save_final_predictions_to_rag(
+                            output_handler,
+                            config,
+                            combined_mapping_path
+                        )
                         logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
                         logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
                         rag_api_failed = False
@@ -1634,11 +2199,17 @@ async def handle_make_embed_file_operation(
                             pdf_doc_id=pdf_doc_id,
                             storage_config=config
                         )
-                        # Upload java mapping to source storage
+                        # Save to RAG bucket
                         from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
                         output_handler = OutputFileHandler(config)
                         saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                        saved_final_predictions = await save_final_predictions_to_rag(
+                            output_handler,
+                            config,
+                            mapping_json
+                        )
                         logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                        logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
                         rag_api_failed = True
                         rag_failure_reason = rag_result['error']
                         rag_predictions_path = None
@@ -1651,12 +2222,19 @@ async def handle_make_embed_file_operation(
                         pdf_doc_id=pdf_doc_id,
                         storage_config=config
                     )
-                    # Upload java mapping to source storage
+                    # Save to RAG bucket
                     from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
                     saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    saved_final_predictions = await save_final_predictions_to_rag(
+                        output_handler,
+                        config,
+                        mapping_json
+                    )
                     logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
-                # Update config paths for embed operation
+                    logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+
+                # Update config paths
                 config.local_mapped_json = mapping_json
                 config.local_radio_json = radio_groups
                 logger.info(f"✅ Cache processed. MAP stage skipped.")
@@ -1665,125 +2243,38 @@ async def handle_make_embed_file_operation(
                 cache_hit = False
         # Stage 2: Map (only if cache miss)
         if not cache_hit:
-            # CACHE MISS: Run MAP stage
-            if pdf_hash:
-                logger.info(f"📭 CACHE MISS. Running semantic mapper...")
-            else:
-                logger.info("📭 No PDF hash available. Running semantic mapper...")
-            # Phase 1: Semantic Mapper (with cache check)
-            logger.info("\n" + "-" * 80)
-            logger.info("MAPPER PHASE 1: Semantic API Mapper")
-            logger.info("-" * 80)
-            semantic_result = await run_semantic_api_mapper(
-                extracted_json_path=extracted_json,
-                input_json_path=getattr(config, 'local_global_json', None) or input_json_s3,
-                storage_config=config,
+            # CACHE MISS: Call extracted _handle_map_phase() function (source-agnostic, consolidated)
+            map_phase_result = await _handle_map_phase(
+                use_second_mapper=use_second_mapper,
+                extracted_json=extracted_json,
+                input_json_s3=input_json_s3,
+                file_config=file_config,
+                config=config,
                 user_id=user_id,
-                pdf_doc_id=pdf_doc_id,
                 session_id=session_id,
+                pdf_doc_id=pdf_doc_id,
                 pdf_hash=pdf_hash,
                 cache_registry_path=cache_registry_path,
+                env=env,
+                developer_id=developer_id,
                 investor_type=investor_type,
-                mapping_config={},
-                notifier=notifier
+                notifier=notifier,
+                pipeline_results=pipeline_results
             )
-            semantic_mapping_path = semantic_result["semantic_mapping_path"]
-            radio_groups = semantic_result["radio_groups_path"]
-            dest_semantic_mapping = semantic_result["dest_semantic_mapping"]
-            dest_radio_groups = semantic_result["dest_radio_groups"]
-            logger.info(f"✅ Semantic mapper completed")
-            logger.info(f"   Semantic mapping: {semantic_mapping_path}")
-            logger.info(f"   Radio groups: {radio_groups}")
-            # Phase 2: RAG Mapper (optional - if use_second_mapper is True)
+
+            # Unpack results from MAP phase
+            semantic_mapping_path = map_phase_result['semantic_mapping_path']
+            radio_groups = map_phase_result['radio_groups']
+            headers_with_fields_path = map_phase_result['headers_with_fields_path']
+            final_form_fields_path = map_phase_result['final_form_fields_path']
+            dest_semantic_mapping = map_phase_result['dest_semantic_mapping']
+            dest_radio_groups = map_phase_result['dest_radio_groups']
+            pdf_category = map_phase_result['pdf_category']
+            # Capture Phase 1 (semantic mapper) LLM usage for response
+            semantic_result['llm_usage'] = map_phase_result.get('phase1_llm_usage', {})
+
+            # Call RAG mapper if enabled (runs for both cache hit and MAP phase)
             if use_second_mapper:
-                logger.info("\n" + "-" * 80)
-                logger.info("MAPPER PHASE 2: RAG API Mapper")
-                logger.info("-" * 80)
-                # First, extract headers (required by RAG API)
-                # from pdf_autofillr_mapper.headers import get_form_fields_points
-                from pdf_autofillr_mapper.headers.get_form_fields_points import get_form_fields_points
-                # Get header file paths from config (use existing config.ini patterns)
-                if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
-                    headers_output_path = config.local_headers_with_fields
-                    final_fields_output_path = config.local_final_form_fields
-                elif file_config and "headers" in file_config:
-                    headers_output_path = file_config["headers"]["headers_with_fields_path"]
-                    final_fields_output_path = file_config["headers"]["final_form_fields_path"]
-                else:
-                    raise ValueError("Missing header paths configuration")
-                logger.info("📝 Extracting headers for RAG API...")
-                headers_result = await get_form_fields_points(
-                    extracted_json_path=extracted_json,
-                    headers_output_path=headers_output_path,
-                    final_fields_output_path=final_fields_output_path
-                )
-                headers_with_fields_path = headers_output_path
-                final_form_fields_path = final_fields_output_path
-                pdf_category = headers_result.get("pdf_category")
-                # Track headers extraction in pipeline results (Phase 2 LLM costs)
-                pipeline_results["headers"] = {
-                    "headers_with_fields": headers_output_path,
-                    "final_form_fields": final_fields_output_path,
-                    "llm_usage": headers_result.get("llm_usage", {})
-                }
-                logger.info(f"✅ Headers extracted: {final_form_fields_path}")
-                if pdf_category:
-                    logger.info(f"📋 PDF Category: {pdf_category}")
-                # Upload header files to source storage
-                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
-                output_handler = OutputFileHandler(config)
-                dest_headers_with_fields = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
-                dest_final_form_fields = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
-                if dest_headers_with_fields:
-                    logger.info(f"📤 Uploaded headers to: {dest_headers_with_fields}")
-                if dest_final_form_fields:
-                    logger.info(f"📤 Uploaded final fields to: {dest_final_form_fields}")
-                # CACHE PHASE 2 RESULTS immediately after headers extraction completes
-                # This updates the existing cache entry with headers_with_fields and final_form_fields
-                if pdf_hash and not cache_hit:
-                    try:
-                        from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
-                        from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
-                        logger.info("💾 Updating cache with Phase 2 results (headers_with_fields + final_form_fields)...")
-                        # Use destination paths for cache (persistent storage)
-                        cache_headers = dest_headers_with_fields if dest_headers_with_fields else headers_with_fields_path
-                        cache_final_fields = dest_final_form_fields if dest_final_form_fields else final_form_fields_path
-                        # Get cached Phase 1 paths (embedded_pdf, mapping, radio were already cached)
-                        cache_mapping = dest_semantic_mapping if dest_semantic_mapping else semantic_mapping_path
-                        cache_radio = dest_radio_groups if dest_radio_groups else radio_groups
-                        cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
-                        await save_hash_cache(
-                            pdf_hash=pdf_hash,
-                            cache_registry_path=cache_registry_path,
-                            embedded_pdf=cache_embedded,
-                            mapping_json=cache_mapping,
-                            radio_groups=cache_radio,
-                            user_id=user_id,
-                            pdf_doc_id=pdf_doc_id,
-                            headers_with_fields=cache_headers,
-                            final_form_fields=cache_final_fields,
-                            pdf_category=pdf_category
-                        )
-                        logger.info("✅ Phase 2 cached locally")
-                        # IMPORTANT: Upload cache registry to source storage so it persists
-                        if os.path.exists(cache_registry_path):
-                            cache_output_handler = OutputFileHandler(config)
-                            cache_dest = cache_output_handler.save_output(
-                                cache_registry_path, 
-                                'cache_registry_json'
-                            )
-                            if cache_dest:
-                                logger.info(f"📤 Cache registry persisted to: {cache_dest}")
-                            else:
-                                logger.warning("⚠️  Cache registry not uploaded (local storage mode)")
-                        logger.info("✅ Phase 2 cached: headers_with_fields, final_form_fields")
-                    except Exception as cache_error:
-                        logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
-                elif cache_hit:
-                    logger.info("⏭️  Cache hit - skipping Phase 2 cache update")
-                else:
-                    logger.info("⚠️  No pdf_hash available, skipping Phase 2 cache")
-                # Now call RAG mapper with cache check
                 rag_result = await run_rag_api_mapper(
                     extracted_json_path=extracted_json,
                     headers_file_path=final_form_fields_path,
@@ -1798,10 +2289,9 @@ async def handle_make_embed_file_operation(
                     notifier=notifier
                 )
                 if rag_result["success"]:
-                    logger.info(f"✅ RAG mapper completed: {rag_result['rag_predictions_path']}")
+                    logger.info(f"✅ RAG predictions: {rag_result['rag_predictions_path']}")
                     rag_predictions_path = rag_result["rag_predictions_path"]
-                    dest_rag_predictions = rag_result["dest_rag_predictions"]
-                    # Save LLM predictions (from semantic mapping) for comparison
+                    # Save LLM predictions for comparison
                     logger.info("📋 Saving LLM predictions for comparison...")
                     llm_predictions_path = await save_llm_predictions_to_rag_bucket(
                         semantic_mapping_path=semantic_mapping_path,
@@ -1810,11 +2300,10 @@ async def handle_make_embed_file_operation(
                         storage_config=config,
                         session_id=session_id
                     )
-                    # Upload LLM predictions to RAG bucket predictions folder
+                    # Upload LLM predictions to RAG bucket
                     from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
                     from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
                     output_handler = OutputFileHandler(config)
-                    # Save llm_predictions.json to RAG bucket predictions folder
                     if hasattr(config, '_sc'):
                         pr = PathResolver(config._sc)
                         uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
@@ -1827,9 +2316,7 @@ async def handle_make_embed_file_operation(
                     else:
                         dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
                     logger.info(f"✅ LLM predictions saved and uploaded")
-                    logger.info(f"   Local: {llm_predictions_path}")
-                    logger.info(f"   Uploaded: {dest_llm_predictions}")
-                    # Combine semantic + RAG predictions
+                    # Combine semantic + RAG
                     logger.info("🔄 Combining semantic + RAG predictions...")
                     mapping_json, combined_mapping_path = await combine_mappings(
                         semantic_mapping_path=semantic_mapping_path,
@@ -1839,46 +2326,39 @@ async def handle_make_embed_file_operation(
                         storage_config=config,
                         session_id=session_id
                     )
-                    # Upload java mapping and final predictions to RAG bucket predictions folder
-                    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
-                    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
-                    output_handler = OutputFileHandler(config)
+                    logger.info(f"✅ Combined mapping created")
+                    # Save to RAG bucket
                     saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
-                    # Save final_predictions.json to RAG bucket predictions folder
-                    if hasattr(config, '_sc'):
-                        pr = PathResolver(config._sc)
-                        uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
-                        rag_predictions_path = pr.remote_final_predictions(uid, sid, pid)
-                        saved_final_predictions = output_handler.save_output(
-                            combined_mapping_path,
-                            'final_predictions_json',
-                            destination_path=rag_predictions_path
-                        )
-                    else:
-                        saved_final_predictions = output_handler.save_output(combined_mapping_path, 'final_predictions_json')
+                    saved_final_predictions = await save_final_predictions_to_rag(
+                        output_handler,
+                        config,
+                        combined_mapping_path
+                    )
                     logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
                     logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
-                    logger.info(f"✅ Combined mapping created (Java format): {mapping_json}")
                     rag_api_failed = False
                 else:
-                    logger.warning(f"❌ RAG mapper failed: {rag_result['error']}")
-                    logger.info("� Falling back to semantic mapping only")
-                    rag_api_failed = True
-                    rag_failure_reason = rag_result['error']
-                    rag_predictions_path = None
-                    dest_rag_predictions = None
-                    # Convert semantic to Java format
+                    logger.warning(f"RAG failed: {rag_result['error']}, using semantic only")
                     mapping_json = await convert_semantic_to_java_format(
                         semantic_mapping_path=semantic_mapping_path,
                         user_id=user_id,
                         pdf_doc_id=pdf_doc_id,
                         storage_config=config
                     )
-                    # Upload java mapping to source storage
+                    # Save to RAG bucket
                     from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
                     output_handler = OutputFileHandler(config)
                     saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    saved_final_predictions = await save_final_predictions_to_rag(
+                        output_handler,
+                        config,
+                        mapping_json
+                    )
                     logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                    logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+                    rag_api_failed = True
+                    rag_failure_reason = rag_result['error']
+                    rag_predictions_path = None
             else:
                 # Semantic mapper only - convert to Java format
                 logger.info("🔄 Converting semantic mapping to Java format...")
@@ -1888,14 +2368,22 @@ async def handle_make_embed_file_operation(
                     pdf_doc_id=pdf_doc_id,
                     storage_config=config
                 )
-                # Upload java mapping to source storage
+                # Save to RAG bucket
                 from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
                 output_handler = OutputFileHandler(config)
                 saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                saved_final_predictions = await save_final_predictions_to_rag(
+                    output_handler,
+                    config,
+                    mapping_json
+                )
                 logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
-                rag_api_failed = False
-                rag_predictions_path = None
-                dest_rag_predictions = None
+                logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+
+            # Update config paths
+            config.local_mapped_json = mapping_json
+            config.local_radio_json = radio_groups
+            logger.info(f"✅ MAP phase completed.")
         # Store map result for pipeline tracking — prefer S3 dest paths over local /tmp
         pipeline_results["map"] = {
             "mapping_path":         saved_java_mapping or mapping_json,
@@ -2100,7 +2588,7 @@ async def handle_make_embed_file_operation(
                 "final_form_fields":    dest_final_form_fields                                  or final_form_fields_path,
                 "llm_predictions":      getattr(config, 'dest_llm_predictions_json',    None)  or llm_predictions_path,
                 "rag_predictions":      getattr(config, 'dest_rag_predictions_json',    None)  or rag_predictions_path,
-                "combined_mapping":     combined_mapping_path,
+                "final_predictions":    saved_final_predictions                                 or combined_mapping_path,
             },
             "pdf_category": pdf_category,
             "pdf_hash": pdf_hash,
@@ -2751,18 +3239,19 @@ async def call_rag_api(
             f"RAG API returned success but no predictions path found in response: {result}"
         )
     logger.info(f"✅ RAG API response — predictions at: {rag_source_path}")
-    # Download from RAG storage to mapper local path
+    # Download from RAG storage to mapper local path (source-agnostic)
     local_rag_path = getattr(storage_config, 'local_rag_predictions', None)
     if not local_rag_path:
         raise ValueError("storage_config.local_rag_predictions is not set.")
     from pdf_autofillr_mapper.handlers.input_handler import InputFileHandler
     input_handler = InputFileHandler(storage_config)
-    downloaded    = input_handler.download_input(rag_source_path, local_rag_path)
+    download_manager = FileDownloadManager(input_handler, storage_config)
+    downloaded = await download_manager.download_rag_predictions(rag_source_path, local_rag_path)
     if not downloaded or not os.path.exists(downloaded):
         raise RuntimeError(
             f"Failed to download RAG predictions from {rag_source_path} to {local_rag_path}"
         )
-    logger.info(f"✅ RAG predictions (http) downloaded to: {downloaded}")
+    logger.info(f"✅ RAG predictions downloaded to: {downloaded}")
     logger.info("=" * 80)
     return downloaded
 
