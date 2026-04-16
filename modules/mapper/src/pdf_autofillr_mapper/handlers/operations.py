@@ -865,15 +865,16 @@ async def handle_fill_operation(
         filled_pdf = await fill_with_java(
             embedded_pdf=local_embedded,
             input_json=local_input,
+            output_path=local_filled,  # Tell Java where to save the output
             storage_config=storage_config
         )
         # Save output immediately to source storage
         saved_path = output_handler.save_output(local_filled, 'filled_pdf')
         if saved_path:
             logger.info(f"✅ Saved filled PDF to: {saved_path}")
-        # Generate presigned URL for S3 files
+        # Generate presigned URL for S3 files (use saved S3 path)
         filled_presigned_url = None
-        if config.source_type == "aws" and hasattr(config, 's3_filled_pdf'):
+        if config.source_type == "aws" and saved_path:
             try:
                 from pdf_autofillr_mapper.clients.s3_client import S3Client
                 s3_client = S3Client()
@@ -894,7 +895,7 @@ async def handle_fill_operation(
                     "embedded_pdf": local_embedded,
                     "input_json": local_input
                 },
-                output_files={"filled_pdf": local_filled},
+                output_files={"filled_pdf": saved_path or local_filled},
                 user_input_details=user_input_details,
                 metadata={"storage_type": config.source_type}
             )
@@ -902,7 +903,8 @@ async def handle_fill_operation(
         logger.info("=" * 60)
         result = {
             "operation": "fill",
-            "output_file": local_filled,
+            "output_file": saved_path or local_filled,  # Return S3 path if saved, else local
+            "dest_output_file": saved_path,  # Explicit S3 destination path (like embed operation)
             "storage_type": config.source_type,
             "status": "success",
             "execution_time_seconds": duration
@@ -1010,8 +1012,7 @@ async def handle_run_all_operation(
         # Stage 4: Fill
         logger.info("\n[4/4] Starting FILL stage...")
         fill_result = await handle_fill_operation(
-            embedded_pdf_path=embedded_pdf,
-            input_json_path=input_json,
+            config=config,
             user_id=user_id,
             session_id=session_id,
             notifier=notifier,
@@ -2839,10 +2840,9 @@ async def handle_fill_pdf_operation(
             except Exception as _fe:
                 logger.debug(f"Could not check extracted JSON for field count: {_fe}")
 
-        # Call the standard fill operation with S3 paths
+        # Call the standard fill operation with config
         fill_result = await handle_fill_operation(
-            embedded_pdf_path=embedded_pdf_path,  # Use S3 path
-            input_json_path=input_json_path,      # Use S3 path
+            config=config,
             user_id=user_id,
             session_id=session_id,
             notifier=notifier,
@@ -2850,7 +2850,8 @@ async def handle_fill_pdf_operation(
         )
         end_time = time.time()
         duration = round(end_time - start_time, 2)
-        filled_pdf_path = fill_result["output_file"]
+        # Use S3 path if available (dest_output_file), else local path
+        filled_pdf_path = fill_result.get("dest_output_file") or fill_result["output_file"]
         filled_presigned_url = fill_result.get("filled_presigned_url")
         logger.info(f"✅ Fill PDF completed in {duration}s")
         logger.info("=" * 60)
