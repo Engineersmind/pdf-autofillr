@@ -44,6 +44,6 @@ jobs:
       - name: Verify package imports cleanly
         run: |
           python -c "
-          from pdf_autofiller import PDFMapperClient
+          from pdf_autofiller import MapperClient, MapperError, AuthenticationError, ValidationError, APIError, TimeoutError
           print('All imports OK')
           "
