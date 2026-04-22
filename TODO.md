@@ -108,40 +108,38 @@ Every package must follow this layout:
 └── README.md
 ```
 
-#### `sdks/python/` — `pdf-autofiller` (v1.0.0)
-- [ ] `pyproject.toml` created ✅
-- [ ] Remove redundant `setup.py`
-- [ ] Remove redundant `requirements.txt` (deps declared in `pyproject.toml`)
-- [ ] Add `tests/` with basic test coverage
-- [ ] Add `CHANGELOG.md`
-- [ ] Confirm `__version__` in `__init__.py` matches `pyproject.toml` version
+#### `sdks/python/` — `pdf-autofiller` (v1.0.0) ✅
+- [x] `pyproject.toml` created
+- [x] Removed redundant `setup.py` and `requirements.txt`
+- [x] `tests/` with basic coverage
+- [x] `CHANGELOG.md` added
+- [x] `__version__` matches `pyproject.toml`
 
-#### `packages/core/` — `pdf-autofiller-core` (v1.0.0)
-- [ ] `pyproject.toml` exists ✅
-- [ ] Remove redundant `setup.py`
-- [ ] Remove redundant `requirements.txt`
-- [ ] Remove `SETUP_COMPLETE.md` (internal note, not for PyPI)
-- [ ] Add `examples/`
-- [ ] Add `tests/` with basic interface coverage
-- [ ] Add `CHANGELOG.md`
+#### `packages/core/` — `pdf-autofiller-core` (v1.0.0) ✅
+- [x] `pyproject.toml` exists
+- [x] Removed redundant `setup.py`, `requirements.txt`, `SETUP_COMPLETE.md`
+- [x] `examples/` added (implement_storage.py, implement_handler.py)
+- [x] `tests/` added
+- [x] `CHANGELOG.md` added
 
-#### `packages/plugins/` — `pdf-autofiller-plugins` (v0.1.0)
-- [ ] `pyproject.toml` exists ✅
-- [ ] Remove redundant `setup.py`
-- [ ] Remove redundant `requirements.txt`
-- [ ] Remove `SETUP_COMPLETE.md`
-- [ ] Add `tests/` with basic coverage
-- [ ] Add `CHANGELOG.md`
+#### `packages/plugins/` — `pdf-autofiller-plugins` (v0.1.0) ✅
+- [x] `pyproject.toml` exists
+- [x] Removed redundant `setup.py`, `requirements.txt`, `SETUP_COMPLETE.md`
+- [x] `tests/` added
+- [x] `CHANGELOG.md` added
 
 ### CI/CD for publishing
 
-- [ ] Write `.github/workflows/publish-pypi.yml` — tag-based routing:
-  - `sdk/v*` → publish `sdks/python/`
-  - `core/v*` → publish `packages/core/`
-  - `plugins/v*` → publish `packages/plugins/`
-- [ ] Add `PYPI_TOKEN` as GitHub Actions secret
-- [ ] Test publish to TestPyPI before first real release: `twine upload --repository testpypi dist/*`
-- [ ] Confirm install works: `pip install --index-url https://test.pypi.org/simple/ pdf-autofiller`
+- [x] `publish-pypi.yml` written with tag-based routing (sdk-v*, core-v*, plugins-v*)
+- [ ] Set up PyPI Trusted Publishing (OIDC) — no API token needed
+  - Go to: https://pypi.org/manage/account/publishing/
+  - Owner: Engineersmind | Repo: pdf-autofillr | Workflow: publish-pypi.yml | Env: pypi
+- [ ] Create `pypi` environment in GitHub repo settings → Environments → New environment → name: `pypi`
+- [ ] Test publish to TestPyPI before first real release:
+  ```bash
+  cd sdks/python && pip install build twine
+  python -m build && twine upload --repository testpypi dist/*
+  ```
 
 ---
 
@@ -150,10 +148,10 @@ Every package must follow this layout:
 ### Mapper module
 - [ ] **Token limiting** — add per-operation and per-session token caps for Phase 1 (semantic mapper) and header extraction, fetched from user profile via backend API (see discussion in conversation)
 - [ ] **Notification key consistency** — verify all stage notifications use consistent key names matching `pipeline_completed` output (extract, map, embed, fill stages) ← partially done
-- [ ] **`notifier.py` status.value fix** — `notify_pipeline_completion()` was using `status.value` on a string ← fixed, confirm deployed
-- [ ] **Requirements consolidation** — `dev` mapper has 5 requirements files (`requirements.txt`, `requirements-aws.txt`, `requirements-azure.txt`, `requirements-gcp.txt`, `requirements-full.txt`) — document when to use which or consolidate with extras in `pyproject.toml`
-- [ ] **Remove `api_server.py`** from `main`'s mapper — superseded by `entrypoints/`
-- [ ] **Rename `adapters/` → `adapter_src/`** on `main` to match `dev`
+- [x] **`notifier.py` status.value fix** — fixed and committed on dev
+- [ ] **Requirements consolidation** — mapper has 5 requirements files; document when to use which or consolidate with extras in `pyproject.toml`
+- [x] **Remove `api_server.py`** from mapper — done (synced from dev to main)
+- [x] **Rename `adapters/` → `adapter_src/`** — done (synced from dev to main)
 
 ### Module structure consistency
 - [ ] All modules should follow the same folder layout as `modules/mapper/`:
