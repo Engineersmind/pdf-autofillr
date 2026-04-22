@@ -1,0 +1,11 @@
+.terraform/
+.terraform.lock.hcl
+*.tfplan
+*.tfstate
+*.tfstate.backup
+.env.local
+docker-compose.local.yml
+.env
+.env.*
+!.env.example
+.DS_Store

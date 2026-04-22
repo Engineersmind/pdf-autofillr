@@ -1,0 +1,88 @@
+Good question. Here's the exact workflow:
+
+When you change functionality in your codebase
+Step 1 — Change your code
+Edit whatever Python files need changing (chatbot_core.py, s3_helper.py, etc.)
+
+Step 2 — Does it add/remove an env var?
+If YES — you need to touch Terraform:
+FileWhat to updatemodules/aws/main.tfAdd/remove the var from environment { variables { } } block inside aws_lambda_functionmodules/aws/variables.tfAdd/remove the variable declarationvariables.tf (root)Add/remove the variable + descriptionenvironments/prod/terraform.tfvarsAdd the non-secret value, or add a comment for the secretscripts/constructor.shAdd it to REQUIRED array if it's a secretaws_secretsmanager_secret_versionAdd it to the secret_string jsonencode block
+If NO env var change — skip Terraform entirely. Jump to Step 3.
+
+Step 3 — Does it change S3 paths or add a new bucket?
+If new S3 path/file — no Terraform change needed (IAM policy covers the whole bucket with /*).
+If new S3 bucket — add a new aws_s3_bucket resource block + IAM policy statement in modules/aws/main.tf.
+
+Step 4 — Build and push a new image
+bash./scripts/build_and_push.sh prod
+That's it for most changes. This rebuilds your Docker image, pushes to ECR, and updates the Lambda automatically. No terraform apply needed — the lifecycle { ignore_changes = [image_uri] } block means Terraform doesn't track image changes.
+
+Step 5 — If you did change Terraform files
+bash# Export secrets first
+export TF_VAR_auth_token="..."
+export TF_VAR_openai_api_key="..."
+# etc.
+
+# Then apply
+./scripts/constructor.sh prod
+Terraform will only update what changed (the new env var, new bucket, etc.) — it won't touch anything else.
+
+Quick decision tree
+Code change
+    │
+    ├── New/removed env var?
+    │       YES → Edit 6 Terraform files → terraform apply → build_and_push
+    │       NO  ↓
+    │
+    ├── New S3 bucket?
+    │       YES → Add bucket resource + IAM → terraform apply → build_and_push
+    │       NO  ↓
+    │
+    └── Just logic/bug fix?
+            → build_and_push only (30 seconds)
+
+Files you will NEVER need to touch for a code-only change
+
+outputs.tf
+scripts/destructor.sh
+scripts/logging.sh
+scripts/bootstrap_backend.sh
+environments/prod/terraform.tfvars (unless new non-secret config)
+
+The vast majority of your changes will just be Step 4 — build and push. Terraform only comes in when the infrastructure itself changes, not the code running inside it.
+
+
+
+
+
+For doc-upload, chatbot-dev, chatbot-prod (ZIP)
+bashcd terraform/doc-upload-lambda        # or chatbot-lambda / chatbot-lambda-prod
+./scripts/build_and_deploy.sh dev     # or prod
+That's it. One command. It:
+
+Copies your changed .py files
+Installs deps
+Zips everything
+Uploads to Lambda
+
+
+For rag-lambda (Image)
+bashcd terraform/rag-lambda
+./scripts/build_and_push.sh dev       # or prod
+That's it. It:
+
+docker build — rebuilds the image with your new code
+docker push — uploads to ECR
+Updates Lambda to use the new image
+
+
+The full picture
+You change a .py file
+        │
+        ├── doc-upload, chatbot-dev, chatbot-prod
+        │       └── ./scripts/build_and_deploy.sh
+        │
+        └── rag-lambda
+                └── ./scripts/build_and_push.sh
+Never need to run terraform apply just for a code change.
+Terraform only runs when you change infrastructure — new env var, new bucket, new timeout, etc.

@@ -1,0 +1,25 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfplan
+*.tfstate
+*.tfstate.backup
+terraform.tfstate.d/
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Generated local files (written by modules/local)
+.env.local
+docker-compose.local.yml
+
+# Secrets — never commit these
+*.tfvars.secret
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
