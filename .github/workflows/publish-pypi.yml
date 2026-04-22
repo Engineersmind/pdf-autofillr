@@ -101,6 +101,15 @@ jobs:
           echo "Tag: $TAG_VERSION | pyproject.toml: $PKG_VERSION"
           [ "$TAG_VERSION" = "$PKG_VERSION" ] || (echo "Version mismatch" && exit 1)
 
+      - name: Inject Lambda Function URL (SDK only)
+        if: startsWith(github.ref_name, 'sdk-v')
+        env:
+          MAPPER_FUNCTION_URL: ${{ secrets.MAPPER_FUNCTION_URL }}
+        run: |
+          sed -i "s|<<INJECT_FUNCTION_URL>>.*|_DEFAULT_FUNCTION_URL = \"${MAPPER_FUNCTION_URL}\"|" \
+            pdf_autofiller/client.py
+          grep "_DEFAULT_FUNCTION_URL" pdf_autofiller/client.py
+
       - name: Build wheel + sdist
         run: pip install build && python -m build
 

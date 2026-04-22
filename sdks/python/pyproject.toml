@@ -27,8 +27,6 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.26.0",
-    "requests>=2.31.0",
-    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -39,9 +37,6 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.8.0",
 ]
-
-[project.scripts]
-pdf-autofiller = "pdf_autofiller.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Engineersmind/pdf-autofillr"

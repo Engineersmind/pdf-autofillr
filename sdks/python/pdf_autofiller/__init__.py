@@ -1,12 +1,21 @@
-"""
-PDF Autofiller Python SDK
-
-Client library for PDF Mapper API.
-"""
+"""PDF Autofiller Python SDK."""
 
 __version__ = "1.0.0"
 
-from .client import PDFMapperClient
-from .resources.mapper import MapperResource
+from .client import MapperClient
+from .exceptions import (
+    APIError,
+    AuthenticationError,
+    MapperError,
+    TimeoutError,
+    ValidationError,
+)
 
-__all__ = ["PDFMapperClient", "MapperResource"]
+__all__ = [
+    "MapperClient",
+    "MapperError",
+    "AuthenticationError",
+    "ValidationError",
+    "APIError",
+    "TimeoutError",
+]

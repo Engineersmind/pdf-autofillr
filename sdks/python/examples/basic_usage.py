@@ -1,62 +1,72 @@
 """
-Basic example of using the PDF Autofiller SDK.
+Basic usage of the PDF Autofiller SDK.
+
+The mapper Lambda exposes three operations.  The typical flow is:
+
+  1. make_embed_file  — extract fields from the PDF, map them, embed the result
+  2. check_embed_file — (optional) verify the cache is ready before filling
+  3. fill_pdf         — fill the embedded PDF with the user's actual data
 """
 
-from pdf_autofiller import PDFMapperClient
+from pdf_autofiller import MapperClient
+from pdf_autofiller.exceptions import AuthenticationError, MapperError
+
+API_KEY = "your-api-key"   # the only thing customers need to set
+
+USER_ID = 1
+PDF_DOC_ID = 42
+SESSION_ID = "session-abc123"
+ENV = "prod"
 
 
 def main():
-    # Initialize client
-    client = PDFMapperClient(
-        api_key="your-api-key-here",
-        base_url="http://localhost:8000"  # Change to your API URL
-    )
-    
-    pdf_path = "s3://my-bucket/test-form.pdf"
-    
-    print("1. Checking API health...")
-    health = client.health_check()
-    print(f"   Status: {health}")
-    
-    print("\n2. Extracting fields from PDF...")
-    extract_result = client.mapper.extract(pdf_path=pdf_path)
-    print(f"   Success: {extract_result['success']}")
-    if extract_result['success']:
-        fields = extract_result.get('data', {}).get('fields', [])
-        print(f"   Found {len(fields)} fields")
-    
-    print("\n3. Mapping fields...")
-    map_result = client.mapper.map(
-        pdf_path=pdf_path,
-        mapper_type="ensemble"
-    )
-    print(f"   Success: {map_result['success']}")
-    
-    print("\n4. Creating embed file (Extract + Map + Embed)...")
-    embed_result = client.mapper.make_embed_file(pdf_path=pdf_path)
-    print(f"   Success: {embed_result['success']}")
-    
-    print("\n5. Checking if PDF has embedded metadata...")
-    check_result = client.mapper.check_embed_file(pdf_path=pdf_path)
-    print(f"   Has metadata: {check_result.get('data', {}).get('has_metadata', False)}")
-    
-    print("\n6. Filling PDF with data...")
-    fill_data = {
-        "first_name": "John",
-        "last_name": "Doe",
-        "email": "john@example.com",
-        "phone": "+1-555-0100"
-    }
-    fill_result = client.mapper.fill(
-        pdf_path=pdf_path,
-        data=fill_data
-    )
-    print(f"   Success: {fill_result['success']}")
-    
-    # Close client
-    client.close()
-    print("\nDone!")
+    # function_url defaults to the production Lambda — no need to set it
+    with MapperClient(api_key=API_KEY) as client:
+
+        # ------------------------------------------------------------------
+        # Step 1 — Extract, map, and embed the PDF
+        # (run once per PDF; result is cached in S3 for subsequent fills)
+        # ------------------------------------------------------------------
+        print("Running make_embed_file ...")
+        embed_result = client.make_embed_file(
+            user_id=USER_ID,
+            pdf_doc_id=PDF_DOC_ID,
+            session_id=SESSION_ID,
+            env=ENV,
+        )
+        print(f"  cache_hit : {embed_result.get('cache_hit')}")
+        print(f"  result    : {embed_result}")
+
+        # ------------------------------------------------------------------
+        # Step 2 — Check the cache (useful if calling make_embed_file again)
+        # ------------------------------------------------------------------
+        print("\nRunning check_embed_file ...")
+        check_result = client.check_embed_file(
+            user_id=USER_ID,
+            pdf_doc_id=PDF_DOC_ID,
+            session_id=SESSION_ID,
+            env=ENV,
+        )
+        print(f"  cache_hit : {check_result.get('cache_hit')}")
+
+        # ------------------------------------------------------------------
+        # Step 3 — Fill the PDF with user data
+        # ------------------------------------------------------------------
+        print("\nRunning fill_pdf ...")
+        fill_result = client.fill_pdf(
+            user_id=USER_ID,
+            pdf_doc_id=PDF_DOC_ID,
+            session_id=SESSION_ID,
+            env=ENV,
+        )
+        print(f"  filled_pdf: {fill_result.get('filled_pdf')}")
+        print(f"  result    : {fill_result}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except AuthenticationError as e:
+        print(f"Auth error — check your API key: {e}")
+    except MapperError as e:
+        print(f"Mapper error: {e}")
