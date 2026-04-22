@@ -72,19 +72,30 @@ class TestCreateBboxHash:
         assert create_bbox_hash(fields_a, 1000, 1000) != create_bbox_hash(fields_b, 1000, 1000)
 
 
+_MOCK_SEMANTIC_CONFIG = {
+    "llm": "openai/gpt-4o-mini",
+    "confidence_threshold": 0.7,
+    "include_key_variants": True,
+    "include_field_name_variants": False,
+    "include_description": True,
+    "chunking_strategy": "fixed",
+}
+_MOCK_CHUNKING_CONFIG = {"current_strategy": "page", "strategy": "page", "chunk_size": 10}
+
+
 class TestSemanticMapperInit:
     def test_init_with_defaults(self):
         from pdf_autofillr_mapper.mappers.semantic_mapper import SemanticMapper
-        with patch("pdf_autofillr_mapper.mappers.semantic_mapper.settings"):
-            with patch("pdf_autofillr_mapper.mappers.semantic_mapper.get_semantic_mapper_config", return_value={}):
-                with patch("pdf_autofillr_mapper.mappers.semantic_mapper.get_chunking_config", return_value={}):
+        with patch("pdf_autofillr_mapper.core.config.get_semantic_mapper_config", return_value=_MOCK_SEMANTIC_CONFIG):
+            with patch("pdf_autofillr_mapper.core.config.get_chunking_config", return_value=_MOCK_CHUNKING_CONFIG):
+                with patch("pdf_autofillr_mapper.clients.unified_llm_client.UnifiedLLMClient"):
                     mapper = SemanticMapper()
                     assert mapper is not None
 
     def test_init_with_legacy_method_config(self):
         from pdf_autofillr_mapper.mappers.semantic_mapper import SemanticMapper
-        with patch("pdf_autofillr_mapper.mappers.semantic_mapper.settings"):
-            with patch("pdf_autofillr_mapper.mappers.semantic_mapper.get_semantic_mapper_config", return_value={}):
-                with patch("pdf_autofillr_mapper.mappers.semantic_mapper.get_chunking_config", return_value={}):
-                    mapper = SemanticMapper(method_config={"confidence_threshold": 0.8})
+        with patch("pdf_autofillr_mapper.core.config.get_semantic_mapper_config", return_value=_MOCK_SEMANTIC_CONFIG):
+            with patch("pdf_autofillr_mapper.core.config.get_chunking_config", return_value=_MOCK_CHUNKING_CONFIG):
+                with patch("pdf_autofillr_mapper.clients.unified_llm_client.UnifiedLLMClient"):
+                    mapper = SemanticMapper(method_config={"confidence_threshold": 0.8, "llm": "openai/gpt-4o-mini"})
                     assert mapper is not None

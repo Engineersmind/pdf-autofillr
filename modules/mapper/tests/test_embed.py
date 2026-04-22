@@ -54,6 +54,13 @@ class TestRunEmbedJavaStage:
         radio = tmp_path / "radio.json"
         radio.write_text("{}")
         output = tmp_path / "out" / "embedded.pdf"
+        import os as _os
+        _real_exists = _os.path.exists
+
+        def fake_exists(path):
+            if str(path).endswith(".jar"):
+                return True
+            return _real_exists(path)
 
         def fake_run(cmd, **_):
             Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
@@ -63,14 +70,15 @@ class TestRunEmbedJavaStage:
             result.returncode = 0
             return result
 
-        with patch("subprocess.run", side_effect=fake_run):
-            result = await run_embed_java_stage(
-                str(pdf),
-                str(extracted),
-                str(mapping),
-                str(radio),
-                storage_config={"path": str(output)},
-            )
+        with patch("pdf_autofillr_mapper.embedders.embed_keys.os.path.exists", side_effect=fake_exists):
+            with patch("subprocess.run", side_effect=fake_run):
+                result = await run_embed_java_stage(
+                    str(pdf),
+                    str(extracted),
+                    str(mapping),
+                    str(radio),
+                    storage_config={"path": str(output)},
+                )
 
         assert result == str(output)
 

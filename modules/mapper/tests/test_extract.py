@@ -39,25 +39,32 @@ class TestDocumentAnalyzer:
 
 
 class TestDetailedFitzExtractor:
-    def test_init_with_no_args(self):
+    def test_init_with_empty_config(self):
         from pdf_autofillr_mapper.extractors.detailed_fitz import DetailedFitzExtractor
 
-        extractor = DetailedFitzExtractor()
+        extractor = DetailedFitzExtractor(config={})
         assert extractor is not None
+        assert extractor.WIDGET_LINE_DISTANCE_THRESHOLD == 10
+
+    def test_init_applies_config_overrides(self):
+        from pdf_autofillr_mapper.extractors.detailed_fitz import DetailedFitzExtractor
+
+        extractor = DetailedFitzExtractor(config={"WIDGET_LINE_DISTANCE_THRESHOLD": 20, "rounding": 2})
+        assert extractor.WIDGET_LINE_DISTANCE_THRESHOLD == 20
+        assert extractor.rounding == 2
 
     def test_extract_raises_on_missing_pdf(self, tmp_path):
         from pdf_autofillr_mapper.extractors.detailed_fitz import DetailedFitzExtractor
 
-        extractor = DetailedFitzExtractor()
+        extractor = DetailedFitzExtractor(config={})
         missing = str(tmp_path / "ghost.pdf")
-        with pytest.raises((FileNotFoundError, Exception)):
+        with pytest.raises(Exception):
             extractor.extract(missing)
 
     def test_extract_returns_dict_on_valid_pdf(self, tmp_path):
         from pdf_autofillr_mapper.extractors.detailed_fitz import DetailedFitzExtractor
         import fitz
 
-        # Create a minimal valid PDF with fitz
         pdf_path = str(tmp_path / "test.pdf")
         doc = fitz.open()
         page = doc.new_page()
@@ -65,6 +72,6 @@ class TestDetailedFitzExtractor:
         doc.save(pdf_path)
         doc.close()
 
-        extractor = DetailedFitzExtractor()
-        result = extractor.extract(pdf_path)
+        extractor = DetailedFitzExtractor(config={})
+        result = extractor.extract(pdf_path, storage_config={"type": "local", "path": str(tmp_path / "extracted.json")})
         assert isinstance(result, dict)

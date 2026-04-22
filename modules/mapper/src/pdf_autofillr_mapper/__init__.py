@@ -17,10 +17,19 @@ Quick start::
 """
 from __future__ import annotations
 
-from pdf_autofillr_mapper.orchestrator import PDFPipeline
-
 __version__ = "1.0.0"
 __all__ = ["PDFPipeline"]
+
+
+def __getattr__(name: str):
+    if name == "PDFPipeline":
+        from pdf_autofillr_mapper.orchestrator import PDFPipeline
+        return PDFPipeline
+    import importlib
+    try:
+        return importlib.import_module(f"pdf_autofillr_mapper.{name}")
+    except ImportError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def copy_sample_configs(destination: str = ".") -> None:

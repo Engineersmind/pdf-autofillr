@@ -11,8 +11,9 @@ class TestFillWithJava:
 
         input_json = tmp_path / "data.json"
         input_json.write_text("{}")
-        with pytest.raises(FileNotFoundError, match="embedded_pdf"):
-            await fill_with_java(str(tmp_path / "ghost.pdf"), str(input_json))
+        with patch("pdf_autofillr_mapper.fillers.fill_pdf.find_jar", return_value="/fake/filler.jar"):
+            with pytest.raises(FileNotFoundError, match="embedded_pdf"):
+                await fill_with_java(str(tmp_path / "ghost.pdf"), str(input_json))
 
     async def test_raises_when_input_json_missing(self, tmp_path):
         from pdf_autofillr_mapper.fillers.fill_pdf import fill_with_java
