@@ -52,7 +52,11 @@ Things missing on `dev` (experiment-001) that need to be added.
 
 - [x] `sdks/python/pyproject.toml` created — authoritative build config
 - [x] `BRANCHING.md` and `TODO.md` committed to `dev`
-- [ ] Review `GETTING_STARTED.md`, `ARCHITECTURE.md`, `COMMANDS.md` — update to reflect new module structure (5 modules, new paths)
+- [x] Restored `modules/rag-pdf-fillr/` name (reverted rename, git history preserved)
+- [x] Moved `modules/pdf_autofillr/` → `packages/pdf_autofillr/` (meta-package, not a module)
+- [x] Removed `modules/mapper/sdk/` — superseded by `sdks/python/`
+- [x] Archived `modules/rag-pdf-fillr/.env` → `archives/`
+- [ ] Review `GETTING_STARTED.md`, `ARCHITECTURE.md`, `COMMANDS.md` — update to reflect 4 modules and new paths
 
 ---
 
@@ -84,7 +88,7 @@ Things missing on `dev` (experiment-001) that need to be added.
 - [ ] No secrets in any committed file on `main`
 - [ ] All `.env.example` templates present and accurate
 - [ ] All `terraform.tfvars.example` templates present
-- [ ] `modules/mapper/sdk/` fully deleted (contents moved to `sdks/python/`)
+- [x] `modules/mapper/sdk/` deleted (done on `dev`, apply same on `main`)
 
 ---
 
@@ -175,9 +179,9 @@ Every package must follow this layout:
 
 ### CI/CD
 - [ ] Update `mapper-tests.yml` to use new `src/pdf_autofillr_mapper/` path (not old flat `src/`)
-- [ ] Update `sdk-tests.yml` to point to `sdks/python/` (not `modules/mapper/sdk/`)
-- [ ] Add trigger branch `dev` to all workflows that currently only trigger on `main`
-- [ ] Add `modules/doc_upload/` and `modules/rag/` test jobs to CI
+- [x] Updated `sdk-tests.yml` to point to `sdks/python/`
+- [x] Added `dev`/`prod` trigger branches to all workflows
+- [ ] Add `modules/doc_upload/` and `modules/rag-pdf-fillr/` test jobs to CI
 
 ---
 
