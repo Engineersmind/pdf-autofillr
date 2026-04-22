@@ -1,0 +1,3274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG — Intelligence Console</title>
+<link rel="icon" type="image/png" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwZjExMTciLz4KICA8cmVjdCB4PSI4IiAgeT0iMzYiIHdpZHRoPSIxMCIgaGVpZ2h0PSIyMCIgcng9IjMiIGZpbGw9IiM0Mjk5ZTEiLz4KICA8cmVjdCB4PSIyMiIgeT0iMjQiIHdpZHRoPSIxMCIgaGVpZ2h0PSIzMiIgcng9IjMiIGZpbGw9IiM2M2IzZWQiLz4KICA8cmVjdCB4PSIzNiIgeT0iMTQiIHdpZHRoPSIxMCIgaGVpZ2h0PSI0MiIgcng9IjMiIGZpbGw9IiM0ZmQxYzUiLz4KICA8cmVjdCB4PSI1MCIgeT0iMjAiIHdpZHRoPSI2IiAgaGVpZ2h0PSIzNiIgcng9IjMiIGZpbGw9IiM2OGQzOTEiLz4KICA8cG9seWxpbmUgcG9pbnRzPSIxMywzNCAyNywyMiA0MSwxMiA1MywxOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYjc5NGY0IiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTMiIGN5PSIzNCIgcj0iMi41IiBmaWxsPSIjYjc5NGY0Ii8+CiAgPGNpcmNsZSBjeD0iMjciIGN5PSIyMiIgcj0iMi41IiBmaWxsPSIjYjc5NGY0Ii8+CiAgPGNpcmNsZSBjeD0iNDEiIGN5PSIxMiIgcj0iMi41IiBmaWxsPSIjYjc5NGY0Ii8+CiAgPGNpcmNsZSBjeD0iNTMiIGN5PSIxOCIgcj0iMi41IiBmaWxsPSIjYjc5NGY0Ii8+Cjwvc3ZnPg=="/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Outfit:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════════ */
+:root {
+  --ink:       #0a0b0f;
+  --ink2:      #0f1117;
+  --ink3:      #141720;
+  --card:      #181c26;
+  --card2:     #1c2130;
+  --border:    #252d3d;
+  --border2:   #2e3a50;
+  --glow:      rgba(99,179,237,0.06);
+
+  --sky:       #63b3ed;
+  --sky2:      #4299e1;
+  --mint:      #4fd1c5;
+  --violet:    #b794f4;
+  --rose:      #fc8181;
+  --amber:     #f6ad55;
+  --lime:      #68d391;
+  --coral:     #fc8181;
+  --pink:      #f687b3;
+  --indigo:    #7f9cf5;
+
+  --text:      #e2e8f0;
+  --text2:     #a0aec0;
+  --text3:     #4a5568;
+  --text4:     #2d3748;
+
+  --mono:      'Space Mono', monospace;
+  --sans:      'Outfit', sans-serif;
+  --r:         12px;
+  --sidebar:   260px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--ink);
+  color:var(--text);
+  font-family:var(--sans);
+  min-height:100vh;
+  overflow-x:hidden;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--ink2)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ── BACKGROUND GRAIN ── */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:0;opacity:0.4;
+}
+
+/* ═══════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════ */
+.shell{display:flex;min-height:100vh;position:relative;z-index:1}
+
+/* ─── SIDEBAR ─── */
+.sidebar{
+  width:var(--sidebar);
+  min-height:100vh;
+  background:var(--ink2);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  position:fixed;left:0;top:0;bottom:0;
+  z-index:200;overflow-y:auto;overflow-x:hidden;
+}
+.main{margin-left:var(--sidebar);flex:1;min-height:100vh;padding:0}
+
+/* ─── LOGO ─── */
+.logo-wrap{
+  padding:1.5rem 1.4rem 1.2rem;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(135deg,rgba(99,179,237,0.06) 0%,transparent 60%);
+}
+.logo{
+  font-family:var(--mono);font-weight:700;font-size:1.05rem;
+  letter-spacing:-0.02em;color:var(--text);
+  display:flex;align-items:center;gap:0.5rem;
+}
+.logo-dot{
+  width:28px;height:28px;border-radius:8px;
+  background:linear-gradient(135deg,var(--sky),var(--mint));
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.75rem;font-weight:700;color:#000;flex-shrink:0;
+}
+.logo-text em{color:var(--sky);font-style:normal}
+.logo-sub{
+  font-size:0.55rem;color:var(--text3);margin-top:0.4rem;
+  letter-spacing:0.15em;text-transform:uppercase;font-family:var(--mono);
+}
+
+/* ─── NAV ─── */
+.nav-group{padding:0.8rem 0.8rem 0.2rem}
+.nav-group-label{
+  font-size:0.5rem;text-transform:uppercase;letter-spacing:0.16em;
+  color:var(--text3);padding:0 0.5rem;margin-bottom:0.4rem;
+  display:flex;align-items:center;gap:0.4rem;font-family:var(--mono);
+}
+.nav-group-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.nav-item{
+  display:flex;align-items:center;gap:0.7rem;
+  padding:0.5rem 0.6rem;border-radius:8px;cursor:pointer;
+  border:1px solid transparent;margin-bottom:2px;
+  transition:all 0.15s ease;position:relative;overflow:hidden;
+}
+.nav-item::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,rgba(99,179,237,0.08),transparent);
+  opacity:0;transition:opacity 0.15s;
+}
+.nav-item:hover{background:var(--card);border-color:var(--border)}
+.nav-item:hover::before{opacity:1}
+.nav-item.active{
+  background:rgba(99,179,237,0.08);
+  border-color:rgba(99,179,237,0.2);
+}
+.nav-item.active::before{opacity:1}
+.nav-icon{
+  width:28px;height:28px;border-radius:7px;
+  background:var(--card2);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.68rem;flex-shrink:0;transition:all 0.15s;
+}
+.nav-item.active .nav-icon{
+  background:rgba(99,179,237,0.12);border-color:rgba(99,179,237,0.3);
+  box-shadow:0 0 10px rgba(99,179,237,0.15);
+}
+.nav-text{flex:1;min-width:0}
+.nav-name{font-size:0.7rem;color:var(--text2);line-height:1.1;font-weight:500}
+.nav-item.active .nav-name{color:var(--sky)}
+.nav-badge{
+  font-size:0.48rem;color:var(--text3);font-family:var(--mono);
+  background:var(--ink3);border:1px solid var(--border);
+  padding:0.1rem 0.35rem;border-radius:3px;
+}
+.nav-item.active .nav-badge{color:rgba(99,179,237,0.6);border-color:rgba(99,179,237,0.15)}
+
+/* ─── CFG ─── */
+.cfg-wrap{
+  margin-top:auto;padding:1rem;
+  border-top:1px solid var(--border);
+  background:linear-gradient(180deg,transparent,rgba(99,179,237,0.02));
+}
+.cfg-label{
+  font-size:0.5rem;text-transform:uppercase;letter-spacing:0.14em;
+  color:var(--text3);margin-bottom:0.7rem;display:block;font-family:var(--mono);
+}
+.cfg-field{margin-bottom:0.55rem}
+.cfg-sublabel{font-size:0.55rem;color:var(--text3);display:block;margin-bottom:0.2rem;font-family:var(--mono)}
+.cfg-input{
+  width:100%;background:var(--ink);border:1px solid var(--border);
+  border-radius:6px;padding:0.4rem 0.6rem;
+  font-family:var(--mono);font-size:0.6rem;color:var(--text);
+  outline:none;transition:border-color 0.15s,box-shadow 0.15s;
+}
+.cfg-input:focus{border-color:var(--sky);box-shadow:0 0 0 2px rgba(99,179,237,0.1)}
+.cfg-ai-row{
+  display:flex;align-items:center;gap:0.5rem;margin-top:0.6rem;
+  padding:0.5rem 0.65rem;background:rgba(99,179,237,0.04);
+  border:1px solid rgba(99,179,237,0.12);border-radius:7px;
+}
+.cfg-ai-label{font-size:0.58rem;color:var(--text2);flex:1}
+.toggle{
+  width:32px;height:18px;background:var(--border2);border-radius:9px;
+  position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;
+}
+.toggle.on{background:var(--sky2)}
+.toggle::after{
+  content:'';position:absolute;top:2px;left:2px;
+  width:14px;height:14px;background:#fff;border-radius:50%;
+  transition:transform 0.2s;
+}
+.toggle.on::after{transform:translateX(14px)}
+
+/* ═══════════════════════════════════════════════════
+   MAIN CONTENT
+═══════════════════════════════════════════════════ */
+.section{display:none;min-height:100vh}
+.section.active{display:block;animation:sectionIn 0.25s ease}
+@keyframes sectionIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ─── PAGE HEADER ─── */
+.page-head{
+  padding:2rem 2.5rem 1.5rem;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:1.5rem;
+  background:linear-gradient(135deg,rgba(99,179,237,0.03) 0%,transparent 50%);
+  position:sticky;top:0;z-index:10;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+}
+.page-head-left{}
+.page-title{
+  font-family:var(--sans);font-weight:900;font-size:1.75rem;
+  letter-spacing:-0.03em;color:var(--text);line-height:1;
+}
+.page-title .accent{
+  background:linear-gradient(135deg,var(--sky),var(--mint));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+.page-desc{
+  font-size:0.72rem;color:var(--text2);margin-top:0.5rem;line-height:1.6;max-width:560px;
+}
+.page-head-right{display:flex;align-items:center;gap:0.5rem;flex-shrink:0}
+
+/* ─── BODY ─── */
+.page-body{padding:1.8rem 2.5rem}
+
+/* ─── PANELS ─── */
+.panel{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden;margin-bottom:1.4rem;
+  transition:border-color 0.2s;
+}
+.panel:hover{border-color:var(--border2)}
+.panel-head{
+  display:flex;align-items:center;gap:0.7rem;
+  padding:0.75rem 1.1rem;
+  background:var(--card2);border-bottom:1px solid var(--border);
+}
+.panel-title{
+  font-family:var(--mono);font-size:0.65rem;color:var(--text2);
+  text-transform:uppercase;letter-spacing:0.1em;flex:1;font-weight:700;
+}
+.panel-body{padding:1.2rem}
+
+/* ─── FIELDS ─── */
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;margin-bottom:1rem}
+.fgrid-wide{grid-template-columns:1fr}
+.f-group{}
+.f-label{
+  display:block;font-size:0.53rem;color:var(--text3);
+  text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.28rem;
+  font-family:var(--mono);
+}
+.f-req{color:var(--rose)}
+.f-inp,.f-sel{
+  width:100%;background:var(--ink2);border:1px solid var(--border);
+  border-radius:8px;padding:0.52rem 0.8rem;
+  font-family:var(--mono);font-size:0.68rem;color:var(--text);
+  outline:none;transition:border-color 0.15s,box-shadow 0.15s;
+  appearance:none;
+}
+.f-inp:focus,.f-sel:focus{border-color:var(--sky);box-shadow:0 0 0 2px rgba(99,179,237,0.1)}
+.f-hint{font-size:0.53rem;color:var(--text3);margin-top:0.22rem;font-family:var(--mono)}
+
+/* ─── BUTTONS ─── */
+.actions{display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap}
+.btn{
+  display:inline-flex;align-items:center;gap:0.4rem;
+  padding:0.55rem 1.1rem;border-radius:8px;
+  font-family:var(--mono);font-size:0.68rem;font-weight:700;
+  cursor:pointer;border:none;transition:all 0.15s;letter-spacing:0.02em;
+}
+.btn-run{
+  background:linear-gradient(135deg,var(--sky2),var(--sky));
+  color:#000;
+}
+.btn-run:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(99,179,237,0.35)}
+.btn-run:active{transform:translateY(0)}
+.btn-run:disabled{background:var(--text4);cursor:not-allowed;transform:none;box-shadow:none;color:var(--text3)}
+.btn-ghost{
+  background:transparent;color:var(--text2);
+  border:1px solid var(--border2);
+}
+.btn-ghost:hover{color:var(--text);border-color:var(--text3);background:var(--card2)}
+.btn-ai{
+  background:linear-gradient(135deg,#7c3aed,#a78bfa);
+  color:#fff;margin-left:auto;
+}
+.btn-ai:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(167,139,250,0.35)}
+.btn-ai:disabled{background:var(--text4);cursor:not-allowed;transform:none;box-shadow:none}
+
+/* ─── STATUS ─── */
+.status{
+  margin-left:auto;display:flex;align-items:center;gap:0.4rem;
+  font-size:0.6rem;padding:0.28rem 0.65rem;border-radius:5px;font-family:var(--mono);
+}
+.status.idle{color:var(--text3)}
+.status.loading{color:var(--sky)}
+.status.ok{background:rgba(104,211,145,0.08);color:var(--lime);border:1px solid rgba(104,211,145,0.2)}
+.status.err{background:rgba(252,129,129,0.08);color:var(--rose);border:1px solid rgba(252,129,129,0.2)}
+.spinner{
+  width:8px;height:8px;border:1.5px solid rgba(99,179,237,0.2);
+  border-top-color:var(--sky);border-radius:50%;animation:spin 0.6s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ─── ERROR BANNER ─── */
+.err-banner{
+  background:rgba(252,129,129,0.05);border:1px solid rgba(252,129,129,0.2);
+  border-radius:8px;padding:0.7rem 1rem;font-size:0.65rem;
+  color:var(--rose);margin-top:1rem;display:none;line-height:1.55;
+  font-family:var(--mono);
+}
+.err-banner.show{display:block}
+
+/* ─── CURL ─── */
+.curl-wrap{
+  background:var(--ink);border:1px solid var(--border);border-radius:8px;
+  padding:0.9rem 1rem;font-size:0.6rem;color:var(--text2);
+  white-space:pre-wrap;word-break:break-all;line-height:1.8;
+  position:relative;margin-bottom:1rem;display:none;font-family:var(--mono);
+}
+.curl-wrap.show{display:block}
+.curl-copy{
+  position:absolute;top:0.6rem;right:0.6rem;
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:5px;padding:0.18rem 0.55rem;font-size:0.55rem;
+  cursor:pointer;color:var(--text2);font-family:var(--mono);
+  transition:all 0.15s;
+}
+.curl-copy:hover{color:var(--text);border-color:var(--border2)}
+
+/* ─── AI SUMMARY ─── */
+.ai-summary{
+  background:linear-gradient(135deg,rgba(124,58,237,0.06),rgba(167,139,250,0.04));
+  border:1px solid rgba(167,139,250,0.2);border-radius:10px;
+  padding:1.1rem 1.3rem;margin-top:1.2rem;display:none;
+  position:relative;overflow:hidden;
+}
+.ai-summary.show{display:block;animation:sectionIn 0.3s ease}
+.ai-summary::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--violet),transparent);
+}
+.ai-summary-header{
+  display:flex;align-items:center;gap:0.5rem;margin-bottom:0.8rem;
+  font-size:0.58rem;color:var(--violet);text-transform:uppercase;
+  letter-spacing:0.12em;font-family:var(--mono);font-weight:700;
+}
+.ai-summary-icon{font-size:0.8rem}
+.ai-summary-body{font-size:0.72rem;color:var(--text2);line-height:1.75}
+.ai-summary-body strong{color:var(--text);font-weight:600}
+.ai-summary-body .highlight{
+  display:inline-block;background:rgba(167,139,250,0.12);
+  color:var(--violet);padding:0.05rem 0.35rem;border-radius:3px;
+  font-family:var(--mono);font-size:0.65rem;
+}
+.ai-loading{
+  display:flex;align-items:center;gap:0.5rem;
+  font-size:0.65rem;color:var(--violet);font-family:var(--mono);
+}
+.ai-spinner{
+  width:10px;height:10px;border:1.5px solid rgba(167,139,250,0.2);
+  border-top-color:var(--violet);border-radius:50%;animation:spin 0.6s linear infinite;
+}
+
+/* ─── STAT CARDS ─── */
+.stats-grid{display:grid;gap:0.8rem;margin-bottom:1.2rem}
+.sg-4{grid-template-columns:repeat(4,1fr)}
+.sg-3{grid-template-columns:repeat(3,1fr)}
+.sg-2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:1200px){.sg-4{grid-template-columns:repeat(2,1fr)}.sg-3{grid-template-columns:repeat(2,1fr)}}
+
+.stat-card{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:10px;padding:1rem 1.1rem;
+  position:relative;overflow:hidden;transition:border-color 0.2s,transform 0.15s;
+}
+.stat-card:hover{border-color:var(--border2);transform:translateY(-1px)}
+.stat-card::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--accent,var(--sky)),transparent);
+  opacity:0.4;
+}
+.stat-label{font-size:0.52rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--text3);margin-bottom:0.5rem;font-family:var(--mono)}
+.stat-val{
+  font-family:var(--sans);font-weight:900;font-size:1.85rem;
+  line-height:1;letter-spacing:-0.03em;
+}
+.stat-val.sky   {color:var(--sky);  --accent:var(--sky)}
+.stat-val.mint  {color:var(--mint); --accent:var(--mint)}
+.stat-val.violet{color:var(--violet);--accent:var(--violet)}
+.stat-val.rose  {color:var(--rose); --accent:var(--rose)}
+.stat-val.amber {color:var(--amber);--accent:var(--amber)}
+.stat-val.lime  {color:var(--lime); --accent:var(--lime)}
+.stat-val.indigo{color:var(--indigo);--accent:var(--indigo)}
+.stat-val.text  {color:var(--text)}
+.stat-sub{font-size:0.56rem;color:var(--text3);margin-top:0.35rem;line-height:1.4}
+
+/* ─── PROGRESS BARS ─── */
+.prog-row{display:flex;align-items:center;gap:0.8rem;margin-bottom:0.6rem}
+.prog-label{font-size:0.63rem;color:var(--text2);width:100px;flex-shrink:0;font-family:var(--mono)}
+.prog-track{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;transition:width 1.2s cubic-bezier(0.34,1.56,0.64,1);width:0}
+.prog-fill.sky   {background:linear-gradient(90deg,var(--sky2),var(--sky))}
+.prog-fill.mint  {background:linear-gradient(90deg,var(--mint),#81e6d9)}
+.prog-fill.violet{background:linear-gradient(90deg,#6d28d9,var(--violet))}
+.prog-fill.lime  {background:linear-gradient(90deg,#276749,var(--lime))}
+.prog-fill.amber {background:linear-gradient(90deg,#c05621,var(--amber))}
+.prog-fill.rose  {background:linear-gradient(90deg,#9b2c2c,var(--rose))}
+.prog-val{font-size:0.63rem;color:var(--text);width:50px;text-align:right;flex-shrink:0;font-family:var(--mono)}
+
+/* ─── SECTION DIVIDER ─── */
+.sec-div{
+  display:flex;align-items:center;gap:0.5rem;
+  font-size:0.52rem;text-transform:uppercase;letter-spacing:0.14em;
+  color:var(--text3);margin:1.3rem 0 0.8rem;font-family:var(--mono);
+}
+.sec-div::before{content:'';width:4px;height:4px;border-radius:50%;background:var(--sky);flex-shrink:0}
+.sec-div::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* ─── CHART GRIDS ─── */
+.chart-grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.2rem}
+.chart-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.2rem}
+.chart-box{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:10px;padding:1rem;
+}
+.chart-box-title{
+  font-size:0.57rem;text-transform:uppercase;letter-spacing:0.1em;
+  color:var(--text3);margin-bottom:0.8rem;font-family:var(--mono);
+}
+
+/* ─── TIMELINE ─── */
+.timeline{display:flex;flex-direction:column;gap:0.4rem;max-height:480px;overflow-y:auto;padding-right:2px}
+.tl-row{
+  display:flex;align-items:center;gap:0.8rem;
+  padding:0.6rem 0.85rem;background:var(--card2);
+  border:1px solid var(--border);border-radius:8px;
+  transition:border-color 0.15s;cursor:default;
+}
+.tl-row:hover{border-color:var(--border2)}
+.tl-ts{font-size:0.58rem;color:var(--text3);width:160px;flex-shrink:0;font-family:var(--mono)}
+.tl-id{font-size:0.6rem;color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+.tl-stats{display:flex;gap:0.9rem;flex-shrink:0}
+.tl-stat{display:flex;flex-direction:column;align-items:flex-end}
+.tl-stat-label{font-size:0.5rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;font-family:var(--mono)}
+.tl-stat-val{font-size:0.66rem;font-weight:600;font-family:var(--mono)}
+.tl-stat-val.ok {color:var(--lime)}
+.tl-stat-val.bad{color:var(--rose)}
+.tl-stat-val.mid{color:var(--amber)}
+.tl-dot{width:6px;height:6px;border-radius:50%;background:var(--border2);flex-shrink:0;transition:background 0.2s}
+.tl-dot.err{background:var(--rose);box-shadow:0 0 6px rgba(252,129,129,0.5)}
+
+/* ─── TABLE ─── */
+.data-table{width:100%;border-collapse:collapse}
+.data-table th{
+  font-size:0.52rem;text-transform:uppercase;letter-spacing:0.1em;
+  color:var(--text3);padding:0.5rem 0.75rem;text-align:left;
+  border-bottom:1px solid var(--border);font-weight:400;font-family:var(--mono);
+}
+.data-table td{
+  font-size:0.67rem;padding:0.6rem 0.75rem;
+  border-bottom:1px solid var(--border);font-family:var(--mono);
+}
+.data-table tr:last-child td{border-bottom:none}
+.data-table tr:hover td{background:rgba(99,179,237,0.03)}
+
+/* ─── TAGS / BADGES ─── */
+.tag{
+  display:inline-flex;align-items:center;font-size:0.53rem;
+  padding:0.13rem 0.45rem;border-radius:3px;margin-right:0.3rem;
+  font-family:var(--mono);font-weight:700;letter-spacing:0.05em;
+}
+.tag.sky   {background:rgba(99,179,237,0.12);color:var(--sky);border:1px solid rgba(99,179,237,0.2)}
+.tag.lime  {background:rgba(104,211,145,0.1);color:var(--lime);border:1px solid rgba(104,211,145,0.2)}
+.tag.amber {background:rgba(246,173,85,0.1);color:var(--amber);border:1px solid rgba(246,173,85,0.2)}
+.tag.violet{background:rgba(183,148,244,0.1);color:var(--violet);border:1px solid rgba(183,148,244,0.2)}
+.tag.rose  {background:rgba(252,129,129,0.1);color:var(--rose);border:1px solid rgba(252,129,129,0.2)}
+.tag.mint  {background:rgba(79,209,197,0.1);color:var(--mint);border:1px solid rgba(79,209,197,0.2)}
+
+.method-badge{
+  display:inline-flex;align-items:center;gap:0.3rem;
+  font-size:0.57rem;padding:0.22rem 0.6rem;border-radius:4px;
+  font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-family:var(--mono);
+}
+.method-post{background:rgba(99,179,237,0.12);color:var(--sky);border:1px solid rgba(99,179,237,0.25)}
+
+.winner-pill{
+  display:inline-flex;align-items:center;gap:0.25rem;
+  font-size:0.53rem;padding:0.15rem 0.5rem;border-radius:3px;
+  text-transform:uppercase;letter-spacing:0.08em;font-family:var(--mono);font-weight:700;
+}
+.wp-llm{background:rgba(99,179,237,0.12);color:var(--sky);border:1px solid rgba(99,179,237,0.25)}
+.wp-rag{background:rgba(183,148,244,0.12);color:var(--violet);border:1px solid rgba(183,148,244,0.25)}
+.wp-tie{background:rgba(246,173,85,0.1);color:var(--amber);border:1px solid rgba(246,173,85,0.25)}
+
+.delta{font-size:0.57rem;padding:0.1rem 0.38rem;border-radius:3px;margin-left:0.4rem;font-family:var(--mono)}
+.delta.pos{background:rgba(104,211,145,0.15);color:var(--lime)}
+.delta.neg{background:rgba(252,129,129,0.15);color:var(--rose)}
+.delta.neu{background:rgba(74,85,104,0.15);color:var(--text3)}
+
+/* ─── HEALTH PILL ─── */
+.health-pill{
+  display:inline-flex;align-items:center;gap:0.3rem;
+  font-size:0.58rem;padding:0.22rem 0.6rem;border-radius:4px;font-weight:600;
+  font-family:var(--mono);
+}
+.health-pill.healthy {background:rgba(104,211,145,0.1);color:var(--lime);border:1px solid rgba(104,211,145,0.25)}
+.health-pill.degraded{background:rgba(246,173,85,0.1);color:var(--amber);border:1px solid rgba(246,173,85,0.25)}
+.health-pill.critical{background:rgba(252,129,129,0.1);color:var(--rose);border:1px solid rgba(252,129,129,0.25)}
+.health-pill.unknown {background:rgba(74,85,104,0.1);color:var(--text3);border:1px solid rgba(74,85,104,0.2)}
+.health-dot{width:6px;height:6px;border-radius:50%}
+.health-pill.healthy  .health-dot{background:var(--lime);box-shadow:0 0 6px rgba(104,211,145,0.5)}
+.health-pill.degraded .health-dot{background:var(--amber);box-shadow:0 0 6px rgba(246,173,85,0.5)}
+.health-pill.critical .health-dot{background:var(--rose);box-shadow:0 0 6px rgba(252,129,129,0.5)}
+.health-pill.unknown  .health-dot{background:var(--text3)}
+
+/* ─── CASE TILES ─── */
+.case-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:0.75rem;margin-bottom:1.2rem}
+.case-tile{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:10px;padding:1rem 0.75rem;text-align:center;
+  transition:all 0.2s;
+}
+.case-tile.lit{border-color:rgba(99,179,237,0.3);background:rgba(99,179,237,0.05)}
+.case-letter{font-family:var(--sans);font-weight:900;font-size:1.6rem;color:var(--text3);line-height:1}
+.case-tile.lit .case-letter{color:var(--sky)}
+.case-count{font-family:var(--sans);font-weight:900;font-size:1.3rem;color:var(--text);margin:0.3rem 0}
+.case-desc{font-size:0.53rem;color:var(--text3);line-height:1.4}
+
+/* ─── ACCURACY BLOCKS ─── */
+.acc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;margin-bottom:1.2rem}
+.acc-block{
+  background:var(--card2);border:1px solid var(--border);border-radius:10px;
+  padding:1rem 1.1rem;position:relative;overflow:hidden;
+}
+.acc-block::before{
+  content:'';position:absolute;top:0;left:0;bottom:0;width:2px;
+  background:var(--acc-color,var(--sky));
+}
+.acc-title{font-size:0.58rem;color:var(--text2);margin-bottom:0.6rem;font-family:var(--mono);text-transform:uppercase;letter-spacing:0.1em}
+.acc-big{font-family:var(--sans);font-weight:900;font-size:2.1rem;letter-spacing:-0.04em;line-height:1;color:var(--acc-color,var(--sky))}
+.acc-rows{margin-top:0.7rem;display:flex;flex-direction:column;gap:0.3rem}
+.acc-row{display:flex;justify-content:space-between;font-size:0.6rem;font-family:var(--mono)}
+.acc-row-label{color:var(--text3)}
+.acc-row-val{color:var(--text2)}
+
+/* ─── ERRORS ─── */
+.no-errors{
+  display:flex;align-items:center;gap:0.5rem;
+  font-size:0.65rem;color:var(--lime);padding:0.5rem 0;
+}
+.err-check{
+  width:18px;height:18px;border-radius:50%;
+  background:rgba(104,211,145,0.12);border:1px solid rgba(104,211,145,0.3);
+  display:flex;align-items:center;justify-content:center;font-size:0.5rem;
+}
+.err-item{
+  background:var(--card2);border:1px solid rgba(252,129,129,0.2);
+  border-radius:8px;padding:0.7rem 0.9rem;margin-bottom:0.5rem;
+}
+.err-type{color:var(--rose);font-size:0.56rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem;font-family:var(--mono);font-weight:700}
+.err-detail{color:var(--text2);font-size:0.63rem;line-height:1.55;font-family:var(--mono)}
+
+/* ─── COMPARE CARDS ─── */
+.cmp-card{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:10px;padding:1.1rem;margin-bottom:0.9rem;
+  transition:border-color 0.2s;
+}
+.cmp-card:hover{border-color:var(--border2)}
+.cmp-card-head{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:0.9rem;padding-bottom:0.7rem;border-bottom:1px solid var(--border);
+}
+.cmp-card-id{font-family:var(--sans);font-weight:700;font-size:1rem;color:var(--text)}
+.cmp-card-sub{font-size:0.58rem;color:var(--text3);margin-top:0.2rem;font-family:var(--mono)}
+
+/* ─── RES CARDS ─── */
+.res-card{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:8px;padding:0.8rem 1rem;margin-bottom:0.5rem;
+}
+.res-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem}
+.res-card-id{font-size:0.68rem;color:var(--text);font-weight:500;font-family:var(--mono)}
+.res-card-body{font-size:0.61rem;color:var(--text3);line-height:1.6;font-family:var(--mono)}
+
+/* ─── FIELD INSPECTOR ─── */
+.field-inspector-grid{display:flex;flex-direction:column;gap:0.45rem;max-height:550px;overflow-y:auto}
+.fi-row{
+  display:grid;grid-template-columns:2fr 1fr 1fr 1fr 2fr 1fr;gap:0.5rem;
+  align-items:center;padding:0.55rem 0.75rem;
+  background:var(--card2);border:1px solid var(--border);border-radius:7px;
+  font-size:0.61rem;font-family:var(--mono);
+  transition:border-color 0.15s;
+}
+.fi-row:hover{border-color:var(--border2)}
+.fi-row.has-err{border-color:rgba(252,129,129,0.25);background:rgba(252,129,129,0.03)}
+.fi-head{
+  display:grid;grid-template-columns:2fr 1fr 1fr 1fr 2fr 1fr;gap:0.5rem;
+  padding:0.35rem 0.75rem;font-size:0.5rem;color:var(--text3);
+  text-transform:uppercase;letter-spacing:0.1em;font-family:var(--mono);
+  border-bottom:1px solid var(--border);margin-bottom:0.4rem;
+}
+.fi-field-name{color:var(--text);font-weight:700}
+.fi-case{}
+.fi-rag-conf{color:var(--violet)}
+.fi-llm-conf{color:var(--sky)}
+.fi-final{}
+.fi-err{}
+
+/* ─── VECTOR TIMELINE ─── */
+.vt-event{
+  display:flex;gap:0.9rem;padding:0.7rem 0;
+  border-bottom:1px solid var(--border);position:relative;
+}
+.vt-event:last-child{border-bottom:none}
+.vt-event::before{
+  content:'';position:absolute;left:11px;top:28px;bottom:-12px;
+  width:1px;background:var(--border);
+}
+.vt-event:last-child::before{display:none}
+.vt-dot{
+  width:24px;height:24px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.55rem;border:1px solid var(--border);z-index:1;
+}
+.vt-dot.created{background:rgba(104,211,145,0.1);color:var(--lime);border-color:rgba(104,211,145,0.3)}
+.vt-dot.decayed{background:rgba(252,129,129,0.1);color:var(--rose);border-color:rgba(252,129,129,0.3)}
+.vt-dot.regen{background:rgba(183,148,244,0.1);color:var(--violet);border-color:rgba(183,148,244,0.3)}
+.vt-body{flex:1}
+.vt-event-title{font-size:0.65rem;color:var(--text);margin-bottom:0.25rem;font-weight:600}
+.vt-event-meta{font-size:0.58rem;color:var(--text3);line-height:1.5;font-family:var(--mono)}
+
+/* ─── PERIOD ANALYTICS ─── */
+.period-bubble{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:var(--card2);border:1px solid var(--border);border-radius:10px;
+  padding:0.9rem;text-align:center;transition:all 0.15s;cursor:default;
+  min-width:80px;
+}
+.period-bubble:hover{border-color:var(--border2);transform:translateY(-2px)}
+.period-bubble-date{font-size:0.55rem;color:var(--text3);font-family:var(--mono);margin-bottom:0.3rem}
+.period-bubble-val{font-family:var(--sans);font-weight:900;font-size:1.1rem;color:var(--sky)}
+.period-bubble-sub{font-size:0.52rem;color:var(--text3)}
+
+/* ─── SCROLLABLE WRAPPERS ─── */
+.scroll-x{overflow-x:auto}
+
+/* ─── EMPTY STATE ─── */
+.empty-state{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:3rem;color:var(--text3);gap:0.5rem;
+}
+.empty-icon{font-size:2rem;opacity:0.4}
+.empty-text{font-size:0.7rem;font-family:var(--mono)}
+
+/* ─── ADD PDF ROW ─── */
+.cmp-pdf-row-wrap{
+  background:var(--ink2);border:1px solid var(--border);
+  border-radius:8px;padding:0.8rem;margin-bottom:0.5rem;
+  position:relative;
+}
+.cmp-remove{
+  position:absolute;top:0.6rem;right:0.6rem;width:20px;height:20px;
+  background:rgba(252,129,129,0.1);border:1px solid rgba(252,129,129,0.2);
+  border-radius:4px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:0.6rem;color:var(--rose);transition:all 0.15s;
+}
+.cmp-remove:hover{background:rgba(252,129,129,0.2)}
+
+/* ─── VECTOR HEALTH BARS ─── */
+.vec-health-card{
+  background:var(--card2);border:1px solid var(--border);border-radius:10px;
+  padding:1rem;margin-bottom:0.8rem;
+}
+.vec-health-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.7rem}
+.vec-id{font-size:0.6rem;color:var(--text2);font-family:var(--mono)}
+.vec-field{font-size:0.72rem;color:var(--text);font-weight:600;margin-bottom:0.1rem}
+.vec-stability{display:flex;align-items:center;gap:0.4rem;font-size:0.58rem;font-family:var(--mono)}
+
+/* ─── COMPOSITE SCORE ─── */
+.composite-score{
+  background:linear-gradient(135deg,rgba(99,179,237,0.08),rgba(79,209,197,0.04));
+  border:1px solid rgba(99,179,237,0.2);border-radius:12px;
+  padding:1.2rem;text-align:center;margin-bottom:1.2rem;
+  position:relative;overflow:hidden;
+}
+.composite-score::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--sky),transparent);
+}
+.composite-label{font-size:0.55rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--text3);margin-bottom:0.4rem;font-family:var(--mono)}
+.composite-val{font-family:var(--sans);font-weight:900;font-size:3.5rem;letter-spacing:-0.05em;background:linear-gradient(135deg,var(--sky),var(--mint));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+.composite-sub{font-size:0.6rem;color:var(--text3);margin-top:0.3rem}
+.composite-bar{height:6px;background:var(--border);border-radius:3px;margin-top:0.8rem;overflow:hidden}
+.composite-fill{height:100%;background:linear-gradient(90deg,var(--sky2),var(--sky),var(--mint));border-radius:3px;transition:width 1.5s cubic-bezier(0.34,1.56,0.64,1)}
+
+/* ─── TREND INDICATORS ─── */
+.trend-up{color:var(--lime);font-size:0.7rem}
+.trend-down{color:var(--rose);font-size:0.7rem}
+.trend-stable{color:var(--text3);font-size:0.7rem}
+
+/* ─── COLLAPSIBLE ─── */
+.collapsible-btn{
+  width:100%;display:flex;align-items:center;justify-content:space-between;
+  background:none;border:none;cursor:pointer;padding:0.5rem 0;
+  color:var(--text2);font-size:0.65rem;font-family:var(--mono);
+  transition:color 0.15s;
+}
+.collapsible-btn:hover{color:var(--text)}
+.collapsible-content{display:none}
+.collapsible-content.open{display:block}
+.collapsible-arrow{transition:transform 0.2s;font-size:0.5rem}
+.collapsible-btn.open .collapsible-arrow{transform:rotate(180deg)}
+
+/* ─── HOME PAGE ─── */
+.home-loading{display:flex;align-items:center;justify-content:center;min-height:60vh}
+.home-loading-inner{display:flex;flex-direction:column;align-items:center;gap:1rem}
+.home-spinner{width:36px;height:36px;border:2px solid rgba(99,179,237,0.15);border-top-color:var(--sky);border-radius:50%;animation:spin 0.8s linear infinite}
+.home-loading-text{font-family:var(--mono);font-size:0.65rem;color:var(--text3);letter-spacing:0.1em}
+
+.home-hero{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.2rem;margin-bottom:1.5rem;
+}
+.home-hero-card{
+  background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:1.4rem 1.5rem;position:relative;overflow:hidden;
+  transition:border-color 0.2s,transform 0.2s;
+}
+.home-hero-card:hover{border-color:var(--border2);transform:translateY(-2px)}
+.home-hero-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,transparent,var(--hc,var(--sky)),transparent);
+}
+.home-hero-card::after{
+  content:'';position:absolute;top:-40px;right:-40px;width:120px;height:120px;
+  border-radius:50%;background:radial-gradient(circle,var(--hc-glow,rgba(99,179,237,0.08)),transparent 70%);
+  pointer-events:none;
+}
+.home-hero-label{font-size:0.54rem;text-transform:uppercase;letter-spacing:0.14em;color:var(--text3);margin-bottom:0.6rem;font-family:var(--mono)}
+.home-hero-val{font-family:var(--sans);font-weight:900;font-size:3rem;letter-spacing:-0.05em;line-height:1;margin-bottom:0.3rem}
+.home-hero-sub{font-size:0.62rem;color:var(--text3);line-height:1.6;font-family:var(--mono)}
+.home-hero-pill{
+  display:inline-flex;align-items:center;gap:0.25rem;
+  font-size:0.53rem;padding:0.18rem 0.5rem;border-radius:3px;
+  margin-top:0.5rem;font-family:var(--mono);font-weight:700;
+}
+
+.home-row{display:grid;gap:1rem;margin-bottom:1.2rem}
+.home-row-4{grid-template-columns:repeat(4,1fr)}
+.home-row-3{grid-template-columns:repeat(3,1fr)}
+.home-row-2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:1200px){.home-row-4{grid-template-columns:repeat(2,1fr)}.home-row-3{grid-template-columns:repeat(2,1fr)}}
+
+.home-mini-card{
+  background:var(--card2);border:1px solid var(--border);border-radius:10px;
+  padding:0.9rem 1rem;transition:border-color 0.15s;position:relative;overflow:hidden;
+}
+.home-mini-card:hover{border-color:var(--border2)}
+.home-mini-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--mc,var(--sky)),transparent);opacity:0.4}
+.home-mini-label{font-size:0.5rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--text3);margin-bottom:0.35rem;font-family:var(--mono)}
+.home-mini-val{font-family:var(--sans);font-weight:900;font-size:1.6rem;letter-spacing:-0.03em;line-height:1}
+.home-mini-sub{font-size:0.54rem;color:var(--text3);margin-top:0.25rem;font-family:var(--mono)}
+
+.home-chart-row{display:grid;gap:1rem;margin-bottom:1.2rem}
+.home-chart-row-3{grid-template-columns:2fr 1fr 1fr}
+.home-chart-row-2{grid-template-columns:3fr 2fr}
+@media(max-width:1200px){.home-chart-row-3{grid-template-columns:1fr}.home-chart-row-2{grid-template-columns:1fr}}
+
+.home-chart-box{
+  background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.2rem;
+}
+.home-chart-title{
+  font-size:0.56rem;text-transform:uppercase;letter-spacing:0.1em;
+  color:var(--text3);margin-bottom:1rem;font-family:var(--mono);
+  display:flex;align-items:center;gap:0.5rem;
+}
+.home-chart-title::before{content:'';width:4px;height:4px;border-radius:50%;background:var(--sky);flex-shrink:0}
+
+.home-activity{display:flex;flex-direction:column;gap:0.35rem;max-height:260px;overflow-y:auto}
+.home-activity-row{
+  display:flex;align-items:center;gap:0.7rem;
+  padding:0.45rem 0.65rem;background:var(--card2);
+  border:1px solid var(--border);border-radius:7px;
+  font-size:0.58rem;font-family:var(--mono);
+  transition:border-color 0.15s;
+}
+.home-activity-row:hover{border-color:var(--border2)}
+.home-activity-ts{color:var(--text3);width:80px;flex-shrink:0;font-size:0.55rem}
+.home-activity-id{color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.home-activity-acc{font-weight:700;width:48px;text-align:right;flex-shrink:0}
+.home-activity-dot{width:5px;height:5px;border-radius:50%;background:var(--border2);flex-shrink:0}
+.home-activity-dot.err{background:var(--rose);box-shadow:0 0 5px rgba(252,129,129,0.5)}
+.home-activity-dot.ok{background:var(--lime);box-shadow:0 0 5px rgba(104,211,145,0.4)}
+
+.home-vec-bar{
+  display:flex;align-items:center;gap:0.7rem;margin-bottom:0.5rem;
+}
+.home-vec-label{font-size:0.6rem;color:var(--text2);width:55px;flex-shrink:0;font-family:var(--mono)}
+.home-vec-track{flex:1;height:7px;background:var(--border);border-radius:4px;overflow:hidden}
+.home-vec-fill{height:100%;border-radius:4px;transition:width 1.2s cubic-bezier(0.34,1.56,0.64,1)}
+.home-vec-val{font-size:0.6rem;color:var(--text);width:42px;text-align:right;font-family:var(--mono)}
+
+.home-err-row{display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border)}
+.home-err-row:last-child{border-bottom:none}
+.home-err-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.home-err-label{font-size:0.61rem;color:var(--text2);flex:1;font-family:var(--mono)}
+.home-err-count{font-size:0.65rem;font-weight:700;font-family:var(--mono)}
+
+.home-winner-badge{
+  display:inline-flex;align-items:center;gap:0.4rem;
+  padding:0.35rem 0.8rem;border-radius:6px;
+  font-family:var(--mono);font-size:0.65rem;font-weight:700;margin-top:0.5rem;
+}
+
+.home-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:4rem;gap:0.7rem;color:var(--text3);
+}
+.home-empty-icon{font-size:2.5rem;opacity:0.3}
+.home-empty-text{font-family:var(--mono);font-size:0.68rem}
+.home-empty-btn{
+  margin-top:0.5rem;padding:0.5rem 1.2rem;background:rgba(99,179,237,0.08);
+  border:1px solid rgba(99,179,237,0.2);border-radius:7px;
+  color:var(--sky);font-family:var(--mono);font-size:0.65rem;cursor:pointer;
+  transition:all 0.15s;
+}
+.home-empty-btn:hover{background:rgba(99,179,237,0.15)}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ═══════════════════════════════════════════════════════════
+     SIDEBAR
+════════════════════════════════════════════════════════════ -->
+<nav class="sidebar">
+  <div class="logo-wrap">
+    <div class="logo">
+      <div class="logo-dot">λ</div>
+      <div><span class="logo-text">RAG<em>·</em>lambda</span></div>
+    </div>
+    <div class="logo-sub">intelligence console v2</div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">overview</div>
+    <div class="nav-item active" onclick="showSection('home',this)">
+      <div class="nav-icon">⌂</div>
+      <div class="nav-text"><div class="nav-name">Home</div></div>
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">metrics api</div>
+    <div class="nav-item" onclick="showSection('global',this)">
+      <div class="nav-icon">⬡</div>
+      <div class="nav-text"><div class="nav-name">Global Metrics</div></div>
+      <span class="nav-badge">5.5</span>
+    </div>
+    <div class="nav-item" onclick="showSection('pdf',this)">
+      <div class="nav-icon">⬢</div>
+      <div class="nav-text"><div class="nav-name">PDF Level</div></div>
+      <span class="nav-badge">5.1</span>
+    </div>
+    <div class="nav-item" onclick="showSection('category',this)">
+      <div class="nav-icon">◈</div>
+      <div class="nav-text"><div class="nav-name">Category</div></div>
+      <span class="nav-badge">5.2</span>
+    </div>
+    <div class="nav-item" onclick="showSection('subcategory',this)">
+      <div class="nav-icon">◇</div>
+      <div class="nav-text"><div class="nav-name">Subcategory</div></div>
+      <span class="nav-badge">5.3</span>
+    </div>
+    <div class="nav-item" onclick="showSection('doctype',this)">
+      <div class="nav-icon">◻</div>
+      <div class="nav-text"><div class="nav-name">Doc Type</div></div>
+      <span class="nav-badge">5.4</span>
+    </div>
+    <div class="nav-item" onclick="showSection('compare',this)">
+      <div class="nav-icon">⬕</div>
+      <div class="nav-text"><div class="nav-name">Compare PDFs</div></div>
+      <span class="nav-badge">5.6</span>
+    </div>
+    <div class="nav-item" onclick="showSection('pdfhash',this)">
+      <div class="nav-icon">#</div>
+      <div class="nav-text"><div class="nav-name">PDF Hash</div></div>
+      <span class="nav-badge">5.7</span>
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">analytics api</div>
+    <div class="nav-item" onclick="showSection('period',this)">
+      <div class="nav-icon">📅</div>
+      <div class="nav-text"><div class="nav-name">Period Analytics</div></div>
+      <span class="nav-badge">10</span>
+    </div>
+    <div class="nav-item" onclick="showSection('fieldinspector',this)">
+      <div class="nav-icon">🔬</div>
+      <div class="nav-text"><div class="nav-name">Field Inspector</div></div>
+      <span class="nav-badge">11</span>
+    </div>
+    <div class="nav-item" onclick="showSection('vectortimeline',this)">
+      <div class="nav-icon">⏱</div>
+      <div class="nav-text"><div class="nav-name">Vector Timeline</div></div>
+      <span class="nav-badge">12</span>
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">admin api</div>
+    <div class="nav-item" onclick="showSection('sysinfo',this)">
+      <div class="nav-icon">◎</div>
+      <div class="nav-text"><div class="nav-name">System Info</div></div>
+      <span class="nav-badge">6</span>
+    </div>
+    <div class="nav-item" onclick="showSection('erranal',this)">
+      <div class="nav-icon">⚠</div>
+      <div class="nav-text"><div class="nav-name">Error Analytics</div></div>
+      <span class="nav-badge">7</span>
+    </div>
+    <div class="nav-item" onclick="showSection('errresolution',this)">
+      <div class="nav-icon">✦</div>
+      <div class="nav-text"><div class="nav-name">Error Resolution</div></div>
+      <span class="nav-badge">8</span>
+    </div>
+    <div class="nav-item" onclick="showSection('modelhealth',this)">
+      <div class="nav-icon">◉</div>
+      <div class="nav-text"><div class="nav-name">Model Health</div></div>
+      <span class="nav-badge">9</span>
+    </div>
+  </div>
+
+  <div class="cfg-wrap">
+    <span class="cfg-label">✦ AI Summaries</span>
+    <div id="ai-locked" style="display:block">
+      <div style="font-size:0.58rem;color:var(--text3);margin-bottom:0.55rem;line-height:1.5">Enter password to enable GPT-4 analysis on every section.</div>
+      <div class="cfg-field">
+        <input class="cfg-input" id="ai-pw" type="password" placeholder="password…" onkeydown="if(event.key==='Enter')unlockAI()"/>
+      </div>
+      <button onclick="unlockAI()" style="width:100%;margin-top:0.4rem;padding:0.45rem;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.25);border-radius:7px;color:var(--violet);font-family:var(--mono);font-size:0.62rem;cursor:pointer;transition:all 0.15s" onmouseover="this.style.background='rgba(167,139,250,0.2)'" onmouseout="this.style.background='rgba(167,139,250,0.1)'">unlock</button>
+      <div id="ai-pw-err" style="font-size:0.55rem;color:var(--rose);margin-top:0.3rem;display:none">Wrong password</div>
+    </div>
+    <div id="ai-unlocked" style="display:none">
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <div style="width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 8px rgba(104,211,145,0.6)"></div>
+        <span style="font-size:0.6rem;color:var(--lime);font-family:var(--mono)">AI summaries active</span>
+      </div>
+      <button onclick="lockAI()" style="margin-top:0.4rem;padding:0.3rem 0.6rem;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--text3);font-family:var(--mono);font-size:0.55rem;cursor:pointer">lock</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN CONTENT
+════════════════════════════════════════════════════════════ -->
+<main class="main">
+
+<!-- ══════════════════ HOME ══════════════════ -->
+<section class="section active" id="sec-home">
+  <div class="page-head" style="border-bottom:1px solid var(--border);padding:2rem 2.5rem 1.5rem;background:linear-gradient(135deg,rgba(99,179,237,0.04) 0%,transparent 60%)">
+    <div class="page-head-left">
+      <div class="page-title">Model <span class="accent">Performance</span></div>
+      <div class="page-desc">Live snapshot of the entire RAG pipeline — accuracy, coverage, vector health, submissions, errors, and category distribution. Auto-loaded on open.</div>
+    </div>
+    <div class="page-head-right">
+      <button class="btn btn-run" id="home-refresh-btn" onclick="loadHome()">↻ refresh</button>
+      <div id="home-last-updated" style="font-size:0.55rem;color:var(--text3);font-family:var(--mono);margin-left:0.5rem"></div>
+    </div>
+  </div>
+  <div class="page-body" id="home-body">
+    <div class="home-loading" id="home-loading">
+      <div class="home-loading-inner">
+        <div class="home-spinner"></div>
+        <div class="home-loading-text">loading system state…</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ GLOBAL ══════════════════ -->
+<section class="section" id="sec-global">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Global</span> Metrics</div>
+      <div class="page-desc">System-wide LLM vs RAG performance — accuracy, coverage, confidence, errors, agreement, recovery and model comparison across all submissions.</div>
+    </div>
+    <div class="page-head-right">
+      <span class="method-badge method-post">POST</span>
+      <div id="status-global" class="status idle">ready</div>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">request — no params needed</div></div>
+      <div class="panel-body">
+        <div class="curl-wrap" id="curl-global"><span class="curl-copy" onclick="copyCurl('curl-global')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runGlobal()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-global',buildGlobalPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-global"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-global" style="display:none">
+      <div class="panel-head">
+        <div class="panel-title">response</div>
+        <span class="tag lime">200 OK</span>
+      </div>
+      <div class="panel-body" id="body-global"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ PDF ══════════════════ -->
+<section class="section" id="sec-pdf">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">PDF</span> Metrics</div>
+      <div class="page-desc">Per-submission deep dive — accuracy, coverage, confidence, case classification breakdown, delta after feedback, and full error list.</div>
+    </div>
+    <div class="page-head-right">
+      <span class="method-badge method-post">POST</span>
+      <div id="status-pdf" class="status idle">ready</div>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group">
+            <label class="f-label">user_id <span class="f-req">*</span></label>
+            <input class="f-inp" id="pdf-user" value="741" placeholder="741"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">session_id <span class="f-req">*</span></label>
+            <input class="f-inp" id="pdf-session" value="20187f91-43bf-4ffb-91ce-c114e3fdf692"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">pdf_id <span class="f-req">*</span></label>
+            <input class="f-inp" id="pdf-pdfid" value="1629"/>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-pdf"><span class="curl-copy" onclick="copyCurl('curl-pdf')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runPdf()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-pdf',buildPdfPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-pdf"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-pdf" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-pdf"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ CATEGORY ══════════════════ -->
+<section class="section" id="sec-category">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Category</span> Metrics</div>
+      <div class="page-desc">Time-series accuracy and coverage aggregated across all submissions in a category.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-category" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group">
+            <label class="f-label">category <span class="f-req">*</span></label>
+            <input class="f-inp" id="cat-cat" value="finance" placeholder="finance"/>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-category"><span class="curl-copy" onclick="copyCurl('curl-category')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runCategory()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-category',buildCatPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-category"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-category" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-category"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ SUBCATEGORY ══════════════════ -->
+<section class="section" id="sec-subcategory">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Subcategory</span> Metrics</div>
+      <div class="page-desc">Per-submission time series filtered to a category + subcategory pair.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-subcategory" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group"><label class="f-label">category <span class="f-req">*</span></label><input class="f-inp" id="sub-cat" value="finance"/></div>
+          <div class="f-group"><label class="f-label">subcategory <span class="f-req">*</span></label><input class="f-inp" id="sub-sub" value="investment"/></div>
+        </div>
+        <div class="curl-wrap" id="curl-subcategory"><span class="curl-copy" onclick="copyCurl('curl-subcategory')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runSubcategory()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-subcategory',buildSubPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-subcategory"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-subcategory" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-subcategory"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ DOCTYPE ══════════════════ -->
+<section class="section" id="sec-doctype">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">DocType</span> Metrics</div>
+      <div class="page-desc">Time series narrowed to category + subcategory + document type.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-doctype" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group"><label class="f-label">category <span class="f-req">*</span></label><input class="f-inp" id="dt-cat" value="finance"/></div>
+          <div class="f-group"><label class="f-label">subcategory <span class="f-req">*</span></label><input class="f-inp" id="dt-sub" value="investment"/></div>
+          <div class="f-group"><label class="f-label">doctype <span class="f-req">*</span></label><input class="f-inp" id="dt-dt" value="subscription_form"/></div>
+        </div>
+        <div class="curl-wrap" id="curl-doctype"><span class="curl-copy" onclick="copyCurl('curl-doctype')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runDoctype()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-doctype',buildDtPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-doctype"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-doctype" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-doctype"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ COMPARE ══════════════════ -->
+<section class="section" id="sec-compare">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Compare</span> PDFs</div>
+      <div class="page-desc">Deep side-by-side comparison — accuracy, coverage, confidence, case classification, prediction summaries, error breakdown, and accuracy delta per PDF.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-compare" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">pdfs to compare</div></div>
+      <div class="panel-body">
+        <div id="cmp-rows">
+          <div class="cmp-pdf-row-wrap">
+            <div class="fgrid">
+              <div class="f-group"><label class="f-label">user_id</label><input class="f-inp cmp-user" value="741"/></div>
+              <div class="f-group"><label class="f-label">session_id</label><input class="f-inp cmp-session" value="20187f91-43bf-4ffb-91ce-c114e3fdf692"/></div>
+              <div class="f-group"><label class="f-label">pdf_id</label><input class="f-inp cmp-pdf" value="1629"/></div>
+            </div>
+          </div>
+          <div class="cmp-pdf-row-wrap">
+            <div class="fgrid">
+              <div class="f-group"><label class="f-label">user_id</label><input class="f-inp cmp-user" value="741"/></div>
+              <div class="f-group"><label class="f-label">session_id</label><input class="f-inp cmp-session" value="wd8xm2"/></div>
+              <div class="f-group"><label class="f-label">pdf_id</label><input class="f-inp cmp-pdf" value="1630"/></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-bottom:1rem">
+          <button class="btn btn-ghost" style="font-size:0.63rem;padding:0.38rem 0.75rem" onclick="addCmpRow()">+ add pdf</button>
+        </div>
+        <div class="curl-wrap" id="curl-compare"><span class="curl-copy" onclick="copyCurl('curl-compare')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runCompare()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-compare',buildCmpPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-compare"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-compare" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-compare"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ PDF HASH ══════════════════ -->
+<section class="section" id="sec-pdfhash">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">PDF Hash</span> Metrics</div>
+      <div class="page-desc">All submissions sharing the same PDF hash — aggregated accuracy, coverage, confidence, and per-submission breakdown.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-pdfhash" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters</div></div>
+      <div class="panel-body">
+        <div class="fgrid fgrid-wide">
+          <div class="f-group">
+            <label class="f-label">pdf_hash <span class="f-req">*</span></label>
+            <input class="f-inp" id="ph-hash" value="aeff9d3d87f4ae0ae6e29d35c94ab343da09cc7d389c16508f1f1d20147183e1" placeholder="sha256 hash"/>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-pdfhash"><span class="curl-copy" onclick="copyCurl('curl-pdfhash')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runPdfhash()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-pdfhash',buildPhPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-pdfhash"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-pdfhash" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-pdfhash"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ PERIOD ANALYTICS (API 10) ══════════════════ -->
+<section class="section" id="sec-period">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Period</span> Analytics</div>
+      <div class="page-desc">Date-bucketed analytics with granularity control — day, week, month, or year. Filter by category, subcategory, and doctype. Returns per-period accuracy, coverage, errors, and category breakdown.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-period" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters — all optional</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group">
+            <label class="f-label">date (single day shortcut)</label>
+            <input class="f-inp" id="pa-date" placeholder="2026-04-10"/>
+            <div class="f-hint">overrides date_from/date_to if set</div>
+          </div>
+          <div class="f-group">
+            <label class="f-label">date_from</label>
+            <input class="f-inp" id="pa-from" placeholder="2026-04-01"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">date_to</label>
+            <input class="f-inp" id="pa-to" placeholder="2026-04-30"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">granularity</label>
+            <select class="f-sel" id="pa-gran">
+              <option value="day" selected>day</option>
+              <option value="week">week</option>
+              <option value="month">month</option>
+              <option value="year">year</option>
+            </select>
+          </div>
+          <div class="f-group">
+            <label class="f-label">category</label>
+            <input class="f-inp" id="pa-cat" placeholder="finance"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">subcategory</label>
+            <input class="f-inp" id="pa-sub" placeholder="investment"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">doctype</label>
+            <input class="f-inp" id="pa-doc" placeholder="subscription_form"/>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-period"><span class="curl-copy" onclick="copyCurl('curl-period')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runPeriod()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-period',buildPeriodPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-period"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-period" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-period"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ FIELD INSPECTOR (API 11) ══════════════════ -->
+<section class="section" id="sec-fieldinspector">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Field</span> Inspector</div>
+      <div class="page-desc">Field-level prediction breakdown for one or multiple PDFs — every field with its case type, RAG vs LLM prediction, confidence comparison, and errors. Powerful for debugging specific form field mis-predictions.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-fieldinspector" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">pdfs to inspect</div></div>
+      <div class="panel-body">
+        <div id="fi-rows">
+          <div class="cmp-pdf-row-wrap">
+            <div class="fgrid">
+              <div class="f-group"><label class="f-label">user_id</label><input class="f-inp fi-user" value="741"/></div>
+              <div class="f-group"><label class="f-label">session_id</label><input class="f-inp fi-session" value="20187f91-43bf-4ffb-91ce-c114e3fdf692"/></div>
+              <div class="f-group"><label class="f-label">pdf_id</label><input class="f-inp fi-pdf" value="1629"/></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-bottom:1rem">
+          <button class="btn btn-ghost" style="font-size:0.63rem;padding:0.38rem 0.75rem" onclick="addFiRow()">+ add pdf</button>
+        </div>
+        <div class="curl-wrap" id="curl-fieldinspector"><span class="curl-copy" onclick="copyCurl('curl-fieldinspector')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runFieldinspector()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-fieldinspector',buildFiPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-fieldinspector"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-fieldinspector" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-fieldinspector"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ VECTOR TIMELINE (API 12) ══════════════════ -->
+<section class="section" id="sec-vectortimeline">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Vector</span> Timeline</div>
+      <div class="page-desc">Full chronological history of vector DB activity — creations, confidence decays, embedding regenerations. Filter by field name, source, date range, or event type.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-vectortimeline" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">filters — all optional</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group">
+            <label class="f-label">date_from</label>
+            <input class="f-inp" id="vt-from" placeholder="2026-04-01T00:00:00Z"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">date_to</label>
+            <input class="f-inp" id="vt-to" placeholder="2026-04-30T23:59:59Z"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">field_name</label>
+            <input class="f-inp" id="vt-field" placeholder="investor_full_legal_name_id"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">source</label>
+            <select class="f-sel" id="vt-source">
+              <option value="">all sources</option>
+              <option value="rag">rag</option>
+              <option value="llm">llm</option>
+              <option value="manual">manual</option>
+            </select>
+          </div>
+          <div class="f-group">
+            <label class="f-label">event_type</label>
+            <select class="f-sel" id="vt-event">
+              <option value="">all events</option>
+              <option value="created">created</option>
+              <option value="confidence_decayed">confidence_decayed</option>
+              <option value="embedding_regenerated">embedding_regenerated</option>
+            </select>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-vectortimeline"><span class="curl-copy" onclick="copyCurl('curl-vectortimeline')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runVectortimeline()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-vectortimeline',buildVtPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-vectortimeline"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-vectortimeline" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-vectortimeline"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ SYSTEM INFO ══════════════════ -->
+<section class="section" id="sec-sysinfo">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">System</span> Info</div>
+      <div class="page-desc">System-wide snapshot — users, sessions, PDF hashes, categories, vector DB breakdown, and total error counts.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-sysinfo" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">request — no params</div></div>
+      <div class="panel-body">
+        <div class="curl-wrap" id="curl-sysinfo"><span class="curl-copy" onclick="copyCurl('curl-sysinfo')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runSysinfo()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-sysinfo',{api_name:'get_system_info'})">curl</button>
+        </div>
+        <div class="err-banner" id="err-sysinfo"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-sysinfo" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-sysinfo"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ ERROR ANALYTICS ══════════════════ -->
+<section class="section" id="sec-erranal">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Error</span> Analytics</div>
+      <div class="page-desc">Filterable error breakdown by date range, category, subcategory, and doctype. All filters optional.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-erranal" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">filters — all optional</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group">
+            <label class="f-label">date_from</label>
+            <input class="f-inp" id="ea-from" placeholder="2026-02-01T00:00:00Z"/>
+            <div class="f-hint">ISO 8601 — blank = no bound</div>
+          </div>
+          <div class="f-group">
+            <label class="f-label">date_to</label>
+            <input class="f-inp" id="ea-to" placeholder="2026-02-28T23:59:59Z"/>
+          </div>
+          <div class="f-group"><label class="f-label">category</label><input class="f-inp" id="ea-cat" placeholder="finance"/></div>
+          <div class="f-group"><label class="f-label">subcategory</label><input class="f-inp" id="ea-sub" placeholder="investment"/></div>
+          <div class="f-group"><label class="f-label">doctype</label><input class="f-inp" id="ea-doc" placeholder="subscription_form"/></div>
+        </div>
+        <div class="curl-wrap" id="curl-erranal"><span class="curl-copy" onclick="copyCurl('curl-erranal')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runErranal()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-erranal',buildErranalPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-erranal"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-erranal" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-erranal"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ ERROR RESOLUTION ══════════════════ -->
+<section class="section" id="sec-errresolution">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Error</span> Resolution Report</div>
+      <div class="page-desc">Tracks whether errors reported via user feedback were fixed on the next resubmission. Resolution rates, timelines, and outstanding unresolved errors.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-errresolution" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">filters — all optional</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group"><label class="f-label">date_from</label><input class="f-inp" id="er-from" placeholder="2026-02-01T00:00:00Z"/></div>
+          <div class="f-group"><label class="f-label">date_to</label><input class="f-inp" id="er-to" placeholder="2026-02-28T23:59:59Z"/></div>
+          <div class="f-group"><label class="f-label">pdf_hash</label><input class="f-inp" id="er-hash" placeholder="sha256..."/></div>
+          <div class="f-group">
+            <label class="f-label">case_type</label>
+            <select class="f-sel" id="er-case">
+              <option value="">all</option>
+              <option value="CASE_A">CASE_A</option>
+              <option value="CASE_B">CASE_B</option>
+              <option value="CASE_C">CASE_C</option>
+              <option value="CASE_D">CASE_D</option>
+              <option value="CASE_E">CASE_E</option>
+            </select>
+          </div>
+          <div class="f-group">
+            <label class="f-label">status</label>
+            <select class="f-sel" id="er-status">
+              <option value="">all</option>
+              <option value="RESOLVED">resolved</option>
+              <option value="PENDING">pending</option>
+              <option value="REGRESSED">regressed</option>
+              <option value="MISSED">missed</option>
+            </select>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-errresolution"><span class="curl-copy" onclick="copyCurl('curl-errresolution')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runErrresolution()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-errresolution',buildErrresolutionPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-errresolution"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-errresolution" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-errresolution"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ MODEL HEALTH ══════════════════ -->
+<section class="section" id="sec-modelhealth">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="page-title"><span class="accent">Model Health</span> Dashboard</div>
+      <div class="page-desc">Real-time model health — accuracy trends, error rates, coverage alerts, composite health score, vector stability, and time-granulated performance snapshots.</div>
+    </div>
+    <div class="page-head-right"><span class="method-badge method-post">POST</span><div id="status-modelhealth" class="status idle">ready</div></div>
+  </div>
+  <div class="page-body">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">parameters</div></div>
+      <div class="panel-body">
+        <div class="fgrid">
+          <div class="f-group">
+            <label class="f-label">date_from</label>
+            <input class="f-inp" id="mh-from" placeholder="2026-03-17 (default: -30d)"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">date_to</label>
+            <input class="f-inp" id="mh-to" placeholder="2026-04-17 (default: today)"/>
+          </div>
+          <div class="f-group">
+            <label class="f-label">granularity</label>
+            <select class="f-sel" id="mh-gran">
+              <option value="hour">hour</option>
+              <option value="day" selected>day</option>
+              <option value="week">week</option>
+              <option value="month">month</option>
+            </select>
+          </div>
+        </div>
+        <div class="curl-wrap" id="curl-modelhealth"><span class="curl-copy" onclick="copyCurl('curl-modelhealth')">copy</span></div>
+        <div class="actions">
+          <button class="btn btn-run" onclick="runModelhealth()">▶ run</button>
+          <button class="btn btn-ghost" onclick="toggleCurl('curl-modelhealth',buildMhPayload())">curl</button>
+        </div>
+        <div class="err-banner" id="err-modelhealth"></div>
+      </div>
+    </div>
+    <div class="panel" id="res-modelhealth" style="display:none">
+      <div class="panel-head"><div class="panel-title">response</div><span class="tag lime">200 OK</span></div>
+      <div class="panel-body" id="body-modelhealth"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// CHART.JS DEFAULTS
+// ═══════════════════════════════════════════════════════════════
+Chart.defaults.color = '#718096';
+Chart.defaults.borderColor = '#252d3d';
+Chart.defaults.font.family = "'Space Mono', monospace";
+Chart.defaults.font.size = 10;
+
+const CHART_INSTANCES = {};
+function destroyChart(id){if(CHART_INSTANCES[id]){CHART_INSTANCES[id].destroy();delete CHART_INSTANCES[id]}}
+function mkChart(id,config){
+  destroyChart(id);
+  const el=document.getElementById(id);
+  if(!el)return;
+  CHART_INSTANCES[id]=new Chart(el.getContext('2d'),config);
+  return CHART_INSTANCES[id];
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════
+const RAG_URL = 'https://eko6lfz3yx4dk4aai7o5dwk4vi0qkwzj.lambda-url.us-east-1.on.aws/';
+const RAG_KEY = '7KmP@9xQ2NvL5!';
+const AI_PASS = 'dev@pdf-fillr';
+const getUrl  = ()=>RAG_URL;
+const getKey  = ()=>RAG_KEY;
+let   aiEnabled = false;
+const isAI    = ()=>aiEnabled;
+
+const pct  = v=>v!=null?(v*100).toFixed(1)+'%':'—';
+const pct2 = v=>v!=null?(v*100).toFixed(2)+'%':'—';
+const num  = v=>v!=null?Number(v).toLocaleString():'—';
+const f4   = v=>v!=null?Number(v).toFixed(4):'—';
+const fmtTs= ts=>{if(!ts)return'—';return new Date(ts).toISOString().replace('T',' ').slice(0,19)+'Z'};
+const colorAcc=v=>!v&&v!==0?'text':v>=0.98?'lime':v>=0.92?'amber':'rose';
+const colorCov=v=>!v&&v!==0?'text':v>=0.8?'mint':v>=0.5?'sky':'amber';
+const dcls =v=>!v&&v!==0?'neu':v>0?'pos':v<0?'neg':'neu';
+const dstr =v=>v==null?'':(v>0?'+':'')+(v*100).toFixed(2)+'%';
+
+function setStatus(id,state,msg){
+  const el=document.getElementById('status-'+id);
+  el.className='status '+state;
+  if(state==='loading')el.innerHTML='<div class="spinner"></div> running…';
+  else el.textContent=msg;
+}
+function showErr(id,msg){const el=document.getElementById('err-'+id);el.textContent=msg;el.classList.add('show')}
+function hideErr(id){document.getElementById('err-'+id).classList.remove('show')}
+
+async function callApi(payload){
+  const r=await fetch(getUrl(),{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-API-Key':getKey()},
+    body:JSON.stringify(payload)
+  });
+  const data=await r.json();
+  return{ok:r.ok,status:r.status,data};
+}
+
+// ── CURL ──
+function buildCurlStr(payload){
+  return `curl -X POST ${getUrl()} \\\n  -H "Content-Type: application/json" \\\n  -H "X-API-Key: ${getKey()}" \\\n  -d '${JSON.stringify(payload,null,2)}'`;
+}
+function toggleCurl(elId,payload){
+  const el=document.getElementById(elId);
+  if(el.classList.contains('show')){el.classList.remove('show');return}
+  el.innerHTML='';
+  el.appendChild(document.createTextNode(buildCurlStr(payload)));
+  const btn=document.createElement('span');
+  btn.className='curl-copy';btn.textContent='copy';btn.onclick=()=>copyCurl(elId);
+  el.appendChild(btn);
+  el.classList.add('show');
+}
+function copyCurl(elId){
+  const el=document.getElementById(elId);
+  const text=el.innerText.replace(/^copy$/m,'').trim();
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn=el.querySelector('.curl-copy');
+    if(btn){btn.textContent='copied!';setTimeout(()=>btn.textContent='copy',1500)}
+  });
+}
+
+// ── NAV ──
+function showSection(name,navEl){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('sec-'+name).classList.add('active');
+  navEl.classList.add('active');
+}
+
+// ── AI LOCK / UNLOCK ──
+function unlockAI(){
+  const pw=document.getElementById('ai-pw').value;
+  const errEl=document.getElementById('ai-pw-err');
+  if(pw===AI_PASS){
+    aiEnabled=true;
+    document.getElementById('ai-locked').style.display='none';
+    document.getElementById('ai-unlocked').style.display='block';
+    errEl.style.display='none';
+  } else {
+    errEl.style.display='block';
+    document.getElementById('ai-pw').value='';
+  }
+}
+function lockAI(){
+  aiEnabled=false;
+  document.getElementById('ai-locked').style.display='block';
+  document.getElementById('ai-unlocked').style.display='none';
+  document.getElementById('ai-pw').value='';
+}
+
+// ── ANIMATE BARS ──
+function animateBars(scope){
+  setTimeout(()=>{
+    const sel=scope?`#${scope} .prog-fill`:'.prog-fill';
+    document.querySelectorAll(sel).forEach(el=>{
+      const w=el.style.width;el.style.width='0';
+      requestAnimationFrame(()=>setTimeout(()=>el.style.width=w,50));
+    });
+  },100);
+}
+
+// ── AI SUMMARY ──
+async function aiSummary(containerId, contextData, sectionName){
+  if(!isAI()) return;
+  const container = document.getElementById(containerId);
+  if(!container) return;
+
+  // Remove any existing summary for this anchor
+  const existing = document.getElementById('ai-'+containerId);
+  if(existing) existing.remove();
+
+  const div = document.createElement('div');
+  div.className = 'ai-summary show';
+  div.id = 'ai-' + containerId;
+  div.innerHTML = `
+    <div class="ai-summary-header"><span class="ai-summary-icon">✦</span> AI Analysis</div>
+    <div class="ai-loading"><div class="ai-spinner"></div> Analysing ${sectionName} data…</div>
+  `;
+  container.appendChild(div);
+
+  try {
+    const resp = await fetch(getUrl(), {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': getKey() },
+      body: JSON.stringify({
+        api_name: 'get_ai_summary',
+        section:  sectionName,
+        context:  contextData
+      })
+    });
+    const rd = await resp.json();
+    if(rd.status !== 'success') throw new Error(rd.message || 'Lambda error');
+    const text = rd.data?.summary;
+    if(!text){
+      // Lambda responded but OPENAI_API_KEY not set server-side
+      const reason = rd.data?.reason || 'No summary returned';
+      div.innerHTML = `
+        <div class="ai-summary-header"><span class="ai-summary-icon">✦</span> AI Analysis</div>
+        <div class="ai-summary-body" style="color:var(--text3);font-size:0.65rem">${reason}</div>
+      `;
+      return;
+    }
+    div.innerHTML = `
+      <div class="ai-summary-header"><span class="ai-summary-icon">✦</span> AI Analysis</div>
+      <div class="ai-summary-body">${text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\b(\d+\.?\d*%?)\b/g, '<span class="highlight">$1</span>')
+      }</div>
+    `;
+  } catch(e) {
+    div.innerHTML = `
+      <div class="ai-summary-header"><span class="ai-summary-icon">✦</span> AI Analysis</div>
+      <div class="ai-summary-body" style="color:var(--rose)">Analysis failed: ${e.message}</div>
+    `;
+  }
+}
+
+// ── CHART COLORS ──
+const C={
+  sky:   {line:'#63b3ed',fill:'rgba(99,179,237,0.1)'},
+  mint:  {line:'#4fd1c5',fill:'rgba(79,209,197,0.1)'},
+  violet:{line:'#b794f4',fill:'rgba(183,148,244,0.1)'},
+  lime:  {line:'#68d391',fill:'rgba(104,211,145,0.1)'},
+  rose:  {line:'#fc8181',fill:'rgba(252,129,129,0.1)'},
+  amber: {line:'#f6ad55',fill:'rgba(246,173,85,0.1)'},
+  indigo:{line:'#7f9cf5',fill:'rgba(127,156,245,0.1)'},
+};
+const lineDs=(label,data,c,opts={})=>({label,data,borderColor:c.line,backgroundColor:c.fill,borderWidth:2,pointRadius:2,fill:false,tension:0.35,...opts});
+const barDs =(label,data,c,opts={})=>({label,data,backgroundColor:c.fill.replace('0.1','0.5'),borderColor:c.line,borderWidth:1,borderRadius:4,...opts});
+const lineOpts=(yLabel='')=>({
+  responsive:true,
+  plugins:{legend:{position:'top',labels:{boxWidth:10,padding:12}}},
+  scales:{
+    y:{ticks:{callback:v=>yLabel?v+yLabel:v},grid:{color:'#252d3d'}},
+    x:{grid:{display:false},ticks:{maxTicksLimit:10}}
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GLOBAL METRICS
+// ═══════════════════════════════════════════════════════════════
+const buildGlobalPayload=()=>({api_name:'get_metrics',metric_type:'global'});
+async function runGlobal(){
+  hideErr('global');setStatus('global','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildGlobalPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('global','ok','200 OK');
+    renderGlobal(data.data);
+  }catch(e){setStatus('global','err','error');showErr('global',e.message)}
+}
+
+function renderGlobal(d){
+  const panel=document.getElementById('res-global');panel.style.display='block';
+  const s=d.overall_stats||{};const lr=d.llm_vs_rag||{};const ts=d.time_series||[];
+  const aL=s.avg_accuracy?.llm,aR=s.avg_accuracy?.rag,aE=s.avg_accuracy?.ensemble;
+  const cL=s.avg_coverage?.llm,cR=s.avg_coverage?.rag,cE=s.avg_coverage?.ensemble;
+  const cfL=s.avg_confidence?.llm,cfR=s.avg_confidence?.rag;
+  const eE=s.total_errors?.ensemble??0;
+  const winner=lr.overall_winner?.winner||'—';
+  const llmW=lr.overall_winner?.llm_wins??'—',ragW=lr.overall_winner?.rag_wins??'—';
+
+  document.getElementById('body-global').innerHTML=`
+    <div class="sec-div">overall stats</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">PDFs Processed</div><div class="stat-val text">${num(s.total_pdfs_processed)}</div></div>
+      <div class="stat-card"><div class="stat-label">Fields (Ensemble)</div><div class="stat-val mint">${num(s.total_fields_predicted?.ensemble)}</div><div class="stat-sub">LLM: ${num(s.total_fields_predicted?.llm)} · RAG: ${num(s.total_fields_predicted?.rag)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${eE>0?'rose':'lime'}">${num(eE)}</div><div class="stat-sub">LLM: ${s.total_errors?.llm??'—'} · RAG: ${s.total_errors?.rag??'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Overall Winner</div><div class="stat-val ${winner==='llm'?'sky':winner==='rag'?'violet':'amber'}">${winner.toUpperCase()}</div><div class="stat-sub">LLM ${llmW} wins · RAG ${ragW} wins</div></div>
+    </div>
+
+    <div class="sec-div">accuracy — llm vs rag vs ensemble</div>
+    <div class="prog-row"><span class="prog-label">LLM</span><div class="prog-track"><div class="prog-fill sky" style="width:${((aL||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct2(aL)}</span></div>
+    <div class="prog-row"><span class="prog-label">RAG</span><div class="prog-track"><div class="prog-fill violet" style="width:${((aR||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct2(aR)}</span></div>
+    <div class="prog-row"><span class="prog-label">Ensemble</span><div class="prog-track"><div class="prog-fill lime" style="width:${((aE||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct2(aE)}</span></div>
+
+    <div class="sec-div">coverage</div>
+    <div class="prog-row"><span class="prog-label">LLM</span><div class="prog-track"><div class="prog-fill sky" style="width:${((cL||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct(cL)}</span></div>
+    <div class="prog-row"><span class="prog-label">RAG</span><div class="prog-track"><div class="prog-fill violet" style="width:${((cR||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct(cR)}</span></div>
+    <div class="prog-row"><span class="prog-label">Ensemble</span><div class="prog-track"><div class="prog-fill mint" style="width:${((cE||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct(cE)}</span></div>
+
+    ${cfL!=null?`
+    <div class="sec-div">avg confidence</div>
+    <div class="prog-row"><span class="prog-label">LLM</span><div class="prog-track"><div class="prog-fill sky" style="width:${((cfL||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct(cfL)}</span></div>
+    <div class="prog-row"><span class="prog-label">RAG</span><div class="prog-track"><div class="prog-fill violet" style="width:${((cfR||0)*100).toFixed(1)}%"></div></div><span class="prog-val">${pct(cfR)}</span></div>
+    `:''}
+
+    <div class="sec-div">agreement & recovery</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Agreement Rate</div><div class="stat-val lime">${pct(s.agreement_rate)}</div></div>
+      <div class="stat-card"><div class="stat-label">Conflict Rate</div><div class="stat-val amber">${pct(s.conflict_rate)}</div></div>
+      <div class="stat-card"><div class="stat-label">RAG Recovers LLM</div><div class="stat-val mint">${pct(s.recovery?.rag_recovers_llm_misses)}</div></div>
+      <div class="stat-card"><div class="stat-label">LLM Recovers RAG</div><div class="stat-val sky">${pct(s.recovery?.llm_recovers_rag_misses)}</div></div>
+    </div>
+
+    <div class="sec-div">performance charts</div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Accuracy — LLM vs RAG vs Ensemble</div><canvas id="ch-g-acc" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Coverage — LLM vs RAG vs Ensemble</div><canvas id="ch-g-cov" height="200"></canvas></div>
+    </div>
+    <div class="chart-box" style="margin-bottom:1.2rem">
+      <div class="chart-box-title">Accuracy & Errors — Time Series (last 50)</div>
+      <canvas id="ch-g-ts" height="160"></canvas>
+    </div>
+
+    ${lr.accuracy?`
+    <div class="sec-div">head-to-head comparison</div>
+    <div class="scroll-x"><table class="data-table">
+      <thead><tr><th>Metric</th><th style="color:var(--sky)">LLM</th><th style="color:var(--violet)">RAG</th><th style="color:var(--mint)">Ensemble</th><th>Winner</th></tr></thead>
+      <tbody>
+        ${[['Accuracy',lr.accuracy],['Coverage',lr.coverage],['Confidence',lr.avg_confidence],['Errors (total)',lr.total_errors],['Fields Predicted',lr.total_fields_predicted]].filter(([,v])=>v).map(([label,v])=>`
+          <tr>
+            <td style="color:var(--text2)">${label}</td>
+            <td style="color:var(--sky)">${typeof v.llm==='number'&&v.llm<2?pct2(v.llm):num(v.llm)}</td>
+            <td style="color:var(--violet)">${typeof v.rag==='number'&&v.rag<2?pct2(v.rag):num(v.rag)}</td>
+            <td style="color:var(--mint)">${typeof v.ensemble==='number'&&v.ensemble<2?pct2(v.ensemble):num(v.ensemble)}</td>
+            <td><span class="winner-pill ${v.winner==='llm'?'wp-llm':v.winner==='rag'?'wp-rag':'wp-tie'}">${v.winner||'tie'}</span></td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`:''}
+
+    <div class="sec-div">recent submissions (last 20)</div>
+    <div class="timeline">
+      ${ts.slice(-20).map(e=>{
+        const hasErr=(e.errors_ensemble||0)>0;
+        return`<div class="tl-row">
+          <div class="tl-ts">${fmtTs(e.timestamp)}</div>
+          <div class="tl-id">${e.submission_id||(e.user_id+'/'+e.pdf_id)}</div>
+          <div class="tl-stats">
+            <div class="tl-stat"><span class="tl-stat-label">acc</span><span class="tl-stat-val ${e.accuracy_ensemble>=0.98?'ok':e.accuracy_ensemble>=0.9?'mid':'bad'}">${pct(e.accuracy_ensemble)}</span></div>
+            <div class="tl-stat"><span class="tl-stat-label">cov</span><span class="tl-stat-val ${e.coverage_ensemble>=0.7?'ok':'mid'}">${pct(e.coverage_ensemble)}</span></div>
+            <div class="tl-stat"><span class="tl-stat-label">err</span><span class="tl-stat-val ${hasErr?'bad':'ok'}">${e.errors_ensemble||0}</span></div>
+          </div>
+          <div class="tl-dot ${hasErr?'err':''}"></div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div id="ai-global-anchor"></div>
+  `;
+  animateBars('body-global');
+
+  mkChart('ch-g-acc',{type:'bar',data:{labels:['LLM','RAG','Ensemble'],datasets:[{data:[aL,aR,aE].map(v=>(v||0)*100),backgroundColor:['rgba(99,179,237,0.5)','rgba(183,148,244,0.5)','rgba(104,211,145,0.5)'],borderColor:['#63b3ed','#b794f4','#68d391'],borderWidth:1,borderRadius:6}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  mkChart('ch-g-cov',{type:'bar',data:{labels:['LLM','RAG','Ensemble'],datasets:[{data:[cL,cR,cE].map(v=>(v||0)*100),backgroundColor:['rgba(99,179,237,0.4)','rgba(183,148,244,0.4)','rgba(79,209,197,0.5)'],borderColor:['#63b3ed','#b794f4','#4fd1c5'],borderWidth:1,borderRadius:6}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+
+  const tsSample=ts.length>50?ts.filter((_,i)=>i%Math.ceil(ts.length/50)===0):ts;
+  mkChart('ch-g-ts',{type:'line',data:{
+    labels:tsSample.map(e=>fmtTs(e.timestamp).slice(0,10)),
+    datasets:[
+      lineDs('LLM',tsSample.map(e=>(e.accuracy_llm||0)*100),C.sky),
+      lineDs('RAG',tsSample.map(e=>(e.accuracy_rag||0)*100),C.violet),
+      lineDs('Ensemble',tsSample.map(e=>(e.accuracy_ensemble||0)*100),C.lime,{borderWidth:2.5,fill:true}),
+      {label:'Errors',data:tsSample.map(e=>e.errors_ensemble||0),borderColor:C.rose.line,backgroundColor:C.rose.fill,borderWidth:1.5,pointRadius:3,fill:true,tension:0.3,yAxisID:'y2'},
+    ]
+  },options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10,padding:12}}},scales:{y:{min:80,max:101,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},y2:{position:'right',min:0,grid:{display:false},ticks:{stepSize:1}},x:{grid:{display:false},ticks:{maxTicksLimit:10}}}}});
+
+  aiSummary('ai-global-anchor',{overall_stats:s,llm_vs_rag:lr},'Global Metrics');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PDF METRICS
+// ═══════════════════════════════════════════════════════════════
+const buildPdfPayload=()=>({api_name:'get_metrics',metric_type:'pdf',user_id:document.getElementById('pdf-user').value,session_id:document.getElementById('pdf-session').value,pdf_id:document.getElementById('pdf-pdfid').value});
+async function runPdf(){
+  hideErr('pdf');setStatus('pdf','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildPdfPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('pdf','ok','200 OK');renderPdf(data.data);
+  }catch(e){setStatus('pdf','err','error');showErr('pdf',e.message)}
+}
+
+function renderPdf(d){
+  const panel=document.getElementById('res-pdf');panel.style.display='block';
+  const im=d.initial_metrics||{};const cm=d.current_metrics||{};
+  const cc=d.case_classification||{};const errors=d.errors||[];
+  const iacc=im.accuracy||{};const icov=im.coverage||{};const icf=im.confidence||{};
+  const cacc=cm.accuracy||{};
+  const iagr=im.agreement||{};const irec=im.recovery||{};
+  const hasCur=Object.keys(cacc).length>0&&cacc.accuracy_ensemble!==iacc.accuracy_ensemble;
+
+  const cases=[
+    {key:'CASE_A',desc:'both agreed',color:'sky'},
+    {key:'CASE_B',desc:'conflict',color:'amber'},
+    {key:'CASE_C',desc:'llm only',color:'mint'},
+    {key:'CASE_D',desc:'rag only',color:'violet'},
+    {key:'CASE_E',desc:'both missed',color:'rose'},
+  ];
+
+  document.getElementById('body-pdf').innerHTML=`
+    <div class="sec-div">submission info</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">User ID</div><div class="stat-val text" style="font-size:1rem">${d.user_id||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">PDF ID</div><div class="stat-val text" style="font-size:1rem">${d.pdf_id||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Submission ID</div><div class="stat-val text" style="font-size:0.58rem;word-break:break-all">${d.submission_id||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">PDF Hash</div><div class="stat-val text" style="font-size:0.55rem;word-break:break-all">${(d.pdf_hash||'—').slice(0,20)}…</div></div>
+    </div>
+
+    ${Object.keys(iacc).length?`
+    <div class="sec-div">initial accuracy — before feedback</div>
+    <div class="acc-grid">
+      <div class="acc-block" style="--acc-color:var(--sky)">
+        <div class="acc-title">LLM</div>
+        <div class="acc-big">${pct(iacc.accuracy_llm)}</div>
+        <div class="acc-rows">
+          <div class="acc-row"><span class="acc-row-label">errors</span><span class="acc-row-val" style="${(iacc.errors_llm||0)>0?'color:var(--rose)':''}">${iacc.errors_llm??'—'}</span></div>
+          <div class="acc-row"><span class="acc-row-label">coverage</span><span class="acc-row-val">${pct(icov.coverage_llm)}</span></div>
+          <div class="acc-row"><span class="acc-row-label">avg conf</span><span class="acc-row-val">${pct(icf.avg_conf_llm)}</span></div>
+        </div>
+      </div>
+      <div class="acc-block" style="--acc-color:var(--violet)">
+        <div class="acc-title">RAG</div>
+        <div class="acc-big">${pct(iacc.accuracy_rag)}</div>
+        <div class="acc-rows">
+          <div class="acc-row"><span class="acc-row-label">errors</span><span class="acc-row-val">${iacc.errors_rag??'—'}</span></div>
+          <div class="acc-row"><span class="acc-row-label">coverage</span><span class="acc-row-val">${pct(icov.coverage_rag)}</span></div>
+          <div class="acc-row"><span class="acc-row-label">avg conf</span><span class="acc-row-val">${pct(icf.avg_conf_rag)}</span></div>
+        </div>
+      </div>
+      <div class="acc-block" style="--acc-color:var(--lime)">
+        <div class="acc-title">Ensemble</div>
+        <div class="acc-big">${pct(iacc.accuracy_ensemble)}</div>
+        <div class="acc-rows">
+          <div class="acc-row"><span class="acc-row-label">errors</span><span class="acc-row-val">${iacc.errors_ensemble??'—'}</span></div>
+          <div class="acc-row"><span class="acc-row-label">coverage</span><span class="acc-row-val">${pct(icov.coverage_ensemble)}</span></div>
+          <div class="acc-row"><span class="acc-row-label">rag ambiguity</span><span class="acc-row-val">${pct(icf.rag_ambiguity_rate)}</span></div>
+        </div>
+      </div>
+    </div>`:''}
+
+    ${hasCur?`
+    <div class="sec-div">current accuracy — after feedback</div>
+    <div class="acc-grid">
+      <div class="acc-block" style="--acc-color:var(--sky)"><div class="acc-title">LLM</div><div class="acc-big">${pct(cacc.accuracy_llm)}<span class="delta ${dcls((cacc.accuracy_llm||0)-(iacc.accuracy_llm||0))}">${dstr((cacc.accuracy_llm||0)-(iacc.accuracy_llm||0))}</span></div></div>
+      <div class="acc-block" style="--acc-color:var(--violet)"><div class="acc-title">RAG</div><div class="acc-big">${pct(cacc.accuracy_rag)}<span class="delta ${dcls((cacc.accuracy_rag||0)-(iacc.accuracy_rag||0))}">${dstr((cacc.accuracy_rag||0)-(iacc.accuracy_rag||0))}</span></div></div>
+      <div class="acc-block" style="--acc-color:var(--lime)"><div class="acc-title">Ensemble</div><div class="acc-big">${pct(cacc.accuracy_ensemble)}<span class="delta ${dcls((cacc.accuracy_ensemble||0)-(iacc.accuracy_ensemble||0))}">${dstr((cacc.accuracy_ensemble||0)-(iacc.accuracy_ensemble||0))}</span></div></div>
+    </div>`:''}
+
+    <div class="sec-div">charts</div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Accuracy (initial vs current)</div><canvas id="ch-pdf-acc" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Coverage & Confidence</div><canvas id="ch-pdf-cov" height="200"></canvas></div>
+    </div>
+
+    ${icov.coverage_llm!=null?`
+    <div class="sec-div">coverage & agreement</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Cov LLM</div><div class="stat-val mint">${pct(icov.coverage_llm)}</div></div>
+      <div class="stat-card"><div class="stat-label">Cov RAG</div><div class="stat-val violet">${pct(icov.coverage_rag)}</div></div>
+      <div class="stat-card"><div class="stat-label">Cov Ensemble</div><div class="stat-val lime">${pct(icov.coverage_ensemble)}</div></div>
+      <div class="stat-card"><div class="stat-label">Agreement Rate</div><div class="stat-val ${(iagr.agreement_rate||0)>=0.8?'lime':'amber'}">${pct(iagr.agreement_rate)}</div></div>
+    </div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Conflict Rate</div><div class="stat-val amber">${pct(iagr.conflict_rate)}</div></div>
+      <div class="stat-card"><div class="stat-label">RAG Recovery</div><div class="stat-val mint">${pct(irec.rag_recovery)}</div></div>
+      <div class="stat-card"><div class="stat-label">LLM Recovery</div><div class="stat-val sky">${pct(irec.llm_recovery)}</div></div>
+      <div class="stat-card"><div class="stat-label">RAG Ambiguity</div><div class="stat-val amber">${pct(icf.rag_ambiguity_rate)}</div></div>
+    </div>`:''}
+
+    ${Object.keys(cc).length?`
+    <div class="sec-div">case classification</div>
+    <div class="case-grid">
+      ${cases.map(c=>{const cd=cc[c.key]||{};const cnt=cd.count||0;return`<div class="case-tile ${cnt>0?'lit':''}"><div class="case-letter">${c.key.replace('CASE_','')}</div><div class="case-count">${cnt}</div><div class="case-desc">${c.desc}</div>${c.key==='CASE_B'&&cd.selections?`<div style="font-size:0.52rem;color:var(--text3);margin-top:0.3rem">rag:${cd.selections.rag_selected||0} llm:${cd.selections.llm_selected||0}</div>`:''}</div>`;}).join('')}
+    </div>
+    <div class="chart-box" style="margin-bottom:1.2rem">
+      <div class="chart-box-title">Case Distribution</div>
+      <canvas id="ch-pdf-cases" height="180"></canvas>
+    </div>`:''}
+
+    ${im.field_counts?`
+    <div class="sec-div">field counts</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Fields</div><div class="stat-val text">${im.field_counts.total_fields??'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Predicted LLM</div><div class="stat-val sky">${im.field_counts.predicted_llm??'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Predicted RAG</div><div class="stat-val violet">${im.field_counts.predicted_rag??'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Neither Predicted</div><div class="stat-val rose">${im.field_counts.neither_predicted??'—'}</div></div>
+    </div>`:''}
+
+    <div class="sec-div">errors (${errors.length})</div>
+    ${errors.length===0
+      ?'<div class="no-errors"><div class="err-check">✓</div> No errors recorded</div>'
+      :errors.map(e=>`<div class="err-item"><div class="err-type">${e.error_type||'error'}</div><div class="err-detail">field: <strong style="color:var(--text)">${e.field_name||'—'}</strong> · case: ${e.case_type||'—'} · gpt4: ${e.gpt4_correction||'—'} (${e.gpt4_confidence!=null?(e.gpt4_confidence*100).toFixed(0)+'%':'—'})${e.user_feedback?`<br>feedback: ${e.user_feedback}`:''}</div></div>`).join('')}
+    <div id="ai-pdf-anchor"></div>
+  `;
+  animateBars('body-pdf');
+
+  const hasCurData=Object.keys(cacc).length>0&&hasCur;
+  mkChart('ch-pdf-acc',{type:'bar',data:{labels:['LLM','RAG','Ensemble'],datasets:[
+    barDs('Initial',[iacc.accuracy_llm,iacc.accuracy_rag,iacc.accuracy_ensemble].map(v=>(v||0)*100),C.sky),
+    ...(hasCurData?[barDs('After Feedback',[cacc.accuracy_llm,cacc.accuracy_rag,cacc.accuracy_ensemble].map(v=>(v||0)*100),C.lime)]:[] )
+  ]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+
+  mkChart('ch-pdf-cov',{type:'bar',data:{labels:['Cov LLM','Cov RAG','Cov Ens','Conf LLM','Conf RAG','Conf Ens'],datasets:[{data:[icov.coverage_llm,icov.coverage_rag,icov.coverage_ensemble,icf.avg_conf_llm,icf.avg_conf_rag,icf.avg_conf_ensemble].map(v=>(v||0)*100),backgroundColor:['rgba(99,179,237,0.5)','rgba(183,148,244,0.5)','rgba(79,209,197,0.5)','rgba(99,179,237,0.3)','rgba(183,148,244,0.3)','rgba(79,209,197,0.3)'],borderColor:['#63b3ed','#b794f4','#4fd1c5','#63b3ed','#b794f4','#4fd1c5'],borderWidth:1,borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{font:{size:9}}}}}});
+
+  if(Object.keys(cc).length){
+    const vals=cases.map(c=>cc[c.key]?.count||0);
+    const colors=['rgba(99,179,237,0.7)','rgba(246,173,85,0.7)','rgba(79,209,197,0.7)','rgba(183,148,244,0.7)','rgba(252,129,129,0.7)'];
+    mkChart('ch-pdf-cases',{type:'doughnut',data:{labels:cases.map(c=>c.key+' ('+c.desc+')'),datasets:[{data:vals,backgroundColor:colors,borderColor:colors.map(c=>c.replace('0.7','1')),borderWidth:1}]},options:{responsive:true,plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:9}}}},cutout:'58%'}});
+  }
+  aiSummary('ai-pdf-anchor',{initial_metrics:im,errors:errors.length},'PDF Metrics');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CATEGORY / SUBCATEGORY / DOCTYPE — shared time series
+// ═══════════════════════════════════════════════════════════════
+const buildCatPayload=()=>({api_name:'get_metrics',metric_type:'category',category:document.getElementById('cat-cat').value});
+const buildSubPayload=()=>({api_name:'get_metrics',metric_type:'subcategory',category:document.getElementById('sub-cat').value,subcategory:document.getElementById('sub-sub').value});
+const buildDtPayload =()=>({api_name:'get_metrics',metric_type:'doctype',category:document.getElementById('dt-cat').value,subcategory:document.getElementById('dt-sub').value,doctype:document.getElementById('dt-dt').value});
+async function runCategory()   {await runTimeSeries('category',   buildCatPayload())}
+async function runSubcategory(){await runTimeSeries('subcategory',buildSubPayload())}
+async function runDoctype()    {await runTimeSeries('doctype',    buildDtPayload())}
+
+async function runTimeSeries(id,payload){
+  hideErr(id);setStatus(id,'loading','');
+  try{
+    const{ok,status,data}=await callApi(payload);
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus(id,'ok','200 OK');renderTimeSeries(id,data.data);
+  }catch(e){setStatus(id,'err','error');showErr(id,e.message)}
+}
+
+function renderTimeSeries(id,d){
+  const panel=document.getElementById('res-'+id);panel.style.display='block';
+  const ts=d.time_series||[];const agg=d.aggregated||{};
+
+  const norm=ts.map(e=>{
+    const m=e.metrics||e;
+    return{ts:e.timestamp,sid:e.submission_id||'',uid:e.user_id||'',pid:e.pdf_id||'',
+      accE:m.accuracy_ensemble??m.accuracy??0,accL:m.accuracy_llm??0,accR:m.accuracy_rag??0,
+      covE:m.coverage_ensemble??m.coverage??0,err:m.errors_ensemble??m.errors??0};
+  });
+
+  document.getElementById('body-'+id).innerHTML=`
+    ${Object.keys(agg).length?`
+    <div class="sec-div">aggregated</div>
+    <div class="stats-grid sg-4">
+      ${agg.avg_accuracy!=null?`<div class="stat-card"><div class="stat-label">Avg Accuracy</div><div class="stat-val ${colorAcc(agg.avg_accuracy)}">${pct(agg.avg_accuracy)}</div></div>`:''}
+      ${agg.avg_coverage!=null?`<div class="stat-card"><div class="stat-label">Avg Coverage</div><div class="stat-val ${colorCov(agg.avg_coverage)}">${pct(agg.avg_coverage)}</div></div>`:''}
+      ${agg.total_submissions!=null?`<div class="stat-card"><div class="stat-label">Submissions</div><div class="stat-val text">${agg.total_submissions}</div></div>`:''}
+      ${agg.total_errors!=null?`<div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${agg.total_errors>0?'rose':'lime'}">${agg.total_errors}</div></div>`:''}
+    </div>`:''}
+
+    <div class="sec-div">accuracy over time (${norm.length} entries)</div>
+    <div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">Accuracy — LLM vs RAG vs Ensemble</div><canvas id="ch-ts-${id}-acc" height="160"></canvas></div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Coverage Over Time</div><canvas id="ch-ts-${id}-cov" height="150"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Errors Over Time</div><canvas id="ch-ts-${id}-err" height="150"></canvas></div>
+    </div>
+
+    <div class="sec-div">entries (last 20)</div>
+    <div class="timeline">
+      ${norm.slice(-20).map(e=>{const hasErr=e.err>0;return`<div class="tl-row">
+        <div class="tl-ts">${fmtTs(e.ts)}</div>
+        <div class="tl-id">${e.sid||e.uid+'/'+e.pid}</div>
+        <div class="tl-stats">
+          <div class="tl-stat"><span class="tl-stat-label">acc</span><span class="tl-stat-val ${e.accE>=0.98?'ok':e.accE>=0.9?'mid':'bad'}">${pct(e.accE)}</span></div>
+          <div class="tl-stat"><span class="tl-stat-label">cov</span><span class="tl-stat-val ${e.covE>=0.7?'ok':'mid'}">${pct(e.covE)}</span></div>
+          <div class="tl-stat"><span class="tl-stat-label">err</span><span class="tl-stat-val ${hasErr?'bad':'ok'}">${e.err}</span></div>
+        </div><div class="tl-dot ${hasErr?'err':''}"></div>
+      </div>`;}).join('')}
+    </div>
+    <div id="ai-${id}-anchor"></div>
+  `;
+
+  const sample=norm.length>60?norm.filter((_,i)=>i%Math.ceil(norm.length/60)===0):norm;
+  const labels=sample.map(e=>fmtTs(e.ts).slice(0,10));
+
+  mkChart(`ch-ts-${id}-acc`,{type:'line',data:{labels,datasets:[
+    lineDs('Ensemble',sample.map(e=>e.accE*100),C.lime,{fill:true,borderWidth:2.5}),
+    lineDs('LLM',sample.map(e=>e.accL*100),C.sky,{borderWidth:1.5,pointRadius:1}),
+    lineDs('RAG',sample.map(e=>e.accR*100),C.violet,{borderWidth:1.5,pointRadius:1}),
+  ]},options:{...lineOpts('%'),plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:50,max:101,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+
+  mkChart(`ch-ts-${id}-cov`,{type:'line',data:{labels,datasets:[lineDs('Coverage',sample.map(e=>e.covE*100),C.mint,{fill:true})]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:105,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+  mkChart(`ch-ts-${id}-err`,{type:'bar',data:{labels,datasets:[barDs('Errors',sample.map(e=>e.err),C.rose)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+
+  aiSummary(`ai-${id}-anchor`,{aggregated:agg,entries:norm.length},`${id} Metrics`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMPARE
+// ═══════════════════════════════════════════════════════════════
+function addCmpRow(){
+  const row=document.createElement('div');row.className='cmp-pdf-row-wrap';
+  row.innerHTML=`<div class="cmp-remove" onclick="this.parentElement.remove()">✕</div><div class="fgrid"><div class="f-group"><label class="f-label">user_id</label><input class="f-inp cmp-user" value=""/></div><div class="f-group"><label class="f-label">session_id</label><input class="f-inp cmp-session" value=""/></div><div class="f-group"><label class="f-label">pdf_id</label><input class="f-inp cmp-pdf" value=""/></div></div>`;
+  document.getElementById('cmp-rows').appendChild(row);
+}
+const buildCmpPayload=()=>({api_name:'get_metrics',metric_type:'compare',pdfs:[...document.querySelectorAll('.cmp-user')].map((u,i)=>({user_id:u.value,session_id:document.querySelectorAll('.cmp-session')[i].value,pdf_id:document.querySelectorAll('.cmp-pdf')[i].value}))});
+async function runCompare(){
+  hideErr('compare');setStatus('compare','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildCmpPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('compare','ok','200 OK');renderCompare(data.data);
+  }catch(e){setStatus('compare','err','error');showErr('compare',e.message)}
+}
+
+function renderCompare(d){
+  const panel=document.getElementById('res-compare');panel.style.display='block';
+  const cmp=d.comparison||[];const cs=d.cross_summary||null;
+  const isNew=cmp.length>0&&cmp[0].submission!==undefined;
+
+  const body=document.getElementById('body-compare');
+  body.innerHTML=`
+    ${cs?`
+    <div class="sec-div">cross-pdf summary</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">PDFs Requested</div><div class="stat-val text">${cs.total_pdfs_requested}</div></div>
+      <div class="stat-card"><div class="stat-label">With Metrics</div><div class="stat-val lime">${cs.total_pdfs_with_metrics}</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Accuracy Ens</div><div class="stat-val ${colorAcc(cs.avg_accuracy_ensemble)}">${pct(cs.avg_accuracy_ensemble)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${(cs.total_errors_across_all||0)>0?'rose':'lime'}">${cs.total_errors_across_all||0}</div></div>
+    </div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Best Accuracy</div><div class="stat-val sky" style="font-size:1rem">${cs.best_accuracy_ensemble}</div></div>
+      <div class="stat-card"><div class="stat-label">Worst Accuracy</div><div class="stat-val rose" style="font-size:1rem">${cs.worst_accuracy_ensemble}</div></div>
+      <div class="stat-card"><div class="stat-label">Best Coverage</div><div class="stat-val mint" style="font-size:1rem">${cs.best_coverage_ensemble}</div></div>
+      <div class="stat-card"><div class="stat-label">Most Errors</div><div class="stat-val amber" style="font-size:1rem">${cs.most_errors}</div></div>
+    </div>`:''}
+
+    <div class="sec-div">comparison charts</div>
+    <div class="chart-grid-2" style="margin-bottom:1.2rem">
+      <div class="chart-box"><div class="chart-box-title">Accuracy per PDF</div><canvas id="ch-cmp-acc" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Coverage per PDF</div><canvas id="ch-cmp-cov" height="200"></canvas></div>
+    </div>
+    <div class="chart-grid-2" style="margin-bottom:1.4rem">
+      <div class="chart-box"><div class="chart-box-title">Errors per PDF</div><canvas id="ch-cmp-err" height="150"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Fields Predicted</div><canvas id="ch-cmp-flds" height="150"></canvas></div>
+    </div>
+
+    <div class="sec-div">quick table</div>
+    <div class="scroll-x" style="margin-bottom:1.5rem"><table class="data-table">
+      <thead><tr><th>PDF</th><th>User</th><th>Acc LLM</th><th>Acc RAG</th><th>Acc Ens</th><th>Cov Ens</th><th>Errors</th><th>Freq</th><th>Status</th></tr></thead>
+      <tbody>${cmp.map(row=>{
+        const getA=(k)=>isNew?(row.current_metrics?.accuracy?.[k]??row.initial_metrics?.accuracy?.[k]):row.accuracy;
+        const getC=(k)=>isNew?(row.current_metrics?.coverage?.[k]??row.initial_metrics?.coverage?.[k]):row.coverage;
+        const err=isNew?(row.error_summary?.total_errors||0):(row.errors||0);
+        const freq=isNew?row.submission?.frequency:null;
+        const noM=!row.has_metrics&&isNew;
+        return`<tr>
+          <td style="color:var(--text)">${row.pdf_id}</td>
+          <td style="color:var(--text2)">${row.user_id}</td>
+          <td style="color:var(--sky)">${getA('llm')!=null?pct2(getA('llm')):'—'}</td>
+          <td style="color:var(--violet)">${getA('rag')!=null?pct2(getA('rag')):'—'}</td>
+          <td style="color:var(--${colorAcc(getA('ensemble'))})">${getA('ensemble')!=null?pct2(getA('ensemble')):'—'}</td>
+          <td style="color:var(--${colorCov(getC('ensemble'))})">${getC('ensemble')!=null?pct(getC('ensemble')):'—'}</td>
+          <td style="color:var(--${err>0?'rose':'lime'})">${err}</td>
+          <td style="color:var(--text3)">${freq??'—'}</td>
+          <td>${noM?'<span class="tag amber">no metrics</span>':'<span class="tag lime">ok</span>'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+
+    <div class="sec-div">per-pdf detail cards</div>
+    ${cmp.map(row=>{
+      if(!isNew)return`<div class="cmp-card"><div class="cmp-card-head"><div><div class="cmp-card-id">PDF ${row.pdf_id}</div><div class="cmp-card-sub">${row.user_id} / ${row.session_id}</div></div></div><div class="stats-grid sg-3"><div class="stat-card"><div class="stat-label">Accuracy</div><div class="stat-val ${colorAcc(row.accuracy)}">${pct(row.accuracy)}</div></div><div class="stat-card"><div class="stat-label">Coverage</div><div class="stat-val ${colorCov(row.coverage)}">${pct(row.coverage)}</div></div><div class="stat-card"><div class="stat-label">Errors</div><div class="stat-val ${(row.errors||0)>0?'rose':'lime'}">${row.errors||0}</div></div></div></div>`;
+      const acc=row.current_metrics?.accuracy||row.initial_metrics?.accuracy||{};
+      const cov=row.current_metrics?.coverage||row.initial_metrics?.coverage||{};
+      const es=row.error_summary||{};const del=row.accuracy_delta||null;
+      const sub=row.submission||{};const pi=row.pdf_info||{};
+      const cc2=row.case_classification||{};const noM=!row.has_metrics;
+      return`<div class="cmp-card">
+        <div class="cmp-card-head">
+          <div>
+            <div class="cmp-card-id">PDF ${row.pdf_id}</div>
+            <div class="cmp-card-sub">${row.user_id} · ${row.session_id} ${sub.frequency?'· freq:'+sub.frequency:''}</div>
+          </div>
+          <div style="display:flex;gap:0.4rem;align-items:center">
+            ${sub.env?`<span class="tag sky">${sub.env}</span>`:''}
+            ${sub.is_duplicate?'<span class="tag amber">duplicate</span>':''}
+            ${noM?`<span class="tag rose">⚠ no metrics</span>`:'<span class="tag lime">metrics ok</span>'}
+          </div>
+        </div>
+        ${noM?'<div style="font-size:0.62rem;color:var(--text3);padding:0.3rem 0">API 2 (saving_filled_pdf) has not been called yet for this submission.</div>':''}
+        ${!noM?`
+        <div class="stats-grid sg-4" style="margin-bottom:0.7rem">
+          <div class="stat-card"><div class="stat-label">Acc LLM</div><div class="stat-val sky" style="font-size:1.3rem">${pct2(acc.llm)}</div><div class="stat-sub">err: ${acc.errors_llm??0}</div></div>
+          <div class="stat-card"><div class="stat-label">Acc RAG</div><div class="stat-val violet" style="font-size:1.3rem">${pct2(acc.rag)}</div><div class="stat-sub">err: ${acc.errors_rag??0}</div></div>
+          <div class="stat-card"><div class="stat-label">Acc Ensemble</div><div class="stat-val ${colorAcc(acc.ensemble)}" style="font-size:1.3rem">${pct2(acc.ensemble)}</div><div class="stat-sub">err: ${acc.errors_ensemble??0}</div></div>
+          <div class="stat-card"><div class="stat-label">Cov Ensemble</div><div class="stat-val mint" style="font-size:1.3rem">${pct(cov.ensemble)}</div></div>
+        </div>
+        ${del?`<div style="background:var(--ink2);border:1px solid var(--border);border-radius:7px;padding:0.6rem 0.9rem;margin-bottom:0.7rem;font-size:0.62rem;font-family:var(--mono)">
+          <div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:0.4rem">Accuracy Delta After Feedback</div>
+          LLM: <span class="delta ${dcls(del.llm)}">${dstr(del.llm)}</span>
+          &nbsp;&nbsp;RAG: <span class="delta ${dcls(del.rag)}">${dstr(del.rag)}</span>
+          &nbsp;&nbsp;Ens: <span class="delta ${dcls(del.ensemble)}">${dstr(del.ensemble)}</span>
+          &nbsp;&nbsp;Errors Δ: <span class="delta ${del.errors_delta_ensemble>0?'neg':del.errors_delta_ensemble<0?'pos':'neu'}">${del.errors_delta_ensemble>0?'+':''}${del.errors_delta_ensemble??0}</span>
+        </div>`:''}
+        ${cc2.dominant_case?`<div style="font-size:0.61rem;color:var(--text3);margin-bottom:0.6rem;font-family:var(--mono)">dominant case: <span class="tag sky">${cc2.dominant_case}</span> A:${cc2.CASE_A?.count||0} B:${cc2.CASE_B?.count||0} C:${cc2.CASE_C?.count||0} D:${cc2.CASE_D?.count||0} E:${cc2.CASE_E?.count||0}</div>`:''}
+        ${(es.total_errors||0)>0?`
+          <div style="font-size:0.62rem;color:var(--text3);margin-bottom:0.4rem;font-family:var(--mono)">errors by type: ${Object.entries(es.by_error_type||{}).map(([k,v])=>`<span class="tag rose">${k}: ${v}</span>`).join('')}</div>
+          ${(es.by_field||[]).slice(0,3).map(f=>`<div class="err-item"><div class="err-type">${f.error_type}</div><div class="err-detail">field: <strong>${f.field_name}</strong> · gpt4: ${f.gpt4_correction||'—'} (${f.gpt4_confidence!=null?(f.gpt4_confidence*100).toFixed(0)+'%':'—'})</div></div>`).join('')}`
+          :'<div class="no-errors"><div class="err-check">✓</div> no errors</div>'}
+        `:''}
+      </div>`;
+    }).join('')}
+    <div id="ai-compare-anchor"></div>
+  `;
+
+  const labels=cmp.map(r=>r.pdf_id);
+  const getA=(r,k)=>isNew?(r.current_metrics?.accuracy?.[k]??r.initial_metrics?.accuracy?.[k]??0):(r.accuracy||0);
+  const getC=(r,k)=>isNew?(r.current_metrics?.coverage?.[k]??r.initial_metrics?.coverage?.[k]??0):(r.coverage||0);
+  const getE=(r)=>isNew?(r.error_summary?.total_errors||0):(r.errors||0);
+  const getF=(r,k)=>isNew?(r.initial_metrics?.field_counts?.[k]??0):0;
+
+  mkChart('ch-cmp-acc',{type:'bar',data:{labels,datasets:[barDs('LLM',cmp.map(r=>getA(r,'llm')*100),C.sky),barDs('RAG',cmp.map(r=>getA(r,'rag')*100),C.violet),barDs('Ensemble',cmp.map(r=>getA(r,'ensemble')*100),C.lime)]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  mkChart('ch-cmp-cov',{type:'bar',data:{labels,datasets:[barDs('LLM',cmp.map(r=>getC(r,'llm')*100),C.sky),barDs('RAG',cmp.map(r=>getC(r,'rag')*100),C.violet),barDs('Ensemble',cmp.map(r=>getC(r,'ensemble')*100),C.mint)]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  mkChart('ch-cmp-err',{type:'bar',data:{labels,datasets:[barDs('Errors',cmp.map(r=>getE(r)),C.rose)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  mkChart('ch-cmp-flds',{type:'bar',data:{labels,datasets:[barDs('LLM',cmp.map(r=>getF(r,'predicted_llm')),C.sky),barDs('RAG',cmp.map(r=>getF(r,'predicted_rag')),C.violet),barDs('Ensemble',cmp.map(r=>getF(r,'predicted_ensemble')),C.lime)]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+
+  aiSummary('ai-compare-anchor',{cross_summary:cs,pdfs_count:cmp.length},'PDF Comparison');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PDF HASH
+// ═══════════════════════════════════════════════════════════════
+const buildPhPayload=()=>({api_name:'get_metrics',metric_type:'pdf_hash',pdf_hash:document.getElementById('ph-hash').value.trim()});
+async function runPdfhash(){
+  hideErr('pdfhash');setStatus('pdfhash','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildPhPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('pdfhash','ok','200 OK');renderPdfhash(data.data);
+  }catch(e){setStatus('pdfhash','err','error');showErr('pdfhash',e.message)}
+}
+function renderPdfhash(d){
+  const panel=document.getElementById('res-pdfhash');panel.style.display='block';
+  if(!d.found){document.getElementById('body-pdfhash').innerHTML=`<div style="font-size:0.65rem;color:var(--amber);padding:1rem;font-family:var(--mono)">⚠ PDF hash not found in mapping.</div>`;return}
+  const agg=d.aggregated||{};const subs=d.submissions||[];
+  const errTotal=subs.reduce((t,s)=>t+(s.total_errors||0),0);
+  const withMetrics=subs.filter(s=>s.metrics);
+
+  document.getElementById('body-pdfhash').innerHTML=`
+    <div class="sec-div">hash info</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Submissions</div><div class="stat-val text">${d.total_submissions}</div></div>
+      <div class="stat-card"><div class="stat-label">With Metrics</div><div class="stat-val lime">${withMetrics.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${errTotal>0?'rose':'lime'}">${errTotal}</div></div>
+      <div class="stat-card"><div class="stat-label">Document Type</div><div class="stat-val text" style="font-size:0.75rem">${d.document_type||'—'}</div></div>
+    </div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Category</div><div class="stat-val sky" style="font-size:0.95rem">${d.category||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Sub-Category</div><div class="stat-val violet" style="font-size:0.95rem">${d.sub_category||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">First Seen</div><div class="stat-val text" style="font-size:0.68rem">${fmtTs(d.first_seen)}</div></div>
+      <div class="stat-card"><div class="stat-label">Last Seen</div><div class="stat-val text" style="font-size:0.68rem">${fmtTs(d.last_seen)}</div></div>
+    </div>
+
+    ${agg?`
+    <div class="sec-div">aggregated across ${agg.total_submissions||0} submissions</div>
+    <div class="chart-grid-2"><div class="chart-box"><div class="chart-box-title">Avg Accuracy</div><canvas id="ch-ph-acc" height="180"></canvas></div><div class="chart-box"><div class="chart-box-title">Avg Coverage</div><canvas id="ch-ph-cov" height="180"></canvas></div></div>
+    <div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">Accuracy Trend Over Submissions</div><canvas id="ch-ph-trend" height="150"></canvas></div>`:''}
+
+    <div class="sec-div">all submissions (${subs.length})</div>
+    <div class="timeline">
+      ${subs.map(s=>{const m=s.metrics||{};const acc=m.accuracy||{};const hasErr=(s.total_errors||0)>0;
+        return`<div class="tl-row">
+          <div class="tl-ts">${fmtTs(s.timestamp)}</div>
+          <div class="tl-id">${s.submission_id||s.user_id+'/'+s.pdf_id} <span style="color:var(--text3);font-size:0.55rem">freq:${s.frequency}</span></div>
+          <div class="tl-stats">
+            ${acc.ensemble!=null?`<div class="tl-stat"><span class="tl-stat-label">acc_ens</span><span class="tl-stat-val ${acc.ensemble>=0.98?'ok':acc.ensemble>=0.9?'mid':'bad'}">${pct(acc.ensemble)}</span></div>`:'<div class="tl-stat"><span class="tl-stat-label">acc</span><span class="tl-stat-val mid">—</span></div>'}
+            <div class="tl-stat"><span class="tl-stat-label">err</span><span class="tl-stat-val ${hasErr?'bad':'ok'}">${s.total_errors||0}</span></div>
+          </div>
+          <div class="tl-dot ${hasErr?'err':''}"></div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div id="ai-pdfhash-anchor"></div>
+  `;
+
+  if(agg.avg_accuracy){
+    mkChart('ch-ph-acc',{type:'bar',data:{labels:['LLM','RAG','Ensemble'],datasets:[{data:[agg.avg_accuracy.llm,agg.avg_accuracy.rag,agg.avg_accuracy.ensemble].map(v=>(v||0)*100),backgroundColor:['rgba(99,179,237,0.5)','rgba(183,148,244,0.5)','rgba(104,211,145,0.5)'],borderColor:['#63b3ed','#b794f4','#68d391'],borderWidth:1,borderRadius:6}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+    mkChart('ch-ph-cov',{type:'bar',data:{labels:['LLM','RAG','Ensemble'],datasets:[{data:[agg.avg_coverage?.llm,agg.avg_coverage?.rag,agg.avg_coverage?.ensemble].map(v=>(v||0)*100),backgroundColor:['rgba(99,179,237,0.4)','rgba(183,148,244,0.4)','rgba(79,209,197,0.5)'],borderColor:['#63b3ed','#b794f4','#4fd1c5'],borderWidth:1,borderRadius:6}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  }
+  if(withMetrics.length){
+    mkChart('ch-ph-trend',{type:'line',data:{
+      labels:withMetrics.map(s=>'f'+s.frequency),
+      datasets:[
+        lineDs('Acc Ensemble',withMetrics.map(s=>((s.metrics?.accuracy?.ensemble)||0)*100),C.lime,{fill:true,borderWidth:2.5}),
+        {label:'Errors',data:withMetrics.map(s=>s.total_errors||0),borderColor:C.rose.line,backgroundColor:C.rose.fill,borderWidth:1.5,pointRadius:3,fill:false,tension:0.3,yAxisID:'y2'},
+      ]
+    },options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:101,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},y2:{position:'right',min:0,grid:{display:false}},x:{grid:{display:false},ticks:{maxTicksLimit:12}}}}});
+  }
+  aiSummary('ai-pdfhash-anchor',{category:d.category,document_type:d.document_type,aggregated:agg,submissions:subs.length},'PDF Hash Metrics');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PERIOD ANALYTICS (API 10)
+// ═══════════════════════════════════════════════════════════════
+function buildPeriodPayload(){
+  const p={api_name:'get_period_analytics'};
+  const date=document.getElementById('pa-date').value.trim();
+  const from=document.getElementById('pa-from').value.trim();
+  const to=document.getElementById('pa-to').value.trim();
+  const gran=document.getElementById('pa-gran').value;
+  const cat=document.getElementById('pa-cat').value.trim();
+  const sub=document.getElementById('pa-sub').value.trim();
+  const doc=document.getElementById('pa-doc').value.trim();
+  if(date)p.date=date;
+  if(from)p.date_from=from;if(to)p.date_to=to;
+  p.granularity=gran;
+  if(cat)p.category=cat;if(sub)p.subcategory=sub;if(doc)p.doctype=doc;
+  return p;
+}
+async function runPeriod(){
+  hideErr('period');setStatus('period','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildPeriodPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('period','ok','200 OK');renderPeriod(data.data);
+  }catch(e){setStatus('period','err','error');showErr('period',e.message)}
+}
+function renderPeriod(d){
+  const panel=document.getElementById('res-period');panel.style.display='block';
+  const periods=d.periods||[];const overall=d.overall_summary||null;
+  const gran=d.filters?.granularity||'day';
+
+  document.getElementById('body-period').innerHTML=`
+    <div class="sec-div">overview</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Periods</div><div class="stat-val text">${d.total_periods}</div><div class="stat-sub">granularity: ${gran}</div></div>
+      <div class="stat-card"><div class="stat-label">Total PDFs</div><div class="stat-val mint">${num(d.total_pdfs)}</div></div>
+      ${overall?`
+      <div class="stat-card"><div class="stat-label">Overall Avg Accuracy</div><div class="stat-val ${colorAcc(overall.accuracy?.ensemble)}">${pct(overall.accuracy?.ensemble)}</div></div>
+      <div class="stat-card"><div class="stat-label">Overall Avg Coverage</div><div class="stat-val ${colorCov(overall.coverage?.ensemble)}">${pct(overall.coverage?.ensemble)}</div></div>`:'<div class="stat-card"></div><div class="stat-card"></div>'}
+    </div>
+
+    ${overall?`
+    <div class="sec-div">overall summary</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Errors (Ens)</div><div class="stat-val ${(overall.errors?.ensemble||0)>0?'rose':'lime'}">${overall.errors?.ensemble??0}</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Conf Ensemble</div><div class="stat-val sky">${pct(overall.confidence?.avg_conf_ensemble)}</div></div>
+      <div class="stat-card"><div class="stat-label">Agreement Rate</div><div class="stat-val lime">${pct(overall.agreement?.agreement_rate)}</div></div>
+      <div class="stat-card"><div class="stat-label">Conflict Rate</div><div class="stat-val amber">${pct(overall.agreement?.conflict_rate)}</div></div>
+    </div>`:''}
+
+    ${periods.length?`
+    <div class="sec-div">period charts (${periods.length} buckets)</div>
+    <div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">Accuracy Over Periods</div><canvas id="ch-pa-acc" height="160"></canvas></div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Coverage Over Periods</div><canvas id="ch-pa-cov" height="150"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Errors Over Periods</div><canvas id="ch-pa-err" height="150"></canvas></div>
+    </div>
+
+    <div class="sec-div">period breakdown</div>
+    <div class="scroll-x"><table class="data-table">
+      <thead><tr><th>Period</th><th>PDFs</th><th>Acc LLM</th><th>Acc RAG</th><th>Acc Ens</th><th>Cov Ens</th><th>Errors Ens</th><th>Agreement</th></tr></thead>
+      <tbody>${periods.map(p=>`<tr>
+        <td style="color:var(--text);font-weight:600">${p.period}</td>
+        <td style="color:var(--mint)">${p.total_pdfs}</td>
+        <td style="color:var(--sky)">${pct(p.accuracy?.llm)}</td>
+        <td style="color:var(--violet)">${pct(p.accuracy?.rag)}</td>
+        <td style="color:var(--${colorAcc(p.accuracy?.ensemble)})">${pct(p.accuracy?.ensemble)}</td>
+        <td style="color:var(--${colorCov(p.coverage?.ensemble)})">${pct(p.coverage?.ensemble)}</td>
+        <td style="color:var(--${(p.errors?.ensemble||0)>0?'rose':'lime'})">${p.errors?.ensemble??0}</td>
+        <td style="color:var(--${(p.agreement?.agreement_rate||0)>=0.8?'lime':'amber'})">${pct(p.agreement?.agreement_rate)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:'<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-text">No period data returned</div></div>'}
+    <div id="ai-period-anchor"></div>
+  `;
+
+  if(periods.length){
+    const labels=periods.map(p=>p.period);
+    mkChart('ch-pa-acc',{type:'line',data:{labels,datasets:[lineDs('LLM',periods.map(p=>((p.accuracy?.llm)||0)*100),C.sky),lineDs('RAG',periods.map(p=>((p.accuracy?.rag)||0)*100),C.violet),lineDs('Ensemble',periods.map(p=>((p.accuracy?.ensemble)||0)*100),C.lime,{fill:true,borderWidth:2.5})]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:101,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:12}}}}});
+    mkChart('ch-pa-cov',{type:'line',data:{labels,datasets:[lineDs('Coverage Ens',periods.map(p=>((p.coverage?.ensemble)||0)*100),C.mint,{fill:true})]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:105,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:10}}}}});
+    mkChart('ch-pa-err',{type:'bar',data:{labels,datasets:[barDs('Errors',periods.map(p=>p.errors?.ensemble||0),C.rose)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:10}}}}});
+  }
+  aiSummary('ai-period-anchor',{total_periods:d.total_periods,total_pdfs:d.total_pdfs,overall:overall,granularity:gran},'Period Analytics');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FIELD INSPECTOR (API 11)
+// ═══════════════════════════════════════════════════════════════
+function addFiRow(){
+  const row=document.createElement('div');row.className='cmp-pdf-row-wrap';
+  row.innerHTML=`<div class="cmp-remove" onclick="this.parentElement.remove()">✕</div><div class="fgrid"><div class="f-group"><label class="f-label">user_id</label><input class="f-inp fi-user" value=""/></div><div class="f-group"><label class="f-label">session_id</label><input class="f-inp fi-session" value=""/></div><div class="f-group"><label class="f-label">pdf_id</label><input class="f-inp fi-pdf" value=""/></div></div>`;
+  document.getElementById('fi-rows').appendChild(row);
+}
+function buildFiPayload(){
+  const users=[...document.querySelectorAll('.fi-user')].map(e=>e.value);
+  const sessions=[...document.querySelectorAll('.fi-session')].map(e=>e.value);
+  const pdfs=[...document.querySelectorAll('.fi-pdf')].map(e=>e.value);
+  return{api_name:'get_pdf_field_inspector',pdfs:users.map((u,i)=>({user_id:u,session_id:sessions[i],pdf_id:pdfs[i]}))};
+}
+async function runFieldinspector(){
+  hideErr('fieldinspector');setStatus('fieldinspector','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildFiPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('fieldinspector','ok','200 OK');renderFieldinspector(data.data);
+  }catch(e){setStatus('fieldinspector','err','error');showErr('fieldinspector',e.message)}
+}
+function renderFieldinspector(d){
+  const panel=document.getElementById('res-fieldinspector');panel.style.display='block';
+  const pdfs=d.pdfs||[];
+
+  const caseColor={CASE_A:'sky',CASE_B:'amber',CASE_C:'mint',CASE_D:'violet',CASE_E:'rose'};
+
+  document.getElementById('body-fieldinspector').innerHTML=`
+    <div class="sec-div">overview</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">PDFs Inspected</div><div class="stat-val text">${d.total_pdfs}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Fields</div><div class="stat-val mint">${pdfs.reduce((t,p)=>t+(p.total_fields||0),0)}</div></div>
+      <div class="stat-card"><div class="stat-label">PDFs with Errors</div><div class="stat-val ${pdfs.some(p=>p.has_errors)?'rose':'lime'}">${pdfs.filter(p=>p.has_errors).length}</div></div>
+      <div class="stat-card"><div class="stat-label">PDFs with Metrics</div><div class="stat-val sky">${pdfs.filter(p=>p.has_metrics).length}</div></div>
+    </div>
+
+    ${pdfs.map(pdf=>`
+    <div class="panel" style="margin-bottom:1.2rem">
+      <div class="panel-head">
+        <div class="panel-title">PDF ${pdf.pdf_id} · ${pdf.user_id} · ${pdf.total_fields} fields</div>
+        ${pdf.has_errors?`<span class="tag rose">has errors</span>`:''}
+        ${pdf.has_metrics?`<span class="tag lime">metrics ok</span>`:'<span class="tag amber">no metrics</span>'}
+        ${pdf.pdf_category?.document_type?`<span class="tag sky">${pdf.pdf_category.document_type}</span>`:''}
+      </div>
+      <div class="panel-body">
+        ${pdf.metrics?`
+        <div class="stats-grid sg-4" style="margin-bottom:1rem">
+          <div class="stat-card"><div class="stat-label">Acc Ensemble</div><div class="stat-val ${colorAcc(pdf.metrics.accuracy?.accuracy_ensemble)}">${pct(pdf.metrics.accuracy?.accuracy_ensemble)}</div></div>
+          <div class="stat-card"><div class="stat-label">Cov Ensemble</div><div class="stat-val mint">${pct(pdf.metrics.coverage?.coverage_ensemble)}</div></div>
+          <div class="stat-card"><div class="stat-label">Agreement</div><div class="stat-val lime">${pct(pdf.metrics.agreement?.agreement_rate)}</div></div>
+          <div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${(pdf.error_summary?.total_errors||0)>0?'rose':'lime'}">${pdf.error_summary?.total_errors||0}</div></div>
+        </div>`:''}
+
+        ${pdf.case_summary?`
+        <div class="case-grid" style="margin-bottom:1rem">
+          ${['CASE_A','CASE_B','CASE_C','CASE_D','CASE_E'].map(k=>{
+            const cs=pdf.case_summary[k]||{};
+            const descs={CASE_A:'both agreed',CASE_B:'conflict',CASE_C:'llm only',CASE_D:'rag only',CASE_E:'both missed'};
+            return`<div class="case-tile ${cs.count>0?'lit':''}"><div class="case-letter">${k.replace('CASE_','')}</div><div class="case-count">${cs.count||0}</div><div class="case-desc">${descs[k]}</div><div style="font-size:0.51rem;color:var(--text3)">${cs.percentage||0}%</div></div>`;
+          }).join('')}
+        </div>`:''}
+
+        <div class="sec-div" style="margin-top:0">field-level breakdown (${pdf.fields?.length||0} fields)</div>
+        <div class="fi-head">
+          <div>Field Name</div><div>Case</div><div>RAG Conf</div><div>LLM Conf</div><div>Final Selection</div><div>Error?</div>
+        </div>
+        <div class="field-inspector-grid">
+          ${(pdf.fields||[]).slice(0,50).map(f=>`
+          <div class="fi-row ${f.has_error?'has-err':''}">
+            <div class="fi-field-name" title="${f.final?.selected_field_name||'—'}">${(f.final?.selected_field_name||'—').slice(0,28)}${(f.final?.selected_field_name||'').length>28?'…':''}</div>
+            <div><span class="tag ${caseColor[f.case_type]||'sky'}">${f.case_type}</span></div>
+            <div class="fi-rag-conf">${f.rag?.confidence!=null?pct(f.rag.confidence):'—'}</div>
+            <div class="fi-llm-conf">${f.llm?.confidence!=null?pct(f.llm.confidence):'—'}</div>
+            <div style="color:var(--text2);font-size:0.57rem" title="${f.final?.selected_from||''}">from: ${f.final?.selected_from||'—'}</div>
+            <div>${f.has_error?'<span class="tag rose">err</span>':'<span style="color:var(--lime);font-size:0.6rem">✓</span>'}</div>
+          </div>`).join('')}
+          ${(pdf.fields||[]).length>50?`<div style="text-align:center;font-size:0.6rem;color:var(--text3);padding:0.5rem;font-family:var(--mono)">… ${(pdf.fields||[]).length-50} more fields not shown</div>`:''}
+        </div>
+      </div>
+    </div>`).join('')}
+    <div id="ai-fieldinspector-anchor"></div>
+  `;
+  aiSummary('ai-fieldinspector-anchor',{pdfs_count:d.total_pdfs,pdfs:pdfs.map(p=>({pdf_id:p.pdf_id,total_fields:p.total_fields,has_errors:p.has_errors,case_summary:p.case_summary}))},'Field Inspector');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VECTOR TIMELINE (API 12)
+// ═══════════════════════════════════════════════════════════════
+function buildVtPayload(){
+  const p={api_name:'get_vector_timeline'};
+  const from=document.getElementById('vt-from').value.trim();
+  const to=document.getElementById('vt-to').value.trim();
+  const field=document.getElementById('vt-field').value.trim();
+  const source=document.getElementById('vt-source').value;
+  const event=document.getElementById('vt-event').value;
+  if(from)p.date_from=from;if(to)p.date_to=to;
+  if(field)p.field_name=field;if(source)p.source=source;if(event)p.event_type=event;
+  return p;
+}
+async function runVectortimeline(){
+  hideErr('vectortimeline');setStatus('vectortimeline','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildVtPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('vectortimeline','ok','200 OK');renderVectortimeline(data.data);
+  }catch(e){setStatus('vectortimeline','err','error');showErr('vectortimeline',e.message)}
+}
+function renderVectortimeline(d){
+  const panel=document.getElementById('res-vectortimeline');panel.style.display='block';
+  const timeline=d.timeline||[];const vecs=d.vectors||[];
+  const dbSummary=d.database_summary||{};
+
+  const eventIcon={created:'✦',confidence_decayed:'↓',embedding_regenerated:'⟳'};
+  const eventCls ={created:'created',confidence_decayed:'decayed',embedding_regenerated:'regen'};
+
+  document.getElementById('body-vectortimeline').innerHTML=`
+    <div class="sec-div">vector database summary</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Vectors</div><div class="stat-val text">${num(dbSummary.total_vectors)}</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Confidence</div><div class="stat-val ${colorAcc(dbSummary.avg_confidence)}">${pct(dbSummary.avg_confidence)}</div></div>
+      <div class="stat-card"><div class="stat-label">Filtered Vectors</div><div class="stat-val sky">${d.filtered_vectors_count}</div></div>
+      <div class="stat-card"><div class="stat-label">Timeline Events</div><div class="stat-val violet">${d.timeline_events_count}</div></div>
+    </div>
+
+    ${dbSummary.by_source?`
+    <div class="stats-grid sg-3">
+      <div class="stat-card" style="--accent:var(--sky)"><div class="stat-label">RAG Vectors</div><div class="stat-val sky">${num(dbSummary.by_source.rag)}</div></div>
+      <div class="stat-card" style="--accent:var(--violet)"><div class="stat-label">LLM Vectors</div><div class="stat-val violet">${num(dbSummary.by_source.llm)}</div></div>
+      <div class="stat-card" style="--accent:var(--amber)"><div class="stat-label">Manual Vectors</div><div class="stat-val amber">${num(dbSummary.by_source.manual)}</div></div>
+    </div>`:''}
+
+    ${timeline.length?`
+    <div class="sec-div">event charts</div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Events by Type</div><canvas id="ch-vt-types" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Source Distribution</div><canvas id="ch-vt-src" height="200"></canvas></div>
+    </div>
+
+    <div class="sec-div">timeline (${timeline.length} events)</div>
+    <div style="max-height:500px;overflow-y:auto;padding:0.5rem">
+      ${timeline.slice(0,40).map(ev=>`
+      <div class="vt-event">
+        <div class="vt-dot ${eventCls[ev.event_type]||'created'}">${eventIcon[ev.event_type]||'·'}</div>
+        <div class="vt-body">
+          <div class="vt-event-title">${ev.event_type.replace(/_/g,' ')} — <span style="color:var(--text2)">${ev.field_name||'—'}</span></div>
+          <div class="vt-event-meta">
+            ${fmtTs(ev.timestamp)} · source: ${ev.source||'—'} · doc_type: ${ev.document_type||'—'}
+            ${ev.initial_confidence!=null?` · init_conf: ${pct(ev.initial_confidence)}`:''}
+            ${ev.corrected_to?` → corrected to: <strong style="color:var(--lime)">${ev.corrected_to}</strong>`:''}
+            ${ev.error_type?` · error: ${ev.error_type}`:''}
+          </div>
+        </div>
+      </div>`).join('')}
+      ${timeline.length>40?`<div style="text-align:center;font-size:0.6rem;color:var(--text3);padding:0.5rem;font-family:var(--mono)">… ${timeline.length-40} more events</div>`:''}
+    </div>`:'<div class="empty-state"><div class="empty-icon">⏱</div><div class="empty-text">No timeline events match filters</div></div>'}
+
+    ${vecs.length?`
+    <div class="sec-div">vector details (${vecs.length} filtered)</div>
+    <div class="scroll-x"><table class="data-table">
+      <thead><tr><th>Vector ID</th><th>Field Name</th><th>Source</th><th>Doc Type</th><th>Curr Conf</th><th>Conf Δ</th><th>Stability</th><th>Usage</th><th>Errors</th></tr></thead>
+      <tbody>${vecs.slice(0,30).map(v=>`<tr>
+        <td style="color:var(--text3)">${v.vector_id}</td>
+        <td style="color:var(--text)">${v.field_name}</td>
+        <td><span class="tag ${v.prediction_source==='rag'?'violet':v.prediction_source==='llm'?'sky':'amber'}">${v.prediction_source||'—'}</span></td>
+        <td style="color:var(--text2)">${v.document_type||'—'}</td>
+        <td style="color:var(--${colorAcc(v.current_confidence)})">${pct(v.current_confidence)}</td>
+        <td><span class="delta ${dcls(v.confidence_delta)}">${v.confidence_delta!=null?(v.confidence_delta>0?'+':'')+v.confidence_delta.toFixed(4):'—'}</span></td>
+        <td style="color:var(--${v.stability_score>=0.8?'lime':v.stability_score>=0.5?'amber':'rose'})">${v.stability_score?.toFixed(3)||'—'}</td>
+        <td style="color:var(--text2)">${v.usage_count||0}</td>
+        <td style="color:var(--${(v.total_errors||0)>0?'rose':'lime'})">${v.total_errors||0}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:''}
+    <div id="ai-vectortimeline-anchor"></div>
+  `;
+
+  if(timeline.length){
+    const typeCounts={};timeline.forEach(e=>{typeCounts[e.event_type]=(typeCounts[e.event_type]||0)+1});
+    const tc=Object.entries(typeCounts);
+    mkChart('ch-vt-types',{type:'doughnut',data:{labels:tc.map(([k])=>k.replace(/_/g,' ')),datasets:[{data:tc.map(([,v])=>v),backgroundColor:['rgba(104,211,145,0.7)','rgba(252,129,129,0.7)','rgba(183,148,244,0.7)'],borderColor:['#68d391','#fc8181','#b794f4'],borderWidth:1}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10}}},cutout:'55%'}});
+    const srcCounts={};timeline.forEach(e=>{srcCounts[e.source||'unknown']=(srcCounts[e.source||'unknown']||0)+1});
+    const sc=Object.entries(srcCounts);
+    mkChart('ch-vt-src',{type:'bar',data:{labels:sc.map(([k])=>k),datasets:[{data:sc.map(([,v])=>v),backgroundColor:['rgba(99,179,237,0.5)','rgba(183,148,244,0.5)','rgba(246,173,85,0.5)','rgba(104,211,145,0.5)'],borderColor:['#63b3ed','#b794f4','#f6ad55','#68d391'],borderWidth:1,borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  }
+  aiSummary('ai-vectortimeline-anchor',{database_summary:dbSummary,timeline_events:d.timeline_events_count,vectors_filtered:d.filtered_vectors_count},'Vector Timeline');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SYSTEM INFO
+// ═══════════════════════════════════════════════════════════════
+async function runSysinfo(){
+  hideErr('sysinfo');setStatus('sysinfo','loading','');
+  try{
+    const{ok,status,data}=await callApi({api_name:'get_system_info'});
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('sysinfo','ok','200 OK');renderSysinfo(data.data);
+  }catch(e){setStatus('sysinfo','err','error');showErr('sysinfo',e.message)}
+}
+function renderSysinfo(d){
+  const panel=document.getElementById('res-sysinfo');panel.style.display='block';
+  const s=d.summary||{};const vd=d.vector_db||{};const cats=d.categories||[];const dts=d.document_types||[];const hashes=d.pdf_hashes||[];
+
+  document.getElementById('body-sysinfo').innerHTML=`
+    <div class="sec-div">system snapshot</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total PDFs</div><div class="stat-val text">${num(s.total_pdfs)}</div></div>
+      <div class="stat-card"><div class="stat-label">Submissions</div><div class="stat-val mint">${num(s.total_submissions)}</div></div>
+      <div class="stat-card"><div class="stat-label">Unique Users</div><div class="stat-val sky">${num(s.total_unique_users)}</div></div>
+      <div class="stat-card"><div class="stat-label">Unique Sessions</div><div class="stat-val violet">${num(s.total_unique_sessions)}</div></div>
+    </div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">PDF Hashes</div><div class="stat-val text">${num(s.total_pdf_hashes)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Vectors</div><div class="stat-val lime">${num(s.total_vectors)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${(s.total_errors||0)>0?'rose':'lime'}">${num(s.total_errors)}</div></div>
+      <div class="stat-card"><div class="stat-label">Document Types</div><div class="stat-val amber">${num(s.total_document_types)}</div></div>
+    </div>
+
+    <div class="sec-div">charts</div>
+    <div class="chart-grid-3">
+      <div class="chart-box"><div class="chart-box-title">Vector DB Sources</div><canvas id="ch-sys-vec" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Submissions per Category</div><canvas id="ch-sys-cat" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Errors per Doc Type</div><canvas id="ch-sys-dt" height="200"></canvas></div>
+    </div>
+    <div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">PDF Hashes — Submissions & Errors (top 10)</div><canvas id="ch-sys-hashes" height="150"></canvas></div>
+
+    <div class="sec-div">vector database</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Vectors</div><div class="stat-val lime">${num(vd.total_vectors)}</div></div>
+      <div class="stat-card"><div class="stat-label">RAG Source</div><div class="stat-val violet">${num(vd.sources?.rag)}</div></div>
+      <div class="stat-card"><div class="stat-label">LLM Source</div><div class="stat-val sky">${num(vd.sources?.llm)}</div></div>
+      <div class="stat-card"><div class="stat-label">Manual Source</div><div class="stat-val amber">${num(vd.sources?.manual)}</div></div>
+    </div>
+    ${vd.last_updated?`<div style="font-size:0.58rem;color:var(--text3);margin-bottom:1rem;font-family:var(--mono)">Last updated: ${fmtTs(vd.last_updated)}</div>`:''}
+
+    <div class="sec-div">categories (${cats.length})</div>
+    <div class="scroll-x" style="margin-bottom:1rem"><table class="data-table">
+      <thead><tr><th>Category</th><th>PDFs</th><th>Submissions</th><th>Errors</th><th>Subcategories</th></tr></thead>
+      <tbody>${cats.map(c=>`<tr>
+        <td style="color:var(--text);font-weight:600">${c.category}</td>
+        <td style="color:var(--mint)">${c.pdf_count}</td>
+        <td style="color:var(--text2)">${c.submission_count}</td>
+        <td style="color:var(--${c.total_errors>0?'rose':'lime'})">${c.total_errors}</td>
+        <td style="color:var(--text3)">${c.sub_categories?.join(', ')||'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+
+    <div class="sec-div">pdf hashes (${hashes.length})</div>
+    <div class="scroll-x"><table class="data-table">
+      <thead><tr><th>Hash</th><th>Doc Type</th><th>Category</th><th>PDFs</th><th>Submissions</th><th>Errors</th><th>First Seen</th><th>Last Seen</th></tr></thead>
+      <tbody>${hashes.map(h=>`<tr>
+        <td style="color:var(--text3);font-size:0.58rem">${(h.pdf_hash||'').slice(0,12)}…</td>
+        <td style="color:var(--sky)">${h.document_type||'—'}</td>
+        <td style="color:var(--text2)">${h.category||'—'}</td>
+        <td style="color:var(--text)">${h.pdf_count}</td>
+        <td style="color:var(--text2)">${h.total_submissions}</td>
+        <td style="color:var(--${h.total_errors>0?'rose':'lime'})">${h.total_errors}</td>
+        <td style="color:var(--text3);font-size:0.58rem">${fmtTs(h.first_seen).slice(0,10)}</td>
+        <td style="color:var(--text3);font-size:0.58rem">${fmtTs(h.last_seen).slice(0,10)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div id="ai-sysinfo-anchor"></div>
+  `;
+
+  const vc=vd.sources||{};
+  mkChart('ch-sys-vec',{type:'doughnut',data:{labels:['RAG','LLM','Manual'],datasets:[{data:[vc.rag||0,vc.llm||0,vc.manual||0],backgroundColor:['rgba(183,148,244,0.7)','rgba(99,179,237,0.7)','rgba(246,173,85,0.7)'],borderColor:['#b794f4','#63b3ed','#f6ad55'],borderWidth:1}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10}}},cutout:'55%'}});
+  mkChart('ch-sys-cat',{type:'bar',data:{labels:cats.map(c=>c.category),datasets:[barDs('Submissions',cats.map(c=>c.submission_count),C.sky)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+  mkChart('ch-sys-dt',{type:'bar',data:{labels:dts.map(dt=>dt.document_type.slice(0,16)),datasets:[barDs('Errors',dts.map(dt=>dt.total_errors),C.rose),barDs('Subs',dts.map(dt=>dt.submission_count),C.lime)]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{font:{size:9}}}}}});
+  const top10=[...hashes].sort((a,b)=>b.total_submissions-a.total_submissions).slice(0,10);
+  mkChart('ch-sys-hashes',{type:'bar',data:{labels:top10.map(h=>(h.pdf_hash||'').slice(0,8)+'…'),datasets:[barDs('Subs',top10.map(h=>h.total_submissions),C.mint),barDs('Errors',top10.map(h=>h.total_errors),C.rose)]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{font:{size:9}}}}}});
+
+  aiSummary('ai-sysinfo-anchor',{summary:s,vector_db:vd,categories:cats.length},'System Info');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ERROR ANALYTICS
+// ═══════════════════════════════════════════════════════════════
+function buildErranalPayload(){
+  const p={api_name:'get_error_analytics'};
+  const from=document.getElementById('ea-from').value.trim();const to=document.getElementById('ea-to').value.trim();
+  const cat=document.getElementById('ea-cat').value.trim();const sub=document.getElementById('ea-sub').value.trim();const doc=document.getElementById('ea-doc').value.trim();
+  if(from)p.date_from=from;if(to)p.date_to=to;if(cat)p.category=cat;if(sub)p.subcategory=sub;if(doc)p.doctype=doc;
+  return p;
+}
+async function runErranal(){
+  hideErr('erranal');setStatus('erranal','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildErranalPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('erranal','ok','200 OK');renderErranal(data.data);
+  }catch(e){setStatus('erranal','err','error');showErr('erranal',e.message)}
+}
+function renderErranal(d){
+  const panel=document.getElementById('res-erranal');panel.style.display='block';
+  const bd=d.breakdown||{};const errs=d.errors||[];const fa=d.filters_applied||{};
+
+  document.getElementById('body-erranal').innerHTML=`
+    <div class="sec-div">summary</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Errors</div><div class="stat-val ${d.total_errors>0?'rose':'lime'}">${d.total_errors}</div></div>
+      <div class="stat-card"><div class="stat-label">Categories Hit</div><div class="stat-val text">${(bd.by_category||[]).length}</div></div>
+      <div class="stat-card"><div class="stat-label">Error Types</div><div class="stat-val amber">${(bd.by_error_type||[]).length}</div></div>
+      <div class="stat-card"><div class="stat-label">Case Types</div><div class="stat-val violet">${(bd.by_case_type||[]).length}</div></div>
+    </div>
+    ${Object.values(fa).some(v=>v)?`<div style="font-size:0.61rem;color:var(--text3);margin-bottom:1rem;font-family:var(--mono)">Filters: ${Object.entries(fa).filter(([,v])=>v).map(([k,v])=>`<span class="tag sky">${k}: ${v}</span>`).join('')}</div>`:''}
+
+    ${d.total_errors>0?`
+    <div class="sec-div">breakdown charts</div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Errors by Type</div><canvas id="ch-ea-type" height="200"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Errors by Case Type</div><canvas id="ch-ea-case" height="200"></canvas></div>
+    </div>
+    <div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">Errors by Date</div><canvas id="ch-ea-date" height="140"></canvas></div>
+
+    <div class="sec-div">breakdown tables</div>
+    <div class="chart-grid-2" style="margin-bottom:1rem">
+      <div class="scroll-x"><table class="data-table"><thead><tr><th>Error Type</th><th>Count</th></tr></thead><tbody>
+        ${(bd.by_error_type||[]).map(r=>`<tr><td style="color:var(--rose)">${r.error_type}</td><td style="color:var(--text)">${r.error_count}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="scroll-x"><table class="data-table"><thead><tr><th>Case Type</th><th>Count</th></tr></thead><tbody>
+        ${(bd.by_case_type||[]).map(r=>`<tr><td style="color:var(--violet)">${r.case_type}</td><td style="color:var(--text)">${r.error_count}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div>
+
+    <div class="sec-div">individual errors (${errs.length})</div>
+    <div class="scroll-x"><table class="data-table">
+      <thead><tr><th>Timestamp</th><th>PDF</th><th>Field</th><th>Error Type</th><th>Case</th><th>GPT-4 Correction</th><th>Conf</th></tr></thead>
+      <tbody>${errs.map(e=>`<tr>
+        <td style="color:var(--text3);font-size:0.58rem">${fmtTs(e.timestamp)}</td>
+        <td style="color:var(--text2);font-size:0.58rem">${e.pdf_id||'—'}</td>
+        <td style="color:var(--text)">${e.field_name||'—'}</td>
+        <td style="color:var(--rose)">${e.error_type||'—'}</td>
+        <td style="color:var(--violet)">${e.case_type||'—'}</td>
+        <td style="color:var(--lime)">${e.gpt4_correction||'—'}</td>
+        <td style="color:var(--text3)">${e.gpt4_confidence!=null?pct(e.gpt4_confidence):'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:'<div class="empty-state"><div class="empty-icon">✓</div><div class="empty-text">No errors match current filters</div></div>'}
+    <div id="ai-erranal-anchor"></div>
+  `;
+
+  if(d.total_errors>0){
+    const et=bd.by_error_type||[];
+    mkChart('ch-ea-type',{type:'doughnut',data:{labels:et.map(r=>r.error_type),datasets:[{data:et.map(r=>r.error_count),backgroundColor:et.map((_,i)=>`hsla(${i*55+10},70%,65%,0.7)`),borderColor:et.map((_,i)=>`hsl(${i*55+10},70%,65%)`),borderWidth:1}]},options:{responsive:true,plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:9}}}},cutout:'50%'}});
+    const ct=bd.by_case_type||[];
+    mkChart('ch-ea-case',{type:'bar',data:{labels:ct.map(r=>r.case_type),datasets:[barDs('Count',ct.map(r=>r.error_count),C.violet)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false}}}}});
+    const dd=bd.by_date||[];
+    mkChart('ch-ea-date',{type:'bar',data:{labels:dd.map(r=>r.date),datasets:[barDs('Errors',dd.map(r=>r.error_count),C.rose)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:12}}}}});
+  }
+  aiSummary('ai-erranal-anchor',{total_errors:d.total_errors,breakdown:bd},'Error Analytics');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ERROR RESOLUTION
+// ═══════════════════════════════════════════════════════════════
+function buildErrresolutionPayload(){
+  const p={api_name:'get_error_resolution_report'};
+  const from=document.getElementById('er-from').value.trim();const to=document.getElementById('er-to').value.trim();
+  const hash=document.getElementById('er-hash').value.trim();const kase=document.getElementById('er-case').value;const status=document.getElementById('er-status').value;
+  if(from)p.date_from=from;if(to)p.date_to=to;if(hash)p.pdf_hash=hash;if(kase)p.case_type=kase;if(status)p.status=status;
+  return p;
+}
+async function runErrresolution(){
+  hideErr('errresolution');setStatus('errresolution','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildErrresolutionPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('errresolution','ok','200 OK');renderErrresolution(data.data);
+  }catch(e){setStatus('errresolution','err','error');showErr('errresolution',e.message)}
+}
+function renderErrresolution(d){
+  const panel=document.getElementById('res-errresolution');panel.style.display='block';
+  const sum=d.summary||{};const byType=d.by_error_type||[];const byField=d.by_field||[];
+  const trend=d.trend||[];const unresolved=d.unresolved||[];
+  const resRate=sum.resolution_rate;
+  const totalErr=sum.total_checkpoints??0;
+
+  document.getElementById('body-errresolution').innerHTML=`
+    <div class="sec-div">resolution summary</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Checkpoints</div><div class="stat-val ${totalErr>0?'rose':'lime'}">${num(totalErr)}</div></div>
+      <div class="stat-card"><div class="stat-label">Resolved</div><div class="stat-val lime">${num(sum.resolved)}</div><div class="stat-sub">${pct(resRate)} rate</div></div>
+      <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-val amber">${num(sum.pending)}</div></div>
+      <div class="stat-card"><div class="stat-label">Regressed / Missed</div><div class="stat-val rose">${num((sum.regressed||0)+(sum.missed||0))}</div></div>
+    </div>
+
+    <div class="sec-div">resolution rate</div>
+    ${resRate!=null?`
+    <div class="prog-row" style="margin-bottom:1rem">
+      <span class="prog-label">Resolution</span>
+      <div class="prog-track" style="height:10px"><div class="prog-fill ${resRate>=0.9?'lime':resRate>=0.6?'amber':'rose'}" style="width:${(resRate*100).toFixed(1)}%"></div></div>
+      <span class="prog-val">${pct(resRate)}</span>
+    </div>`:''}
+
+    <div class="sec-div">charts</div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Resolved vs Unresolved</div><canvas id="ch-er-donut" height="200"></canvas></div>
+      ${byType.length?`<div class="chart-box"><div class="chart-box-title">By Error Type</div><canvas id="ch-er-type" height="200"></canvas></div>`:'<div></div>'}
+    </div>
+    ${trend.length?`<div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">Resolution Trend Over Time</div><canvas id="ch-er-trend" height="140"></canvas></div>`:''}
+
+    ${byType.length?`
+    <div class="sec-div">by error type</div>
+    <div class="scroll-x" style="margin-bottom:1.2rem"><table class="data-table">
+      <thead><tr><th>Error Type</th><th>Total</th><th>Resolved</th><th>Unresolved</th><th>Res. Rate</th></tr></thead>
+      <tbody>${byType.map(r=>{const rr=r.total>0?(r.resolved||0)/r.total:0;return`<tr>
+        <td style="color:var(--rose)">${r.error_type}</td>
+        <td style="color:var(--text)">${r.total}</td>
+        <td style="color:var(--lime)">${r.resolved??0}</td>
+        <td style="color:var(--${(r.unresolved||0)>0?'rose':'text3'})">${r.unresolved??0}</td>
+        <td><span class="delta ${rr>=0.9?'pos':rr>=0.5?'neu':'neg'}">${pct(rr)}</span></td>
+      </tr>`;}).join('')}</tbody>
+    </table></div>`:''}
+
+    ${byField.length?`
+    <div class="sec-div">top fields with unresolved errors</div>
+    <div class="scroll-x" style="margin-bottom:1.2rem"><table class="data-table">
+      <thead><tr><th>Field Name</th><th>Total</th><th>Resolved</th><th>Unresolved</th></tr></thead>
+      <tbody>${byField.slice(0,15).map(f=>`<tr>
+        <td style="color:var(--text)">${f.field_name}</td>
+        <td style="color:var(--text2)">${f.total}</td>
+        <td style="color:var(--lime)">${f.resolved??0}</td>
+        <td style="color:var(--${(f.unresolved||0)>0?'rose':'lime'})">${f.unresolved??0}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:''}
+
+    ${unresolved.length?`
+    <div class="sec-div">unresolved errors (${unresolved.length})</div>
+    <div style="max-height:400px;overflow-y:auto">
+      ${unresolved.slice(0,20).map(e=>`<div class="res-card">
+        <div class="res-card-head"><span class="res-card-id">${e.field_name||'unknown field'}</span><span class="tag rose">${e.error_type||e.status||'unresolved'}</span></div>
+        <div class="res-card-body">pdf: ${e.pdf_hash?.slice(0,12)||'—'}… · case: ${e.case_type||'—'} · status: <span style="color:var(--amber)">${e.status||'—'}</span>${e.recorded_at?` · recorded: ${fmtTs(e.recorded_at)}`:''}</div>
+      </div>`).join('')}
+      ${unresolved.length>20?`<div style="font-size:0.6rem;color:var(--text3);padding:0.5rem;font-family:var(--mono)">… ${unresolved.length-20} more</div>`:''}
+    </div>`:''}
+    <div id="ai-errresolution-anchor"></div>
+  `;
+  animateBars('body-errresolution');
+
+  mkChart('ch-er-donut',{type:'doughnut',data:{labels:['Resolved','Regressed','Missed','Pending'],datasets:[{data:[sum.resolved||0,sum.regressed||0,sum.missed||0,sum.pending||0],backgroundColor:['rgba(104,211,145,0.7)','rgba(252,129,129,0.7)','rgba(246,173,85,0.7)','rgba(74,85,104,0.5)'],borderColor:['#68d391','#fc8181','#f6ad55','#4a5568'],borderWidth:1}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10}}},cutout:'55%'}});
+  if(byType.length){mkChart('ch-er-type',{type:'bar',data:{labels:byType.map(r=>r.error_type),datasets:[barDs('Resolved',byType.map(r=>r.resolved||0),C.lime),barDs('Unresolved',byType.map(r=>r.unresolved||0),C.rose)]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{font:{size:9}}}}}})}
+  if(trend.length){mkChart('ch-er-trend',{type:'line',data:{labels:trend.map(t=>t.date),datasets:[{label:'Checked',data:trend.map(t=>t.checked||0),borderColor:C.sky.line,backgroundColor:C.sky.fill,borderWidth:1.5,pointRadius:2,fill:true,tension:0.3},{label:'Resolved',data:trend.map(t=>t.resolved||0),borderColor:C.lime.line,backgroundColor:C.lime.fill,borderWidth:1.5,pointRadius:2,fill:false,tension:0.3}]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:12}}}}})}
+
+  aiSummary('ai-errresolution-anchor',{summary:sum,by_error_type:byType,unresolved_count:unresolved.length},'Error Resolution');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODEL HEALTH
+// ═══════════════════════════════════════════════════════════════
+function buildMhPayload(){
+  const p={api_name:'get_model_health_dashboard',granularity:document.getElementById('mh-gran').value};
+  const from=document.getElementById('mh-from').value.trim();const to=document.getElementById('mh-to').value.trim();
+  if(from)p.date_from=from;if(to)p.date_to=to;
+  return p;
+}
+async function runModelhealth(){
+  hideErr('modelhealth');setStatus('modelhealth','loading','');
+  try{
+    const{ok,status,data}=await callApi(buildMhPayload());
+    if(!ok||data.status!=='success')throw new Error(data.message||`HTTP ${status}`);
+    setStatus('modelhealth','ok','200 OK');renderModelhealth(data.data);
+  }catch(e){setStatus('modelhealth','err','error');showErr('modelhealth',e.message)}
+}
+function healthCls(s){if(!s)return'unknown';const sl=s.toLowerCase();if(sl.includes('healthy')||sl==='ok'||sl==='good')return'healthy';if(sl.includes('degraded')||sl==='warning')return'degraded';if(sl.includes('critical')||sl==='error')return'critical';return'unknown'}
+
+function renderModelhealth(d){
+  const panel=document.getElementById('res-modelhealth');panel.style.display='block';
+  const sum=d.summary||{};const imp=d.improvement||{};const vh=d.vector_health||{};const gran=d.granularity||'day';
+  const daySeries=d.day_series||[];
+  const latest=sum.latest||{};const r7=sum.rolling_7d||{};const r30=sum.rolling_30d||{};
+  const composite=latest.composite_score||r7?.composite_score||null;
+
+  const trendIcon=v=>{if(!v||v.direction==='insufficient_data')return'<span class="trend-stable">–</span>';if(v.direction==='improving')return'<span class="trend-up">↑</span>';if(v.direction==='declining')return'<span class="trend-down">↓</span>';return'<span class="trend-stable">→</span>';};
+
+  document.getElementById('body-modelhealth').innerHTML=`
+    ${composite!=null?`
+    <div class="composite-score">
+      <div class="composite-label">Composite Health Score</div>
+      <div class="composite-val">${(composite*100).toFixed(1)}</div>
+      <div class="composite-sub">weighted avg of accuracy, coverage, confidence, agreement & recovery</div>
+      <div class="composite-bar"><div class="composite-fill" style="width:${(composite*100).toFixed(1)}%"></div></div>
+    </div>`:''}
+
+    <div class="sec-div">date range & granularity</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">From</div><div class="stat-val text" style="font-size:0.85rem">${d.date_range?.from||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">To</div><div class="stat-val text" style="font-size:0.85rem">${d.date_range?.to||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Granularity</div><div class="stat-val sky" style="font-size:1.2rem">${gran}</div></div>
+      <div class="stat-card"><div class="stat-label">Submissions in Range</div><div class="stat-val mint">${num(d.total_submissions_in_range)}</div></div>
+    </div>
+
+    <div class="sec-div">rolling averages</div>
+    <div class="chart-grid-3" style="margin-bottom:0.8rem">
+      <div class="chart-box" style="text-align:center">
+        <div class="chart-box-title">Latest Day</div>
+        <div style="font-family:var(--sans);font-weight:900;font-size:2rem;color:var(--${colorAcc(latest.accuracy_ensemble)})">${pct(latest.accuracy_ensemble)}</div>
+        <div style="font-size:0.6rem;color:var(--text3);font-family:var(--mono)">acc ens · cov: ${pct(latest.coverage_ensemble)}</div>
+        <div style="font-size:0.6rem;color:var(--text3);font-family:var(--mono)">submissions: ${latest.submission_count||0}</div>
+      </div>
+      <div class="chart-box" style="text-align:center">
+        <div class="chart-box-title">7-Day Rolling</div>
+        <div style="font-family:var(--sans);font-weight:900;font-size:2rem;color:var(--${colorAcc(r7.accuracy_ensemble)})">${pct(r7.accuracy_ensemble)}</div>
+        <div style="font-size:0.6rem;color:var(--text3);font-family:var(--mono)">acc ens · cov: ${pct(r7.coverage_ensemble)}</div>
+        <div style="font-size:0.6rem;color:var(--text3);font-family:var(--mono)">submissions: ${r7.submission_count||0}</div>
+      </div>
+      <div class="chart-box" style="text-align:center">
+        <div class="chart-box-title">30-Day Rolling</div>
+        <div style="font-family:var(--sans);font-weight:900;font-size:2rem;color:var(--${colorAcc(r30.accuracy_ensemble)})">${pct(r30.accuracy_ensemble)}</div>
+        <div style="font-size:0.6rem;color:var(--text3);font-family:var(--mono)">acc ens · cov: ${pct(r30.coverage_ensemble)}</div>
+        <div style="font-size:0.6rem;color:var(--text3);font-family:var(--mono)">submissions: ${r30.submission_count||0}</div>
+      </div>
+    </div>
+
+    ${Object.keys(imp).length?`
+    <div class="sec-div">improvement indicators (week-over-week)</div>
+    <div class="stats-grid sg-3">
+      ${Object.entries(imp).map(([metric,data])=>{
+        const wow=data.week_over_week;
+        return`<div class="stat-card"><div class="stat-label">${metric.replace(/_/g,' ')}</div>
+          <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.3rem">
+            <div class="stat-val text" style="font-size:1.1rem">${wow?.recent!=null?(metric.includes('error')?wow.recent.toFixed(1):pct2(wow.recent)):'—'}</div>
+            ${trendIcon(wow)}
+          </div>
+          <div class="stat-sub">${wow?.delta!=null?'Δ '+(wow.delta>0?'+':'')+wow.delta.toFixed(4):'—'} vs prior week</div>
+        </div>`;
+      }).join('')}
+    </div>`:''}
+
+    ${daySeries.length?`
+    <div class="sec-div">performance trends (${daySeries.length} ${gran} buckets)</div>
+    <div class="chart-box" style="margin-bottom:1.2rem"><div class="chart-box-title">Accuracy Trends</div><canvas id="ch-mh-acc" height="160"></canvas></div>
+    <div class="chart-grid-2">
+      <div class="chart-box"><div class="chart-box-title">Coverage & Composite Score</div><canvas id="ch-mh-cov" height="150"></canvas></div>
+      <div class="chart-box"><div class="chart-box-title">Error Count Over Time</div><canvas id="ch-mh-err" height="150"></canvas></div>
+    </div>`:''}
+
+    ${vh.available&&vh.total_vectors>0?`
+    <div class="sec-div">vector health</div>
+    <div class="stats-grid sg-4">
+      <div class="stat-card"><div class="stat-label">Total Vectors</div><div class="stat-val text">${num(vh.total_vectors)}</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Stability</div><div class="stat-val ${vh.avg_stability_score>=0.8?'lime':vh.avg_stability_score>=0.5?'amber':'rose'}">${vh.avg_stability_score?.toFixed(3)||'—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Cold Vectors</div><div class="stat-val ${(vh.cold_vector_pct||0)>0.2?'amber':'lime'}">${vh.cold_vectors||0}</div><div class="stat-sub">${pct(vh.cold_vector_pct)} of total</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Usage Count</div><div class="stat-val sky">${vh.avg_usage_count?.toFixed(1)||'—'}</div></div>
+    </div>
+    ${vh.bottom_10_unstable?.length?`
+    <div class="chart-box" style="margin-bottom:1rem">
+      <div class="chart-box-title">Bottom 10 — Most Unstable Vectors</div>
+      ${vh.bottom_10_unstable.map(v=>`
+      <div class="vec-health-card">
+        <div class="vec-health-header">
+          <div>
+            <div class="vec-field">${v.field_name||'—'}</div>
+            <div class="vec-id">${v.vector_id} · source: ${v.source||'—'}</div>
+          </div>
+          <div class="vec-stability">
+            stability: <span style="color:var(--${v.stability_score>=0.8?'lime':v.stability_score>=0.5?'amber':'rose'})">${v.stability_score?.toFixed(3)||'—'}</span>
+          </div>
+        </div>
+        <div class="prog-row" style="margin:0">
+          <div class="prog-track" style="flex:1">
+            <div class="prog-fill ${v.stability_score>=0.8?'lime':v.stability_score>=0.5?'amber':'rose'}" style="width:${((v.stability_score||0)*100).toFixed(1)}%"></div>
+          </div>
+          <span style="font-size:0.58rem;color:var(--text3);font-family:var(--mono);width:140px;text-align:right">+${v.positive_count} / -${v.negative_count} · used ${v.usage_count}×</span>
+        </div>
+      </div>`).join('')}
+    </div>`:''}
+    `:''}
+    <div id="ai-modelhealth-anchor"></div>
+  `;
+  animateBars('body-modelhealth');
+  if(composite!=null){
+    setTimeout(()=>{
+      const fill=document.querySelector('.composite-fill');
+      if(fill)fill.style.width=`${(composite*100).toFixed(1)}%`;
+    },100);
+  }
+
+  if(daySeries.length){
+    const bucketKey=b=>b.period||b.date||'';
+    const labels=daySeries.map(b=>bucketKey(b));
+    mkChart('ch-mh-acc',{type:'line',data:{labels,datasets:[
+      lineDs('LLM',daySeries.map(b=>((b.accuracy_llm||0)*100)),C.sky,{borderWidth:1.5,pointRadius:1}),
+      lineDs('RAG',daySeries.map(b=>((b.accuracy_rag||0)*100)),C.violet,{borderWidth:1.5,pointRadius:1}),
+      lineDs('Ensemble',daySeries.map(b=>((b.accuracy_ensemble||0)*100)),C.lime,{fill:true,borderWidth:2.5}),
+    ]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:101,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:10}}}}});
+
+    mkChart('ch-mh-cov',{type:'line',data:{labels,datasets:[
+      lineDs('Coverage Ens',daySeries.map(b=>((b.coverage_ensemble||0)*100)),C.mint,{fill:true}),
+      lineDs('Composite×100',daySeries.map(b=>((b.composite_score||0)*100)),C.indigo,{borderDash:[4,2]}),
+    ]},options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:10}}},scales:{y:{min:0,max:105,ticks:{callback:v=>v+'%'},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:10}}}}});
+
+    mkChart('ch-mh-err',{type:'bar',data:{labels,datasets:[barDs('Errors',daySeries.map(b=>b.errors_ensemble||0),C.rose)]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,ticks:{stepSize:1},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:10}}}}});
+  }
+  aiSummary('ai-modelhealth-anchor',{composite_score:composite,rolling_7d:r7,rolling_30d:r30,improvement:imp,vector_health:{total:vh.total_vectors,avg_stability:vh.avg_stability_score}},'Model Health Dashboard');
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// HOME PAGE
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// HOME PAGE
+// ═══════════════════════════════════════════════════════════════
+async function loadHome(){
+  const body = document.getElementById('home-body');
+  const btn  = document.getElementById('home-refresh-btn');
+  const ts   = document.getElementById('home-last-updated');
+  btn.disabled = true;
+  btn.textContent = '↻ loading…';
+
+  body.innerHTML = `<div class="home-loading"><div class="home-loading-inner"><div class="home-spinner"></div><div class="home-loading-text">fetching system state…</div></div></div>`;
+
+  try {
+    // Parallel: global metrics + system info
+    const [globalRes, sysRes] = await Promise.all([
+      callApi({api_name:'get_metrics', metric_type:'global'}),
+      callApi({api_name:'get_system_info'})
+    ]);
+
+    const ok = r => r.ok && r.data?.status === 'success';
+    if(!ok(globalRes) && !ok(sysRes)){
+      throw new Error((globalRes.data?.message || sysRes.data?.message || 'Both APIs failed'));
+    }
+
+    const g  = ok(globalRes) ? globalRes.data.data : null;
+    const si = ok(sysRes)    ? sysRes.data.data    : null;
+
+    renderHome(g, si);
+    ts.textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    body.innerHTML = `
+      <div class="home-empty">
+        <div class="home-empty-icon">⚠</div>
+        <div class="home-empty-text">${e.message}</div>
+        <button class="home-empty-btn" onclick="loadHome()">try again</button>
+      </div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ refresh';
+  }
+}
+
+function renderHome(g, si){
+  const body = document.getElementById('home-body');
+
+  // ── Pull values ──
+  const s   = g?.overall_stats || {};
+  const lr  = g?.llm_vs_rag   || {};
+  const ts  = g?.time_series   || [];
+  const sum = si?.summary      || {};
+  const vd  = si?.vector_db   || {};
+  const cats= si?.categories   || [];
+  const dts = si?.document_types || [];
+  const hashes = si?.pdf_hashes || [];
+
+  const aL  = s.avg_accuracy?.llm;
+  const aR  = s.avg_accuracy?.rag;
+  const aE  = s.avg_accuracy?.ensemble;
+  const cL  = s.avg_coverage?.llm;
+  const cR  = s.avg_coverage?.rag;
+  const cE  = s.avg_coverage?.ensemble;
+  const eE  = s.total_errors?.ensemble ?? 0;
+  const winner = lr.overall_winner?.winner || null;
+
+  // Health classification
+  const healthColor = v => !v&&v!==0 ? 'var(--text3)' : v>=0.98 ? 'var(--lime)' : v>=0.9 ? 'var(--amber)' : 'var(--rose)';
+  const healthBg    = v => !v&&v!==0 ? '' : v>=0.98 ? 'rgba(104,211,145,0.12)' : v>=0.9 ? 'rgba(246,173,85,0.1)' : 'rgba(252,129,129,0.1)';
+  const healthLabel = v => !v&&v!==0 ? 'unknown' : v>=0.98 ? 'excellent' : v>=0.9 ? 'good' : v>=0.75 ? 'fair' : 'poor';
+
+  // recent 30 entries for sparkline
+  const recent = ts.slice(-30);
+  const recent5 = ts.slice(-5);
+
+  body.innerHTML = `
+    <!-- HERO ROW -->
+    <div class="home-hero">
+      <div class="home-hero-card" style="--hc:var(--lime);--hc-glow:rgba(104,211,145,0.08)">
+        <div class="home-hero-label">Ensemble Accuracy</div>
+        <div class="home-hero-val" style="color:${healthColor(aE)}">${aE!=null?(aE*100).toFixed(1)+'%':'—'}</div>
+        <div class="home-hero-sub">LLM: ${aL!=null?(aL*100).toFixed(2)+'%':'—'} &nbsp;·&nbsp; RAG: ${aR!=null?(aR*100).toFixed(2)+'%':'—'}</div>
+        ${aE!=null?`<div class="home-hero-pill" style="background:${healthBg(aE)};color:${healthColor(aE)};border:1px solid ${healthColor(aE).replace(')',',0.3)').replace('var(','rgba(').replace(')',',0.3)')}">
+          <div style="width:5px;height:5px;border-radius:50%;background:${healthColor(aE)}"></div> ${healthLabel(aE)}
+        </div>`:''}
+      </div>
+      <div class="home-hero-card" style="--hc:var(--mint);--hc-glow:rgba(79,209,197,0.08)">
+        <div class="home-hero-label">Ensemble Coverage</div>
+        <div class="home-hero-val" style="color:var(--mint)">${cE!=null?(cE*100).toFixed(1)+'%':'—'}</div>
+        <div class="home-hero-sub">LLM: ${cL!=null?(cL*100).toFixed(1)+'%':'—'} &nbsp;·&nbsp; RAG: ${cR!=null?(cR*100).toFixed(1)+'%':'—'}</div>
+        <div class="home-hero-pill" style="background:rgba(79,209,197,0.12);color:var(--mint);border:1px solid rgba(79,209,197,0.3)">
+          <div style="width:5px;height:5px;border-radius:50%;background:var(--mint)"></div> ${s.total_pdfs_processed??0} pdfs processed
+        </div>
+      </div>
+      <div class="home-hero-card" style="--hc:var(--${eE>0?'rose':'lime'});--hc-glow:rgba(${eE>0?'252,129,129':'104,211,145'},0.08)">
+        <div class="home-hero-label">Total Errors</div>
+        <div class="home-hero-val" style="color:var(--${eE>0?'rose':'lime'})">${num(eE)}</div>
+        <div class="home-hero-sub">agreement: ${pct(s.agreement_rate)} &nbsp;·&nbsp; conflict: ${pct(s.conflict_rate)}</div>
+        ${winner?`<div class="home-winner-badge" style="background:${winner==='llm'?'rgba(99,179,237,0.12)':winner==='rag'?'rgba(183,148,244,0.12)':'rgba(246,173,85,0.1)'};color:var(--${winner==='llm'?'sky':winner==='rag'?'violet':'amber'});border:1px solid var(--${winner==='llm'?'sky':winner==='rag'?'violet':'amber'})">
+          ⬡ ${winner.toUpperCase()} overall winner
+        </div>`:''}
+      </div>
+    </div>
+
+    <!-- MINI STATS ROW -->
+    <div class="home-row home-row-4" style="margin-bottom:1.2rem">
+      <div class="home-mini-card" style="--mc:var(--sky)"><div class="home-mini-label">Total PDFs</div><div class="home-mini-val" style="color:var(--sky)">${num(sum.total_pdfs??s.total_pdfs_processed)}</div><div class="home-mini-sub">unique hashes: ${num(sum.total_pdf_hashes)}</div></div>
+      <div class="home-mini-card" style="--mc:var(--violet)"><div class="home-mini-label">Unique Users</div><div class="home-mini-val" style="color:var(--violet)">${num(sum.total_unique_users)}</div><div class="home-mini-sub">sessions: ${num(sum.total_unique_sessions)}</div></div>
+      <div class="home-mini-card" style="--mc:var(--amber)"><div class="home-mini-label">Doc Types</div><div class="home-mini-val" style="color:var(--amber)">${num(sum.total_document_types)}</div><div class="home-mini-sub">categories: ${num(sum.total_categories)}</div></div>
+      <div class="home-mini-card" style="--mc:var(--lime)"><div class="home-mini-label">Total Vectors</div><div class="home-mini-val" style="color:var(--lime)">${num(sum.total_vectors??vd.total_vectors)}</div><div class="home-mini-sub">rag: ${num(vd.sources?.rag)} · llm: ${num(vd.sources?.llm)}</div></div>
+    </div>
+
+    <!-- CHARTS ROW 1 -->
+    <div class="home-chart-row home-chart-row-3" style="margin-bottom:1.2rem">
+      <div class="home-chart-box">
+        <div class="home-chart-title">Accuracy trend — last ${recent.length} submissions</div>
+        <canvas id="hc-trend" height="160"></canvas>
+      </div>
+      <div class="home-chart-box">
+        <div class="home-chart-title">Vector sources</div>
+        <canvas id="hc-vec" height="160"></canvas>
+      </div>
+      <div class="home-chart-box">
+        <div class="home-chart-title">LLM vs RAG</div>
+        <canvas id="hc-lvr" height="160"></canvas>
+      </div>
+    </div>
+
+    <!-- CHARTS ROW 2 -->
+    <div class="home-chart-row home-chart-row-2" style="margin-bottom:1.2rem">
+      <div class="home-chart-box">
+        <div class="home-chart-title">Submissions per category</div>
+        <canvas id="hc-cat" height="180"></canvas>
+      </div>
+      <div class="home-chart-box">
+        <div class="home-chart-title">Top doc types — submission count</div>
+        <canvas id="hc-dt" height="180"></canvas>
+      </div>
+    </div>
+
+    <!-- BOTTOM ROW -->
+    <div class="home-row home-row-3">
+      <!-- Recent activity -->
+      <div class="home-chart-box" style="grid-column:span 2">
+        <div class="home-chart-title">Recent submissions</div>
+        <div class="home-activity">
+          ${recent.slice(-20).reverse().map(e=>{
+            const hasErr=(e.errors_ensemble||0)>0;
+            const acc=e.accuracy_ensemble;
+            return `<div class="home-activity-row">
+              <div class="home-activity-ts">${fmtTs(e.timestamp).slice(5,16)}</div>
+              <div class="home-activity-id">${e.submission_id||e.user_id+'/'+e.pdf_id}</div>
+              <div class="home-activity-acc" style="color:${acc>=0.98?'var(--lime)':acc>=0.9?'var(--amber)':'var(--rose)'}">${pct(acc)}</div>
+              <div class="home-activity-dot ${hasErr?'err':'ok'}"></div>
+            </div>`;
+          }).join('') || '<div style="font-size:0.62rem;color:var(--text3);padding:0.5rem;font-family:var(--mono)">No submissions yet</div>'}
+        </div>
+      </div>
+
+      <!-- Vector coverage + error summary -->
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        <div class="home-chart-box" style="flex:1">
+          <div class="home-chart-title">Recovery rates</div>
+          <div class="home-vec-bar">
+            <span class="home-vec-label">RAG recov.</span>
+            <div class="home-vec-track"><div class="home-vec-fill" style="width:${((s.recovery?.rag_recovers_llm_misses||0)*100).toFixed(1)}%;background:linear-gradient(90deg,var(--violet),var(--mint))"></div></div>
+            <span class="home-vec-val">${pct(s.recovery?.rag_recovers_llm_misses)}</span>
+          </div>
+          <div class="home-vec-bar">
+            <span class="home-vec-label">LLM recov.</span>
+            <div class="home-vec-track"><div class="home-vec-fill" style="width:${((s.recovery?.llm_recovers_rag_misses||0)*100).toFixed(1)}%;background:linear-gradient(90deg,var(--sky2),var(--sky))"></div></div>
+            <span class="home-vec-val">${pct(s.recovery?.llm_recovers_rag_misses)}</span>
+          </div>
+          <div class="home-vec-bar" style="margin-top:0.3rem">
+            <span class="home-vec-label">Agree.</span>
+            <div class="home-vec-track"><div class="home-vec-fill" style="width:${((s.agreement_rate||0)*100).toFixed(1)}%;background:linear-gradient(90deg,var(--lime),var(--mint))"></div></div>
+            <span class="home-vec-val">${pct(s.agreement_rate)}</span>
+          </div>
+          <div class="home-vec-bar">
+            <span class="home-vec-label">Conflict</span>
+            <div class="home-vec-track"><div class="home-vec-fill" style="width:${((s.conflict_rate||0)*100).toFixed(1)}%;background:linear-gradient(90deg,var(--rose),var(--amber))"></div></div>
+            <span class="home-vec-val">${pct(s.conflict_rate)}</span>
+          </div>
+        </div>
+
+        <div class="home-chart-box" style="flex:1">
+          <div class="home-chart-title">Errors by model</div>
+          ${[['LLM','var(--sky)',s.total_errors?.llm],['RAG','var(--violet)',s.total_errors?.rag],['Ensemble','var(--lime)',s.total_errors?.ensemble]].map(([label,color,count])=>`
+          <div class="home-err-row">
+            <div class="home-err-dot" style="background:${color}"></div>
+            <span class="home-err-label">${label}</span>
+            <span class="home-err-count" style="color:${(count||0)>0?'var(--rose)':'var(--lime)'}">${num(count??0)}</span>
+          </div>`).join('')}
+          <div style="margin-top:0.7rem;font-size:0.55rem;color:var(--text3);font-family:var(--mono)">total errors across all submissions</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ── Draw charts ──
+  setTimeout(()=>{
+    // Trend chart
+    if(recent.length){
+      mkChart('hc-trend',{type:'line',data:{
+        labels:recent.map(e=>fmtTs(e.timestamp).slice(5,10)),
+        datasets:[
+          lineDs('Ensemble',recent.map(e=>(e.accuracy_ensemble||0)*100),C.lime,{fill:true,borderWidth:2.5}),
+          lineDs('LLM',recent.map(e=>(e.accuracy_llm||0)*100),C.sky,{borderWidth:1.5,pointRadius:0}),
+          lineDs('RAG',recent.map(e=>(e.accuracy_rag||0)*100),C.violet,{borderWidth:1.5,pointRadius:0}),
+        ]
+      },options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:8,padding:10,font:{size:9}}}},scales:{y:{min:50,max:101,ticks:{callback:v=>v+'%',font:{size:9}},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{maxTicksLimit:8,font:{size:9}}}}}});
+    }
+
+    // Vector source donut
+    const vs = vd.sources||{};
+    if(vs.rag||vs.llm||vs.manual){
+      mkChart('hc-vec',{type:'doughnut',data:{
+        labels:['RAG','LLM','Manual'],
+        datasets:[{data:[vs.rag||0,vs.llm||0,vs.manual||0],
+          backgroundColor:['rgba(183,148,244,0.7)','rgba(99,179,237,0.7)','rgba(246,173,85,0.7)'],
+          borderColor:['#b794f4','#63b3ed','#f6ad55'],borderWidth:1}]
+      },options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:9,padding:8,font:{size:9}}}},cutout:'60%'}});
+    }
+
+    // LLM vs RAG bar
+    if(aL!=null){
+      mkChart('hc-lvr',{type:'bar',data:{
+        labels:['Accuracy','Coverage','Confidence'],
+        datasets:[
+          barDs('LLM',[(aL||0)*100,(cL||0)*100,(s.avg_confidence?.llm||0)*100],C.sky),
+          barDs('RAG',[(aR||0)*100,(cR||0)*100,(s.avg_confidence?.rag||0)*100],C.violet),
+        ]
+      },options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:8,padding:8,font:{size:9}}}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:9}},grid:{color:'#252d3d'}},x:{grid:{display:false},ticks:{font:{size:9}}}}}});
+    }
+
+    // Categories bar
+    if(cats.length){
+      mkChart('hc-cat',{type:'bar',data:{
+        labels:cats.map(c=>c.category),
+        datasets:[
+          barDs('Submissions',cats.map(c=>c.submission_count),C.sky),
+          barDs('Errors',cats.map(c=>c.total_errors),C.rose),
+        ]
+      },options:{responsive:true,plugins:{legend:{position:'top',labels:{boxWidth:8,padding:8,font:{size:9}}}},scales:{y:{min:0,grid:{color:'#252d3d'},ticks:{font:{size:9}}},x:{grid:{display:false},ticks:{font:{size:9}}}}}});
+    }
+
+    // Doc types bar (top 8)
+    if(dts.length){
+      const top = [...dts].sort((a,b)=>b.submission_count-a.submission_count).slice(0,8);
+      mkChart('hc-dt',{type:'bar',data:{
+        labels:top.map(d=>d.document_type.slice(0,14)+(d.document_type.length>14?'…':'')),
+        datasets:[barDs('Submissions',top.map(d=>d.submission_count),C.mint)]
+      },options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,grid:{color:'#252d3d'},ticks:{font:{size:9}}},x:{grid:{display:false},ticks:{font:{size:9}}}}}});
+    }
+
+    // Animate bars
+    document.querySelectorAll('.home-vec-fill').forEach(el=>{
+      const w=el.style.width;el.style.width='0';
+      requestAnimationFrame(()=>setTimeout(()=>el.style.width=w,80));
+    });
+  },80);
+}
+
+
+
+// Auto-load home on page open
+// Auto-load home on page open
+window.addEventListener('DOMContentLoaded', ()=>loadHome());
+
+</script>

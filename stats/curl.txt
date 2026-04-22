@@ -1,0 +1,1 @@
+curl -H "X-Dashboard-Key: D@shB0ard#2026" https://aovrk7xf4r62kfi66f6jidola40nnepx.lambda-url.us-east-1.on.aws/
