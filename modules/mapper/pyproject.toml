@@ -100,6 +100,29 @@ python_functions = ["test_*"]
 addopts = ["-v", "--tb=short"]
 asyncio_mode = "auto"
 
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/venv/*",
+    "*/__pycache__/*",
+    "*/java_utils/*",
+    "*/config_samples/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "\\.\\.\\.",
+]
+show_missing = true
+skip_empty = true
+
 [tool.black]
 line-length = 100
 target-version = ["py39", "py310", "py311"]
