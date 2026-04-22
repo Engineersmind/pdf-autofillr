@@ -6,14 +6,14 @@ Usage:
     ragpdf system-info
     ragpdf metrics --type global
     ragpdf predict --user u1 --session s1 --pdf p1 \
-        --fields ragpdf_data/input/fields/lp_subscription_fields.json \
+        --fields data/input/fields/lp_subscription_fields.json \
         --hash abc123 \
-        --category ragpdf_data/input/pdf_category.json
+        --category data/input/pdf_category.json
     ragpdf feedback --user u1 --session s1 --pdf p1 --errors errors.json
     ragpdf error-analytics --from 2026-01-01T00:00:00Z
 
   --category accepts EITHER:
-    a) a file path:  --category ragpdf_data/input/pdf_category.json   (recommended on Windows)
+    a) a file path:  --category data/input/pdf_category.json   (recommended on Windows)
     b) inline JSON:  --category '{"category":"Finance",...}'          (Linux/Mac only)
 """
 import argparse
@@ -26,7 +26,7 @@ from ragpdf import RAGPDFClient
 def _load_category(value: str) -> dict:
     """
     Accept --category as either:
-      - a path to a JSON file  (ragpdf_data/input/pdf_category.json)
+      - a path to a JSON file  (data/input/pdf_category.json)
       - an inline JSON string  ({"category":"Finance",...})
     Returns a dict. Exits with a clear message on failure.
     """
@@ -58,7 +58,7 @@ def _load_category(value: str) -> dict:
             f"\nERROR: --category could not be parsed.\n"
             f"  Got: {value!r}\n\n"
             f"  On Windows, use a file path instead:\n"
-            f"    --category ragpdf_data/input/pdf_category.json\n\n"
+            f"    --category data/input/pdf_category.json\n\n"
             f"  On Linux/Mac, inline JSON works:\n"
             f"    --category '{{\"category\":\"Finance\",\"sub_category\":\"PE\",\"document_type\":\"Sub\"}}'",
             file=sys.stderr,
@@ -80,7 +80,7 @@ def main():
     p.add_argument(
         "--category", default="{}",
         help=(
-            "File path (recommended on Windows): --category ragpdf_data/input/pdf_category.json  "
+            "File path (recommended on Windows): --category data/input/pdf_category.json  "
             "OR inline JSON (Linux/Mac): --category '{\"category\":\"Finance\",...}'"
         ),
     )

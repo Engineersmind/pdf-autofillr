@@ -17,11 +17,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from src.core.logger import setup_logging
-from src.core.config import settings
+from pdf_autofillr_mapper.core.logger import setup_logging
+from pdf_autofillr_mapper.core.config import settings
 
 # Import platform-agnostic handlers
-from src.handlers.operations import (
+from pdf_autofillr_mapper.handlers.operations import (
     handle_extract_operation,
     handle_map_operation,
     handle_embed_operation,

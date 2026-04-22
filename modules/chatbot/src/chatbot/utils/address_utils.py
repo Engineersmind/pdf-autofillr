@@ -15,7 +15,7 @@ ADDRESS_PATTERNS = [
 def is_address_field(field_path: str) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Return (is_address, address_type, sub_field_name).
-    e.g. "address_registered.address_registered_city_id" → (True, "registered", "city")
+    e.g. "address_registered.address_registered_city_id" -> (True, "registered", "city")
     """
     for pattern, addr_type in ADDRESS_PATTERNS:
         if pattern in field_path:

@@ -4,8 +4,8 @@ Unit tests for SessionManager and _empty_session.
 Covers Issue 9 fix: langchain_buffer removed from _empty_session.
 """
 import pytest
-from src.chatbot.core.session import SessionManager, _empty_session
-from src.chatbot.core.states import State
+from chatbot.core.session import SessionManager, _empty_session
+from chatbot.core.states import State
 
 
 def test_empty_session_has_required_keys():

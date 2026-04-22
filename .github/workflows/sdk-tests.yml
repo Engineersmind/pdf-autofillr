@@ -4,12 +4,12 @@ on:
   push:
     branches-ignore: [main]
     paths:
-      - "modules/mapper/sdk/**"
+      - "sdks/python/**"
       - ".github/workflows/sdk-tests.yml"
   pull_request:
-    branches: [main]
+    branches: [main, dev, prod]
     paths:
-      - "modules/mapper/sdk/**"
+      - "sdks/python/**"
       - ".github/workflows/sdk-tests.yml"
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: modules/mapper/sdk
+        working-directory: sdks/python
 
     steps:
       - name: Checkout code
@@ -44,7 +44,6 @@ jobs:
       - name: Verify package imports cleanly
         run: |
           python -c "
-          from pdf_autofiller_mapper import PDFMapperClient
-          from pdf_autofiller_mapper.exceptions import PDFMapperError, APIError
+          from pdf_autofiller import PDFMapperClient
           print('All imports OK')
           "

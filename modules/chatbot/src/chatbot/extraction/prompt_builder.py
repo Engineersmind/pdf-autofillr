@@ -1,4 +1,4 @@
-# chatbot/extraction/prompt_builder.py
+﻿# chatbot/extraction/prompt_builder.py
 """
 PromptBuilder — builds LLM extraction prompts dynamically from the schema.
 """
@@ -57,7 +57,7 @@ EXTRACTION RULES:
 7. Field keys must EXACTLY match the schema keys provided — no inventing new keys.
 8. If the user says "skip" or "don't have" for a field, do NOT include that field.
 9. Geographic inference: if country is clear from context (e.g., "NYC"), infer "USA".
-10. Negative responses ("no", "n/a", "none") for text fields → omit the field.
+10. Negative responses ("no", "n/a", "none") for text fields -> omit the field.
 
 """
 

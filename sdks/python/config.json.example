@@ -1,0 +1,7 @@
+{
+  "api_url": "http://localhost:8000",
+  "api_key": "",
+  "timeout": 300,
+  "default_user_id": 1,
+  "default_pdf_doc_id": 100
+}

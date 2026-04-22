@@ -7,7 +7,7 @@ on:
       - "modules/mapper/**"
       - ".github/workflows/mapper-tests.yml"
   pull_request:
-    branches: [main]
+    branches: [main, dev, prod]
     paths:
       - "modules/mapper/**"
       - ".github/workflows/mapper-tests.yml"
@@ -51,7 +51,7 @@ jobs:
         run: |
           python -m pytest tests/ \
             --tb=short \
-            --cov=src \
+            --cov=src/pdf_autofillr_mapper \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             -q

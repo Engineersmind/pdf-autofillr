@@ -1,24 +1,28 @@
+# chatbot/src/chatbot/entrypoints/fastapi_app.py
 """
 FastAPI app for pdf-autofillr-chatbot.
 
-Standalone:  chatbot-server
-Mount in your app:
+Standalone via chatbot-server command, or mount in your own app::
+
     from chatbot.entrypoints.fastapi_app import app as chatbot_app
     main_app.mount("/onboarding", chatbot_app)
 """
 from __future__ import annotations
-import os, logging
+
+import os
+import logging
 from typing import Optional
+
 from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from chatbot import chatbotClient, LocalStorage, S3Storage, FormConfig
-from chatbot.limits import RateLimitExceeded
+from chatbot import chatbotClient, FormConfig
+from chatbot.storage.factory import StorageFactory
 
 logger = logging.getLogger(__name__)
 
@@ -29,63 +33,35 @@ app = FastAPI(
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── Client singleton ──────────────────────────────────────────────────────────
-
 _client: Optional[chatbotClient] = None
 
 
 def _build_pdf_filler():
     mode = os.getenv("chatbot_PDF_FILLER", "none").lower()
-    if mode == "none":
+    if mode in ("none", ""):
         return None
-    if mode == "mapper":
+    if mode in ("mapper", "managed"):
         from chatbot.pdf.mapper_filler import MapperPDFFiller
         return MapperPDFFiller(
-            mapper_api_url=os.getenv("MAPPER_API_URL", "http://localhost:8000"),
+            mapper_api_url=os.getenv("MAPPER_API_URL", ""),
             mapper_api_key=os.getenv("MAPPER_API_KEY", ""),
+            config_dir=os.getenv("chatbot_CONFIG_PATH", "./configs"),
         )
-    if mode == "managed":
-        try:
-            from chatbot_managed.filler import chatbotManagedPDFFiller
-        except ImportError:
-            raise ImportError("chatbot_PDF_FILLER=managed requires the chatbot-managed package.")
-        return chatbotManagedPDFFiller(
-            auth0_domain=os.environ["AUTH0_DOMAIN"],
-            auth0_client_id=os.environ["AUTH0_CLIENT_ID"],
-            auth0_client_secret=os.environ["AUTH0_CLIENT_SECRET"],
-            auth0_audience=os.environ["AUTH0_AUDIENCE"],
-            pdf_lambda_url=os.environ["FILL_PDF_LAMBDA_URL"],
-            pdf_api_key=os.environ["PDF_API_KEY"],
-            backend_url=os.getenv("BACKEND_URL", ""),
-            auth_token=os.getenv("AUTH_TOKEN", ""),
-        )
-    raise ValueError(f"Unknown chatbot_PDF_FILLER: {mode!r}. Use: none | mapper | managed")
+    raise ValueError(f"Unknown chatbot_PDF_FILLER: {mode!r}. Use: none | mapper | custom")
 
 
 def get_client() -> chatbotClient:
     global _client
     if _client is None:
-        if os.getenv("chatbot_STORAGE", "local").lower() == "s3":
-            storage = S3Storage(
-                output_bucket=os.environ["AWS_OUTPUT_BUCKET"],
-                config_bucket=os.environ["AWS_CONFIG_BUCKET"],
-                region=os.getenv("AWS_REGION", "us-east-1"),
-            )
-        else:
-            storage = LocalStorage(
-                data_path=os.getenv("chatbot_DATA_PATH", "./chatbot_data"),
-                config_path=os.getenv("chatbot_CONFIG_PATH", "./configs"),
-            )
+        storage = StorageFactory.create()
         _client = chatbotClient(
-            openai_api_key=os.environ["OPENAI_API_KEY"],
+            # api_key read from CHATBOT_LLM_API_KEY env var automatically
             storage=storage,
             form_config=FormConfig.from_directory(os.getenv("chatbot_CONFIG_PATH", "./configs")),
             pdf_filler=_build_pdf_filler(),
         )
     return _client
 
-
-# ── Models ────────────────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
     user_id: str
@@ -108,8 +84,6 @@ class SessionDataResponse(BaseModel):
     data: Optional[dict]
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
 @app.get("/")
 def root():
     return {"name": "pdf-autofillr-chatbot", "version": "0.1.0", "docs": "/docs"}
@@ -123,11 +97,13 @@ def chat(req: ChatRequest):
         if pdf_path:
             client.create_session(req.user_id, req.session_id, pdf_path=pdf_path)
         response, complete, data = client.send_message(req.user_id, req.session_id, req.message)
-        return ChatResponse(user_id=req.user_id, session_id=req.session_id,
-                            response=response, session_complete=complete,
-                            filled_data=data if complete else None)
-    except RateLimitExceeded as e:
-        raise HTTPException(status_code=429, detail=str(e))
+        return ChatResponse(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            response=response,
+            session_complete=complete,
+            filled_data=data if complete else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -165,9 +141,12 @@ def delete_session(user_id: str, session_id: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.1.0",
-            "storage": os.getenv("chatbot_STORAGE", "local"),
-            "pdf_filler": os.getenv("chatbot_PDF_FILLER", "none")}
+    return {
+        "status": "ok",
+        "version": "0.1.0",
+        "storage": os.getenv("chatbot_STORAGE", "local"),
+        "pdf_filler": os.getenv("chatbot_PDF_FILLER", "none"),
+    }
 
 
 @app.exception_handler(Exception)

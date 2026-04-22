@@ -1,7 +1,15 @@
 # chatbot/storage/s3_storage.py
 """
-S3Storage — developer's own S3 buckets backend.
-Identical file layout to LocalStorage.
+S3Storage — AWS S3 backend.
+Identical JSON key layout to LocalStorage.
+
+Key pattern:
+    {user_id}/sessions/{session_id}/{filename}
+    {user_id}/{filename}
+
+Requires: pip install "pdf-autofillr-chatbot[s3]"
+Env vars: AWS_OUTPUT_BUCKET, AWS_CONFIG_BUCKET, AWS_REGION,
+          AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (or AWS_PROFILE or IAM role)
 """
 from __future__ import annotations
 
@@ -19,24 +27,12 @@ except ImportError:
 
 
 class S3Storage(StorageBackend):
-    """
-    Uses two S3 buckets:
 
-    - ``output_bucket``: session data (read/write)
-    - ``config_bucket``: form config files (read-only)
-
-    AWS credentials via standard boto3 chain (env vars, ~/.aws/credentials, IAM role).
-    """
-
-    def __init__(
-        self,
-        output_bucket: str,
-        config_bucket: str,
-        region: str = "us-east-1",
-    ):
+    def __init__(self, output_bucket: str, config_bucket: str, region: str = "us-east-1"):
         if not _BOTO3_AVAILABLE:
             raise ImportError(
-                "boto3 is required for S3Storage. Install it with: pip install chatbot-sdk[s3]"
+                "boto3 is required for S3Storage.\n"
+                "Install: pip install 'pdf-autofillr-chatbot[s3]'"
             )
         self.output_bucket = output_bucket
         self.config_bucket = config_bucket
@@ -49,15 +45,14 @@ class S3Storage(StorageBackend):
             resp = self.s3.get_object(Bucket=bucket, Key=key)
             return json.loads(resp["Body"].read().decode("utf-8"))
         except ClientError as e:
-            if e.response["Error"]["Code"] == "NoSuchKey":
+            if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
                 return None
             raise
 
     def _put(self, bucket: str, key: str, data: Any) -> bool:
         try:
             self.s3.put_object(
-                Bucket=bucket,
-                Key=key,
+                Bucket=bucket, Key=key,
                 Body=json.dumps(data, ensure_ascii=False, indent=2, default=str),
                 ContentType="application/json",
             )
@@ -65,8 +60,6 @@ class S3Storage(StorageBackend):
         except ClientError as e:
             print(f"❌ S3Storage put error {key}: {e}")
             return False
-
-    # ── Key patterns ───────────────────────────────────────────────────
 
     def _sk(self, user_id: str, session_id: str, filename: str) -> str:
         return f"{user_id}/sessions/{session_id}/{filename}"
@@ -140,26 +133,31 @@ class S3Storage(StorageBackend):
 
     # ── Utility ────────────────────────────────────────────────────────
 
-    def list_user_sessions(self, user_id):
+    def list_user_sessions(self, user_id: str) -> List[str]:
+        """Paginated — handles buckets with >1000 objects."""
         prefix = f"{user_id}/sessions/"
+        sessions = []
+        paginator = self.s3.get_paginator("list_objects_v2")
         try:
-            resp = self.s3.list_objects_v2(Bucket=self.output_bucket, Prefix=prefix, Delimiter="/")
-            return [
-                p["Prefix"].replace(prefix, "").rstrip("/")
-                for p in resp.get("CommonPrefixes", [])
-            ]
+            for page in paginator.paginate(Bucket=self.output_bucket, Prefix=prefix, Delimiter="/"):
+                for cp in page.get("CommonPrefixes", []):
+                    sessions.append(cp["Prefix"].replace(prefix, "").rstrip("/"))
         except ClientError:
             return []
+        return sessions
 
-    def delete_session(self, user_id, session_id):
+    def delete_session(self, user_id: str, session_id: str) -> bool:
+        """Paginated delete — handles sessions with >1000 objects."""
         prefix = f"{user_id}/sessions/{session_id}/"
+        paginator = self.s3.get_paginator("list_objects_v2")
         try:
-            resp = self.s3.list_objects_v2(Bucket=self.output_bucket, Prefix=prefix)
-            if "Contents" in resp:
-                self.s3.delete_objects(
-                    Bucket=self.output_bucket,
-                    Delete={"Objects": [{"Key": o["Key"]} for o in resp["Contents"]]},
-                )
+            for page in paginator.paginate(Bucket=self.output_bucket, Prefix=prefix):
+                objects = page.get("Contents", [])
+                if objects:
+                    self.s3.delete_objects(
+                        Bucket=self.output_bucket,
+                        Delete={"Objects": [{"Key": o["Key"]} for o in objects]},
+                    )
             return True
         except ClientError as e:
             print(f"❌ S3Storage delete error: {e}")
@@ -174,8 +172,7 @@ class S3Storage(StorageBackend):
         return data
 
     def load_investor_type_config(self, filename: str) -> dict:
-        key = f"global_investor_type_keys/{filename}"
-        data = self._get(self.config_bucket, key)
+        data = self._get(self.config_bucket, f"global_investor_type_keys/{filename}")
         if data is None:
             return self.load_config("form_keys.json")
         return data

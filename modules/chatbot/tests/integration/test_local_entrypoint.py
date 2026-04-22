@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def local_client(config_path, temp_dir):
     """chatbotClient wired for local entrypoint tests."""
-    from src.chatbot import chatbotClient, LocalStorage, FormConfig
+    from chatbot import chatbotClient, LocalStorage, FormConfig
 
     storage = LocalStorage(
         data_path=str(temp_dir / "entrypoint_data"),
@@ -23,7 +23,7 @@ def local_client(config_path, temp_dir):
     form_config = FormConfig.from_directory(config_path)
 
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({"full_name": "Bob Test"}, 0.05, "llm"),
     ):
         client = chatbotClient(

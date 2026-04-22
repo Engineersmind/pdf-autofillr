@@ -1,17 +1,16 @@
-# chatbot/client.py
+# chatbot/src/chatbot/client.py
 """
 chatbotClient — single entry point for the chatbot SDK.
 """
-
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+import os
+from typing import Optional, Tuple
 
 from chatbot.config.form_config import FormConfig
 from chatbot.config.settings import Settings
 from chatbot.core.engine import ConversationEngine
 from chatbot.core.session import SessionManager
-from chatbot.limits.rate_limiter import RateLimiter, RateLimitExceeded
 from chatbot.logging.debug_logger import DebugLogger
 from chatbot.pdf.interface import PDFFillerInterface
 from chatbot.storage.base import StorageBackend
@@ -27,60 +26,53 @@ class chatbotClient:
     Example::
 
         client = chatbotClient(
-            openai_api_key="sk-...",
             storage=LocalStorage("./data", "./configs"),
             form_config=FormConfig.from_directory("./configs"),
-            pdf_filler=None,
         )
+        # api_key is optional — reads CHATBOT_LLM_API_KEY from env if not set.
+        # LLM model is controlled by CHATBOT_LLM_MODEL in .env.
 
         response, complete, data = client.send_message(
             user_id="investor_123",
             session_id="session_abc",
-            message="Hello",
+            message="",
         )
     """
 
     def __init__(
         self,
-        openai_api_key: str,
         storage: StorageBackend,
         form_config: FormConfig,
+        api_key: Optional[str] = None,
         pdf_filler: Optional[PDFFillerInterface] = None,
         telemetry: Optional[TelemetryConfig] = None,
         document_context: Optional[DocumentContext] = None,
-        rate_limiter: Optional[RateLimiter] = None,
         prompt_builder=None,
         settings: Optional[Settings] = None,
     ):
         self.settings = settings or Settings()
         self.storage = storage
         self.form_config = form_config
-        self.openai_api_key = openai_api_key
-        self.rate_limiter = rate_limiter
+        self.api_key = api_key or os.getenv("CHATBOT_LLM_API_KEY")
 
-        # Telemetry
         self.telemetry = TelemetryCollector(
             config=telemetry,
             document_context=document_context,
         )
 
-        # Core session manager
         self.session_manager = SessionManager(storage=storage)
 
-        # Conversation engine
         self.engine = ConversationEngine(
             storage=storage,
             form_config=form_config,
-            openai_api_key=openai_api_key,
+            api_key=self.api_key,
             pdf_filler=pdf_filler,
             telemetry=self.telemetry,
             prompt_builder=prompt_builder,
             settings=self.settings,
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    # ── Public API ────────────────────────────────────────────────────
 
     def send_message(
         self,
@@ -91,23 +83,11 @@ class chatbotClient:
         """
         Process one message turn for a user.
 
-        Args:
-            user_id:    Unique identifier for the investor.
-            session_id: Unique identifier for this conversation session.
-            message:    The user's raw text input.
-
         Returns:
             (response_text, session_complete, session_data_if_complete)
-
-        Raises:
-            RateLimitExceeded: If any rate limit is breached.
-            ValueError: If user_id or session_id are empty.
         """
         if not user_id or not session_id:
             raise ValueError("user_id and session_id are required")
-
-        if self.rate_limiter:
-            self.rate_limiter.check(user_id=user_id, session_id=session_id)
 
         debug = DebugLogger(user_id=user_id, session_id=session_id)
 
@@ -118,15 +98,7 @@ class chatbotClient:
             debug=debug,
         )
 
-        # FIX C: increment turn counter AFTER successful processing so
-        # messages_per_session limit is actually enforced on the next call.
-        if self.rate_limiter:
-            self.rate_limiter.increment_message(session_id=session_id)
-
-        # Save debug log
-        self.storage.save_debug_conversation(
-            user_id, session_id, debug.to_dict()
-        )
+        self.storage.save_debug_conversation(user_id, session_id, debug.to_dict())
 
         data = None
         if session_complete:
@@ -142,15 +114,7 @@ class chatbotClient:
     ) -> None:
         """
         Explicitly create a session and optionally associate a PDF path.
-
-        If not called, the session is created automatically on the first
-        ``send_message`` call.
-
-        Args:
-            user_id:    Unique identifier for the investor.
-            session_id: Unique identifier for this conversation session.
-            pdf_path:   Local filesystem path or S3 key to the blank PDF.
-                        Required when using a PDFFillerInterface.
+        Auto-called on first send_message if not called.
         """
         self.session_manager.create_session(
             user_id=user_id,
@@ -159,24 +123,11 @@ class chatbotClient:
         )
 
     def get_fill_report(self, user_id: str, session_id: str) -> Optional[dict]:
-        """
-        Return the fill statistics report for a completed session.
-
-        The report shows how many fields were in the config vs how many
-        were filled, broken down by mandatory/optional.
-
-        Returns:
-            Report dict, or None if session not complete yet.
-        """
+        """Return fill statistics report for a completed session."""
         return self.storage.get_fill_report(user_id, session_id)
 
     def get_fill_report_text(self, user_id: str, session_id: str) -> Optional[str]:
-        """
-        Return the fill report as a human-readable text string.
-
-        Returns:
-            Formatted text, or None if session not complete yet.
-        """
+        """Return fill report as formatted text."""
         report = self.get_fill_report(user_id, session_id)
         if report is None:
             return None
@@ -184,15 +135,10 @@ class chatbotClient:
         return FillReport.format_text(report)
 
     def get_session_data(self, user_id: str, session_id: str) -> Optional[dict]:
-        """
-        Return the final filled data dict for a completed session.
-
-        Returns:
-            The ``final_output_flat.json`` dict, or None if not complete yet.
-        """
+        """Return final_output_flat for a completed session."""
         return self.storage.get_final_output_flat(user_id, session_id)
 
-    def list_sessions(self, user_id: str) -> list[str]:
+    def list_sessions(self, user_id: str) -> list:
         """Return all session IDs for a user."""
         return self.storage.list_user_sessions(user_id)
 

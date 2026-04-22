@@ -42,9 +42,9 @@ class DebugLogger:
                     "traceback": traceback.format_exc(),
                 }
             self.entries.append(entry)
-
-            emoji = {"info": "ℹ️", "warning": "⚠️", "error": "❌"}.get(level, "ℹ️")
-            print(f"{emoji} [{category.upper()}] {message}")
+            # Internal debug entries are written to debug_conversation.json only.
+            # They are NOT printed to terminal — the local entrypoint handles
+            # terminal output exclusively through its own terminal_log.json writer.
 
     def to_dict(self) -> dict:
         with self._lock:

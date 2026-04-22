@@ -113,7 +113,7 @@ def config_path(temp_dir):
 @pytest.fixture
 def local_storage(temp_dir):
     """LocalStorage backed by temp_dir."""
-    from src.chatbot.storage.local_storage import LocalStorage
+    from chatbot.storage.local_storage import LocalStorage
     return LocalStorage(
         data_path=str(temp_dir / "data"),
         config_path=str(temp_dir / "configs"),
@@ -123,7 +123,7 @@ def local_storage(temp_dir):
 @pytest.fixture
 def form_config(config_path):
     """FormConfig loaded from minimal config fixtures."""
-    from src.chatbot.config.form_config import FormConfig
+    from chatbot.config.form_config import FormConfig
     return FormConfig.from_directory(config_path)
 
 
@@ -135,7 +135,7 @@ def mock_openai():
     """
     fake_response = {"full_name": "Alice Test", "email": "alice@test.com"}
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=(fake_response, 0.05, "llm"),
     ):
         yield fake_response
@@ -148,7 +148,7 @@ def minimal_client(local_storage, form_config, mock_openai):
     Safe to use in unit tests — never calls OpenAI or touches the filesystem
     outside temp_dir.
     """
-    from src.chatbot import chatbotClient
+    from chatbot import chatbotClient
     return chatbotClient(
         openai_api_key="sk-test-key",
         storage=local_storage,
@@ -170,7 +170,7 @@ def session_id():
 @pytest.fixture
 def sample_session(user_id, session_id):
     """A minimal session dict at INIT state."""
-    from src.chatbot.core.states import State
+    from chatbot.core.states import State
     return {
         "user_id": user_id,
         "session_id": session_id,
@@ -192,7 +192,7 @@ def sample_session(user_id, session_id):
 @pytest.fixture
 def investor_types():
     """All 10 investor type strings from states.py."""
-    from src.chatbot.core.states import INVESTOR_TYPES
+    from chatbot.core.states import INVESTOR_TYPES
     return list(INVESTOR_TYPES)
 
 
@@ -215,7 +215,7 @@ def fastapi_client(config_path, temp_dir):
     api_server._client = None
 
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({"full_name": "API Test User"}, 0.1, "llm"),
     ):
         with TestClient(api_server.app) as tc:

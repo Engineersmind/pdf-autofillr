@@ -5,7 +5,7 @@ These tests spin up the app with TestClient (no real server required)
 and cover the full HTTP layer with mocked LLM responses.
 
 Marked as 'integration' because they exercise the full stack:
-    HTTP → FastAPI → chatbotClient → ConversationEngine → LocalStorage
+    HTTP -> FastAPI -> chatbotClient -> ConversationEngine -> LocalStorage
 """
 import pytest
 from unittest.mock import patch
@@ -97,15 +97,15 @@ def test_fill_report_not_found_for_incomplete_session(fastapi_client):
 
 def test_rate_limit_returns_429(fastapi_client):
     """Simulate hitting the messages_per_session rate limit."""
-    from src.chatbot.limits import RateLimitExceeded
+    from chatbot.limits import RateLimitExceeded
 
     with patch(
-        "src.chatbot.limits.rate_limiter.RateLimiter.check",
+        "chatbot.limits.rate_limiter.RateLimiter.check",
         side_effect=RateLimitExceeded("limit reached", "messages_per_session"),
     ):
         # Need to get the client and patch its rate_limiter
         import api_server
-        import src.chatbot.limits.rate_limiter as rl_mod
+        import chatbot.limits.rate_limiter as rl_mod
 
         old_client = api_server._client
         try:

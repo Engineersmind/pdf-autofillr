@@ -1,4 +1,4 @@
-# chatbot/config/settings.py
+# chatbot/src/chatbot/config/settings.py
 """SDK runtime settings — reads from environment variables or .env file."""
 from __future__ import annotations
 
@@ -10,134 +10,88 @@ class Settings:
     """SDK runtime settings. All values readable from environment variables."""
 
     def __init__(self, validate: bool = True):
-        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-        self.storage_type: str = os.getenv("chatbot_STORAGE", "local")
-        self.data_path: str = os.getenv("chatbot_DATA_PATH", "./chatbot_data")
+        self.llm_model: str = os.getenv("CHATBOT_LLM_MODEL", "openai/gpt-4o-mini")
+        self.llm_api_key: str = os.getenv("CHATBOT_LLM_API_KEY", "")
+        self.storage_type: str = os.getenv("chatbot_STORAGE", "local").lower()
+        self.data_path: str = os.getenv("chatbot_DATA_PATH", "./data/chatbot")
         self.config_path: str = os.getenv("chatbot_CONFIG_PATH", "./configs")
         self.bot_name: str = os.getenv("chatbot_BOT_NAME", "Bot")
-        self.greeting: str = os.getenv(
-            "chatbot_GREETING",
-            "Hi! I am here to help you fill out your investment documents.",
-        )
+        self.greeting: str = os.getenv("chatbot_GREETING", "Hi! I am here to help you fill out your investment documents.")
+        self.pdf_filler_mode: str = os.getenv("chatbot_PDF_FILLER", "none").lower()
+        self.pdf_path: str = os.getenv("chatbot_PDF_PATH", "")
         self.pdf_poll_interval: int = int(os.getenv("chatbot_PDF_POLL_INTERVAL", "10"))
         self.pdf_poll_timeout: int = int(os.getenv("chatbot_PDF_POLL_TIMEOUT", "150"))
         self.pdf_max_retries: int = int(os.getenv("chatbot_PDF_MAX_RETRIES", "3"))
+        self.mapper_api_url: str = os.getenv("MAPPER_API_URL", "")
+        self.mapper_api_key: str = os.getenv("MAPPER_API_KEY", "")
+        self.mapper_config_dir: str = os.getenv("chatbot_CONFIG_PATH", "./configs")
         self.telemetry_enabled: bool = os.getenv("chatbot_TELEMETRY", "false").lower() == "true"
-        self.telemetry_mode: str = os.getenv("chatbot_TELEMETRY_MODE", "local")
         self.telemetry_endpoint: str = os.getenv("chatbot_TELEMETRY_ENDPOINT", "")
-        self.sdk_api_key: str = os.getenv("chatbot_SDK_API_KEY", "")
-        self.rate_limit_enabled: bool = os.getenv("chatbot_RATE_LIMIT_ENABLED", "false").lower() == "true"
         self.debug_logging: bool = os.getenv("chatbot_DEBUG_LOGGING", "true").lower() == "true"
         self.log_level: str = os.getenv("chatbot_LOG_LEVEL", "INFO")
 
-        # PDF filler mode: "none" | "mapper" | "managed" | "custom"
-        self.pdf_filler_mode: str = os.getenv("chatbot_PDF_FILLER", "none").lower()
-        self.pdf_path: str = os.getenv("chatbot_PDF_PATH", "")
-
-        # Mapper connection (used when pdf_filler_mode == "mapper")
-        self.mapper_api_url: str = os.getenv("MAPPER_API_URL", "http://localhost:8000")
-        self.mapper_api_key: str = os.getenv("MAPPER_API_KEY", "")
-
         if validate:
             self._validate()
-
-    # ------------------------------------------------------------------
-    # Validation — emit clear warnings for missing required env vars
-    # ------------------------------------------------------------------
 
     def _validate(self) -> None:
         errors = []
         warns = []
 
-        # ── Core ───────────────────────────────────────────────────────
-        if not self.openai_api_key:
-            errors.append(
-                "OPENAI_API_KEY is not set.\n"
-                "  Export it: export OPENAI_API_KEY=sk-..."
-            )
-
-        # ── Storage: S3 ────────────────────────────────────────────────
-        if self.storage_type == "s3":
-            missing_s3 = []
-            if not os.getenv("AWS_OUTPUT_BUCKET"):
-                missing_s3.append("AWS_OUTPUT_BUCKET")
-            if not os.getenv("AWS_CONFIG_BUCKET"):
-                missing_s3.append("AWS_CONFIG_BUCKET")
-            has_creds = (
-                os.getenv("AWS_ACCESS_KEY_ID")
-                or os.getenv("AWS_PROFILE")
-                or os.getenv("AWS_ROLE_ARN")
-                or os.getenv("AWS_EXECUTION_ENV")
-                or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
-            )
-            if not has_creds:
-                missing_s3.append(
-                    "AWS credentials (AWS_ACCESS_KEY_ID+AWS_SECRET_ACCESS_KEY, "
-                    "AWS_PROFILE, or IAM role)"
-                )
-            if missing_s3:
-                errors.append(
-                    "chatbot_STORAGE=s3 is set but the following are missing:\n"
-                    + "\n".join(f"  - {v}" for v in missing_s3)
-                    + "\n  See .env.example for details."
-                )
-
-        # ── PDF filler ─────────────────────────────────────────────────
-        if self.pdf_filler_mode != "none":
-            if not self.pdf_path:
-                errors.append(
-                    "chatbot_PDF_FILLER is set but chatbot_PDF_PATH is missing.\n"
-                    "  Set the path to the blank PDF that should be filled:\n"
-                    "  chatbot_PDF_PATH=/path/to/blank_form.pdf   (local)\n"
-                    "  chatbot_PDF_PATH=s3://your-bucket/blank_form.pdf  (S3)"
-                )
-
-            if self.pdf_filler_mode == "mapper":
-                if not self.mapper_api_url:
-                    warns.append(
-                        "chatbot_PDF_FILLER=mapper but MAPPER_API_URL is not set.\n"
-                        "  Defaulting to http://localhost:8000.\n"
-                        "  Set MAPPER_API_URL to your mapper API server URL."
-                    )
-                if not self.mapper_api_key:
-                    warns.append(
-                        "MAPPER_API_KEY is not set — mapper API calls will have no auth header.\n"
-                        "  Set MAPPER_API_KEY if your mapper server requires authentication."
-                    )
-
-            elif self.pdf_filler_mode == "managed":
-                managed_required = [
-                    "AUTH0_DOMAIN",
-                    "AUTH0_CLIENT_ID",
-                    "AUTH0_CLIENT_SECRET",
-                    "AUTH0_AUDIENCE",
-                    "FILL_PDF_LAMBDA_URL",
-                    "PDF_API_KEY",
-                ]
-                missing_managed = [v for v in managed_required if not os.getenv(v)]
-                if missing_managed:
-                    errors.append(
-                        "chatbot_PDF_FILLER=managed but the following are missing:\n"
-                        + "\n".join(f"  - {v}" for v in missing_managed)
-                        + "\n  These are required for the managed Auth0 PDF Lambda service."
-                    )
-
-        # ── Telemetry ──────────────────────────────────────────────────
-        if self.telemetry_enabled:
-            if self.telemetry_mode == "local" and not self.telemetry_endpoint:
+        model = self.llm_model.lower()
+        if not self.llm_api_key:
+            has_key = any([
+                os.getenv("OPENAI_API_KEY") and ("openai/" in model or model.startswith("gpt-")),
+                os.getenv("ANTHROPIC_API_KEY") and ("anthropic/" in model or model.startswith("claude-")),
+                os.getenv("GROQ_API_KEY") and "groq/" in model,
+                os.getenv("GEMINI_API_KEY") and "gemini/" in model,
+                os.getenv("AZURE_API_KEY") and "azure/" in model,
+                os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and "vertex_ai/" in model,
+                os.getenv("AWS_ACCESS_KEY_ID") and "bedrock/" in model,
+                "ollama/" in model,
+            ])
+            if not has_key:
                 warns.append(
-                    "chatbot_TELEMETRY=true + chatbot_TELEMETRY_MODE=local but "
-                    "chatbot_TELEMETRY_ENDPOINT is not set.\n"
-                    "  Events will be queued but never sent.\n"
-                    "  Set chatbot_TELEMETRY_ENDPOINT=http://localhost:9000/events"
-                )
-            elif self.telemetry_mode in ("self_hosted", "managed") and not self.telemetry_endpoint:
-                errors.append(
-                    f"chatbot_TELEMETRY=true + chatbot_TELEMETRY_MODE={self.telemetry_mode} "
-                    "but chatbot_TELEMETRY_ENDPOINT is not set."
+                    f"No API key found for model {self.llm_model!r}.\n"
+                    "  Set CHATBOT_LLM_API_KEY as a universal override, or the\n"
+                    "  provider-specific key: OPENAI_API_KEY, ANTHROPIC_API_KEY,\n"
+                    "  GROQ_API_KEY, AZURE_API_KEY, GEMINI_API_KEY.\n"
+                    "  For Bedrock: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY.\n"
+                    "  For Vertex AI: GOOGLE_APPLICATION_CREDENTIALS.\n"
+                    "  For Ollama: no key needed."
                 )
 
-        # ── Emit ───────────────────────────────────────────────────────
+        if self.storage_type == "s3":
+            missing = []
+            if not os.getenv("AWS_OUTPUT_BUCKET"): missing.append("AWS_OUTPUT_BUCKET")
+            if not os.getenv("AWS_CONFIG_BUCKET"):  missing.append("AWS_CONFIG_BUCKET")
+            has_creds = any(os.getenv(k) for k in ["AWS_ACCESS_KEY_ID","AWS_PROFILE","AWS_ROLE_ARN","AWS_EXECUTION_ENV","AWS_LAMBDA_FUNCTION_NAME"])
+            if not has_creds: missing.append("AWS credentials")
+            if missing:
+                errors.append("chatbot_STORAGE=s3 but missing:\n" + "\n".join(f"  - {v}" for v in missing))
+
+        elif self.storage_type == "gcp":
+            missing = []
+            if not os.getenv("GCP_OUTPUT_BUCKET"): missing.append("GCP_OUTPUT_BUCKET")
+            if not os.getenv("GCP_CONFIG_BUCKET"):  missing.append("GCP_CONFIG_BUCKET")
+            if not (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GOOGLE_CLOUD_PROJECT")):
+                missing.append("GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_CLOUD_PROJECT")
+            if missing:
+                errors.append("chatbot_STORAGE=gcp but missing:\n" + "\n".join(f"  - {v}" for v in missing))
+
+        elif self.storage_type == "azure":
+            missing = []
+            if not os.getenv("AZURE_STORAGE_CONNECTION_STRING"): missing.append("AZURE_STORAGE_CONNECTION_STRING")
+            if not os.getenv("AZURE_OUTPUT_CONTAINER"):           missing.append("AZURE_OUTPUT_CONTAINER")
+            if not os.getenv("AZURE_CONFIG_CONTAINER"):           missing.append("AZURE_CONFIG_CONTAINER")
+            if missing:
+                errors.append("chatbot_STORAGE=azure but missing:\n" + "\n".join(f"  - {v}" for v in missing))
+
+        if self.pdf_filler_mode not in ("none", "") and not self.pdf_path:
+            errors.append("chatbot_PDF_FILLER is set but chatbot_PDF_PATH is missing.")
+
+        if self.telemetry_enabled and not self.telemetry_endpoint:
+            warns.append("chatbot_TELEMETRY=true but chatbot_TELEMETRY_ENDPOINT is not set.")
+
         for w in warns:
             warnings.warn(f"[chatbot-sdk] {w}", stacklevel=3)
 

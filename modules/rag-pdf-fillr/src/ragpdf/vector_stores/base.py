@@ -56,8 +56,8 @@ class VectorStoreBackend(ABC):
                           error_info: Optional[dict] = None) -> Optional[float]:
         """
         Update a vector's learned confidence score.
-        is_positive=True  → multiply by CONFIDENCE_GROWTH_RATE
-        is_positive=False → multiply by CONFIDENCE_DECAY_RATE + log error + regen embedding
+        is_positive=True  -> multiply by CONFIDENCE_GROWTH_RATE
+        is_positive=False -> multiply by CONFIDENCE_DECAY_RATE + log error + regen embedding
         Returns new confidence value.
         """
 

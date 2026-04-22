@@ -41,7 +41,7 @@ class PineconeStore(VectorStoreBackend):
         self._index = pc.Index(index_name or RAGPDF_PINECONE_INDEX)
         self._namespace = namespace or RAGPDF_PINECONE_NAMESPACE
         self._dimension = dimension
-        self._cache: dict = {}   # local cache: vector_id → metadata
+        self._cache: dict = {}   # local cache: vector_id -> metadata
         logger.info(f"PineconeStore initialized: index={index_name}, ns={self._namespace}")
 
     def find_similar(self, query_embedding: list,

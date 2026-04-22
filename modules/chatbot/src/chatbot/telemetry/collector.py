@@ -194,7 +194,7 @@ class TelemetryCollector:
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
                     if self._debug:
-                        print(f"[TELEMETRY] Sent {len(batch)} events → HTTP {resp.status}")
+                        print(f"[TELEMETRY] Sent {len(batch)} events -> HTTP {resp.status}")
         except Exception as e:
             if self._debug:
                 print(f"[TELEMETRY] Failed to send batch: {e}")

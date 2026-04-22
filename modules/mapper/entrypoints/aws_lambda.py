@@ -4,7 +4,7 @@ AWS Lambda wrapper - handles AWS-specific concerns only.
 This is a THIN wrapper that:
 1. Parses AWS Lambda events
 2. Validates authentication
-3. Calls source-agnostic handlers from src.handlers
+3. Calls source-agnostic handlers from pdf_autofillr_mapper.handlers
 4. Returns AWS Lambda response format
 
 The actual business logic is in src/handlers/operations.py
@@ -16,13 +16,13 @@ import asyncio
 import time
 from typing import Optional
 
-from src.core.logger import setup_logging
-from src.core.config import settings
-from src.clients.api_client import APIClient
-from src.utils.data_combiner import combine_user_and_session_data
+from pdf_autofillr_mapper.core.logger import setup_logging
+from pdf_autofillr_mapper.core.config import settings
+from pdf_autofillr_mapper.clients.api_client import APIClient
+from pdf_autofillr_mapper.utils.data_combiner import combine_user_and_session_data
 
 # Import source-agnostic handlers
-from src.handlers.operations import (
+from pdf_autofillr_mapper.handlers.operations import (
     handle_extract_operation,
     handle_map_operation,
     handle_embed_operation,
@@ -37,7 +37,7 @@ from src.handlers.operations import (
 
 # Import notification system
 try:
-    from adapters.notifier import create_pipeline_notifier
+    from adapter_src.notifier import create_pipeline_notifier
     NOTIFICATIONS_AVAILABLE = True
 except ImportError:
     NOTIFICATIONS_AVAILABLE = False
@@ -130,14 +130,26 @@ async def async_lambda_handler(event, context):
         
         # Create notification system
         notifier = get_pipeline_notifier()
-        
+
         # Parse operation
         operation = event.get('operation')
         if not operation:
             raise ValueError("Missing required parameter: operation")
-        
+
         logger.info(f"Operation: {operation}")
-        
+
+        # Initialize pipeline tracking for notifications
+        if notifier:
+            notifier.start_pipeline(
+                pipeline_id=f"{operation}_{int(time.time())}",
+                metadata={
+                    "user_id": event.get('user_id'),
+                    "session_id": event.get('session_id'),
+                    "pdf_doc_id": event.get('pdf_doc_id')
+                }
+            )
+            logger.info(f"Pipeline tracking initialized for {operation}")
+
         # Route to appropriate handler
         result = await route_operation(event, operation, notifier)
         
@@ -195,6 +207,136 @@ async def async_lambda_handler(event, context):
                 logger.debug("Notifier closed")
             except Exception as e:
                 logger.warning(f"Error closing notifier: {e}")
+
+
+def _build_aws_config(env: str, developer_id, user_id, session_id, pdf_doc_id,
+                      pdf_s3_url: str = None):
+    """
+    Build AWSStorageConfig with all S3 paths and local temp paths pre-set.
+    Mirrors local.py's _create_storage_config() pattern so operations never
+    need to fall back to config.ini.
+
+    pdf_s3_url: actual S3 URL of the input PDF, fetched from the backend API
+                via APIClient.get_document_s3_url(pdf_doc_id).  When provided
+                this is used as the download source; the mapper stores its own
+                copy at mapper/{pid}/{pid}_input.pdf in the pipeline bucket.
+    """
+    import os
+    from pdf_autofillr_mapper.configs.aws import AWSStorageConfig
+    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+
+    config = AWSStorageConfig(env=env, developer_id=developer_id)
+    s3_paths = config.get_complete_file_config(
+        user_id=user_id,
+        session_id=session_id,
+        pdf_doc_id=pdf_doc_id,
+    )
+
+    # Per-job processing directory inside Lambda ephemeral storage
+    proc_base = os.environ.get('MAPPER_PROCESSING_PATH', '/tmp/processing')
+    proc_dir = os.path.join(proc_base, f"{user_id}_{session_id}_{pdf_doc_id}")
+    os.makedirs(proc_dir, exist_ok=True)
+
+    # Local temp paths — use PathResolver so filenames match the prod naming convention
+    # e.g. {pid}_input.pdf, {pid}_extracted.json, {pid}_mapping.json, {pid}_embedded.pdf, etc.
+    pr = PathResolver(config._sc)
+    local = pr.local_paths(str(user_id), str(session_id), str(pdf_doc_id), proc_dir)
+
+    # S3 source paths (InputFileHandler reads config.s3_{file_type})
+    # pdf_s3_url is the actual URL from the backend DB (fetched via APIClient).
+    # s3_paths['input_pdf'] is the mapper-folder copy: mapper/{pid}/{pid}_input.pdf
+    config.s3_input_pdf   = pdf_s3_url if pdf_s3_url else s3_paths['input_pdf']
+    config.s3_input_json  = s3_paths['input_json']
+
+    # Download form_keys_flat.json once per job — semantic_mapper expects a local path
+    global_json_s3 = s3_paths['global_json']
+    local_global_json = os.path.join(proc_dir, 'form_keys_flat.json')
+    if not os.path.exists(local_global_json):
+        from pdf_autofillr_mapper.clients.s3_client import S3Client
+        S3Client().download_file_from_s3(global_json_s3, local_global_json)
+        logger.info(f"Downloaded global JSON: {global_json_s3} → {local_global_json}")
+    config.s3_global_json  = global_json_s3
+    config.local_global_json = local_global_json
+
+    # Local temp paths (written/read by operations in /tmp/processing/)
+    config.local_input_pdf           = local['processing_input_pdf']
+    config.local_input_json          = local['processing_input_json']
+    config.local_extracted_json      = local['extracted_json']
+    config.local_mapped_json         = local['mapped_json']
+    config.local_radio_json          = local['radio_groups_json']
+    config.local_embedded_pdf        = local['embedded_pdf']
+    config.local_filled_pdf          = local['filled_pdf']
+    config.local_headers_with_fields = local['headers_with_fields']
+    config.local_final_form_fields   = local['final_form_fields']
+    config.local_header_file         = local['header_file']
+    config.local_section_file        = local['section_file']
+    config.local_java_mapping        = local['java_mapping']
+    config.local_llm_predictions     = local['llm_predictions']
+    config.local_rag_predictions     = local['rag_predictions']
+    config.local_final_predictions   = local['final_predictions']
+
+    # S3 destination paths (OutputFileHandler reads config.dest_{file_type})
+    config.dest_extracted_json           = s3_paths['extracted_json']
+    config.dest_mapped_json              = s3_paths['mapped_json']
+    config.dest_radio_json               = s3_paths['radio_groups_json']
+    config.dest_embedded_pdf             = s3_paths['embedded_pdf']
+    # s3_ mirrors so InputFileHandler can find download source for each file
+    config.s3_extracted_json  = s3_paths['extracted_json']
+    config.s3_mapped_json     = s3_paths['mapped_json']
+    config.s3_radio_json      = s3_paths['radio_groups_json']
+    config.s3_embedded_pdf    = s3_paths['embedded_pdf']
+    config.dest_filled_pdf               = s3_paths['filled_pdf']
+    config.dest_headers_with_fields_json = s3_paths['headers_with_fields']
+    config.dest_final_form_fields_json   = s3_paths['final_form_fields']
+    config.dest_header_file_json         = s3_paths['header_file']
+    config.dest_section_file_json        = s3_paths['section_file']
+    config.dest_java_mapping_json        = s3_paths['java_mapping']
+    config.dest_rag_predictions_json     = s3_paths['rag_predictions']
+    config.dest_llm_predictions_json     = s3_paths['llm_predictions']
+    config.dest_final_predictions_json   = s3_paths['final_predictions']
+    # Cache registry — local path for hash_cache.py (local reads/writes), S3 for persistence.
+    # OutputFileHandler looks for config.dest_cache_registry_json (dest_{file_type}).
+    cache_registry_s3    = s3_paths['cache_registry']
+    local_cache_registry = os.path.join('/tmp/processing', 'hash_registry.json')
+    # Download existing registry from S3 so check_hash_cache can find previous entries
+    try:
+        from pdf_autofillr_mapper.clients.s3_client import S3Client
+        _s3 = S3Client()
+        if _s3.object_exists(cache_registry_s3):
+            os.makedirs(os.path.dirname(local_cache_registry), exist_ok=True)
+            _s3.download_file_from_s3(cache_registry_s3, local_cache_registry)
+            logger.info(f"Downloaded cache registry: {cache_registry_s3} → {local_cache_registry}")
+        else:
+            logger.info("Cache registry not in S3 yet — will be created on first save")
+    except Exception as _e:
+        logger.warning(f"Could not download cache registry (will start fresh): {_e}")
+
+    config.dest_cache_registry           = cache_registry_s3
+    config.dest_cache_registry_json      = cache_registry_s3   # name OutputFileHandler expects
+    config.local_cache_registry          = local_cache_registry
+
+    # Clean stale /tmp paths from registry before operations reads it.
+    # In Lambda, any /tmp paths from a previous container invocation are always stale.
+    if os.path.exists(local_cache_registry):
+        try:
+            _stale_cleaned = False
+            with open(local_cache_registry, 'r') as _rf:
+                _registry = json.load(_rf)
+            for _entry in _registry.get('entries', {}).values():
+                _refs = _entry.get('reference_files', {})
+                for _key in list(_refs.keys()):
+                    if isinstance(_refs[_key], str) and _refs[_key].startswith('/tmp'):
+                        logger.info(f"Removing stale /tmp path from registry: {_key}={_refs[_key]}")
+                        _refs[_key] = None
+                        _stale_cleaned = True
+            if _stale_cleaned:
+                with open(local_cache_registry, 'w') as _wf:
+                    json.dump(_registry, _wf, indent=2)
+                logger.info("Cleaned stale /tmp paths from cache registry")
+        except Exception as _ce:
+            logger.warning(f"Could not clean stale registry paths: {_ce}")
+
+    return config
 
 
 async def route_operation(event: dict, operation: str, notifier):
@@ -374,145 +516,11 @@ async def route_operation(event: dict, operation: str, notifier):
         )
     
     elif operation == 'make_embed_file':
-        user_id    = event.get('user_id')
-        pdf_doc_id = event.get('pdf_doc_id')
-        session_id = event.get('session_id')
-
-        if user_id is None:
-            raise ValueError("Missing required parameter: user_id")
-        if pdf_doc_id is None:
-            raise ValueError("Missing required parameter: pdf_doc_id")
-
-        from src.configs.file_config import get_file_config
-        from src.utils.entrypoint_helpers import create_job_context
-        from src.utils.hash_cache import populate_cached_files_to_config
-        from src.utils.storage_helper import upload_to_source
-        from src.utils.entrypoint_helpers import cleanup_processing_directory
-        import os
-
-        ctx = create_job_context(get_file_config(), user_id, session_id or '', pdf_doc_id)
-
-        # Fetch S3 URL from backend API and override source path
-        async with APIClient() as api_client:
-            pdf_s3_url = await api_client.get_document_s3_url(doc_id=pdf_doc_id)
-            logger.info(f"PDF S3 URL: {pdf_s3_url}")
-            if not pdf_s3_url.lower().endswith('.pdf'):
-                raise ValueError(f"pdf_doc_id must be a PDF file, got: {pdf_s3_url}")
-
-        ctx.source_input_pdf = pdf_s3_url
-        ctx.s3_input_pdf     = pdf_s3_url
-
-        # Download inputs to UUID-isolated temp dir
-        os.makedirs(os.path.dirname(ctx.local_input_pdf), exist_ok=True)
-        ctx.download_file(pdf_s3_url, ctx.local_input_pdf)
-
-        # Download global input JSON if configured
-        aws_backend = ctx._storage
-        if aws_backend.global_input_json_s3_uri:
-            try:
-                ctx.download_file(aws_backend.global_input_json_s3_uri, ctx.local_global_json)
-                ctx.s3_global_json = aws_backend.global_input_json_s3_uri
-                logger.info(f"Downloaded global JSON to: {ctx.local_global_json}")
-            except Exception as e:
-                logger.warning(f"Failed to download global JSON: {e}")
-
-        # ── Cache setup ──────────────────────────────────────────────────
-        local_cache_registry   = None
-        s3_cache_registry_path = None
-
-        if settings.pdf_cache_enabled:
-            try:
-                s3_cache_registry_path = settings.cache_registry_path
-                if s3_cache_registry_path and s3_cache_registry_path.startswith('s3://'):
-                    local_cache_registry = os.path.join(ctx.processing_dir, 'hash_registry.json')
-                    try:
-                        ctx.download_file(s3_cache_registry_path, local_cache_registry)
-                        logger.info("[Cache] Downloaded hash_registry.json")
-                    except Exception:
-                        logger.info("[Cache] hash_registry.json not found (first run)")
-
-                    from src.extractors.detailed_fitz import DetailedFitzExtractor
-                    extractor   = DetailedFitzExtractor(config={})
-                    quick_extract = await extractor.extract_to_json(ctx.local_input_pdf, output_file=None)
-                    pdf_hash    = quick_extract.get('pdf_hash')
-
-                    if pdf_hash:
-                        ctx.cached_extraction = quick_extract
-                        cache_hit = await populate_cached_files_to_config(
-                            pdf_hash=pdf_hash,
-                            cache_registry_path=local_cache_registry,
-                            config=ctx,
-                        )
-                        logger.info(f"[Cache] {'HIT' if cache_hit else 'MISS'}")
-            except Exception as e:
-                logger.warning(f"[Cache] Setup error: {e}")
-
-        # ── Run operation ────────────────────────────────────────────────
-        try:
-            result = await handle_make_embed_file_operation(
-                config=ctx,
-                user_id=user_id,
-                pdf_doc_id=pdf_doc_id,
-                session_id=session_id,
-                investor_type=event.get('investor_type', 'individual'),
-                mapping_config=event.get('mapping_config', {}),
-                use_second_mapper=event.get('use_second_mapper', False),
-                notifier=notifier,
-            )
-        finally:
-            # Upload cache registry back regardless of success/failure
-            if settings.pdf_cache_enabled and local_cache_registry and s3_cache_registry_path:
-                try:
-                    if os.path.exists(local_cache_registry):
-                        upload_to_source(local_cache_registry, s3_cache_registry_path)
-                        logger.info("[Cache] Uploaded hash_registry.json back to S3")
-                except Exception as e:
-                    logger.error(f"[Cache] Failed to upload hash_registry.json: {e}")
-            cleanup_processing_directory(ctx.processing_dir)
-
-        return result
-
-    elif operation == 'make_form_fields_data_points':
-        user_id    = event.get('user_id')
-        pdf_doc_id = event.get('pdf_doc_id')
-        session_id = event.get('session_id')
-
-        if user_id is None:
-            raise ValueError("Missing required parameter: user_id")
-        if pdf_doc_id is None:
-            raise ValueError("Missing required parameter: pdf_doc_id")
-
-        from src.configs.file_config import get_file_config
-        from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
-        import os
-
-        ctx = create_job_context(get_file_config(), user_id, session_id or '', pdf_doc_id)
-
-        async with APIClient() as api_client:
-            pdf_s3_url = await api_client.get_document_s3_url(doc_id=pdf_doc_id)
-            if not pdf_s3_url.lower().endswith('.pdf'):
-                raise ValueError(f"pdf_doc_id must be a PDF file, got: {pdf_s3_url}")
-
-        os.makedirs(os.path.dirname(ctx.local_input_pdf), exist_ok=True)
-        ctx.download_file(pdf_s3_url, ctx.local_input_pdf)
-        logger.info(f"Downloaded PDF to: {ctx.local_input_pdf}")
-
-        try:
-            return await handle_make_form_fields_data_points(
-                config=ctx,
-                user_id=user_id,
-                session_id=session_id,
-                pdf_doc_id=pdf_doc_id,
-                notifier=notifier,
-            )
-        finally:
-            cleanup_processing_directory(ctx.processing_dir)
-
-    elif operation == 'fill_pdf':
-        user_id           = event.get('user_id')
-        pdf_doc_id        = event.get('pdf_doc_id')
-        session_id        = event.get('session_id')
-        input_json_doc_id = event.get('input_json_doc_id')
+        user_id      = event.get('user_id')
+        pdf_doc_id   = event.get('pdf_doc_id')
+        session_id   = event.get('session_id')
+        env          = event.get('env')
+        developer_id = event.get('developer_id')
 
         if user_id is None:
             raise ValueError("Missing required parameter: user_id")
@@ -520,80 +528,126 @@ async def route_operation(event: dict, operation: str, notifier):
             raise ValueError("Missing required parameter: pdf_doc_id")
         if session_id is None:
             raise ValueError("Missing required parameter: session_id")
+        if env is None:
+            raise ValueError("Missing required parameter: env")
 
-        from src.configs.file_config import get_file_config
-        from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
-        import os
-
-        ctx = create_job_context(get_file_config(), user_id, session_id, pdf_doc_id)
-
-        # Fetch embedded PDF URL from API
+        # Fetch the actual S3 URL of the PDF from the backend API (same as run_all)
         async with APIClient() as api_client:
-            embedded_pdf_s3_url = (
-                await api_client.get_document_s3_url(doc_id=pdf_doc_id)
-            ).replace('.pdf', '_embedded.pdf')
-            logger.info(f"Embedded PDF S3 URL: {embedded_pdf_s3_url}")
+            pdf_s3_url = await api_client.get_document_s3_url(doc_id=pdf_doc_id)
+            logger.info(f"PDF S3 URL from API: {pdf_s3_url}")
+            if not pdf_s3_url.lower().endswith('.pdf'):
+                raise ValueError(f"pdf_doc_id must reference a PDF file, got: {pdf_s3_url}")
 
-        ctx.s3_embedded_pdf = embedded_pdf_s3_url
-        os.makedirs(os.path.dirname(ctx.local_embedded_pdf), exist_ok=True)
-        ctx.download_file(embedded_pdf_s3_url, ctx.local_embedded_pdf)
+        config = _build_aws_config(env, developer_id, user_id, session_id, pdf_doc_id,
+                                   pdf_s3_url=pdf_s3_url)
+        logger.info(f"AWS config built for make_embed_file: s3_input_pdf={config.s3_input_pdf}")
 
-        # Combine user + session data into JSON
-        input_json_s3_path = await combine_user_and_session_data(
+        return await handle_make_embed_file_operation(
+            config=config,
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            session_id=session_id,
+            env=env,
+            developer_id=developer_id,
+            investor_type=event.get('investor_type', 'individual'),
+            use_second_mapper=event.get('use_second_mapper', False),
+            notifier=notifier,
+        )
+    
+    elif operation == 'make_form_fields_data_points':
+        # Validate parameters - uses user_id + pdf_doc_id (fetches S3 URL internally)
+        user_id = event.get('user_id')
+        pdf_doc_id = event.get('pdf_doc_id')
+        session_id = event.get('session_id')
+        
+        if user_id is None:
+            raise ValueError("Missing required parameter: user_id for make_form_fields_data_points operation")
+        if pdf_doc_id is None:
+            raise ValueError("Missing required parameter: pdf_doc_id for make_form_fields_data_points operation")
+        
+        # Create config object
+        from pdf_autofillr_mapper.configs.aws import AWSStorageConfig
+        from pdf_autofillr_mapper.utils.storage_helper import download_from_source
+        
+        config = AWSStorageConfig()
+        
+        # Fetch S3 URL from backend API
+        async with APIClient() as api_client:
+            pdf_s3_url = await api_client.get_document_s3_url(doc_id=pdf_doc_id)
+            logger.info(f"PDF S3 URL: {pdf_s3_url}")
+            
+            if not pdf_s3_url.lower().endswith('.pdf'):
+                raise ValueError(f"pdf_doc_id must be a PDF file, got: {pdf_s3_url}")
+        
+        # Download PDF to /tmp/ and set on config
+        local_pdf_path = f"/tmp/form_{pdf_doc_id}.pdf"
+        download_from_source(pdf_s3_url, local_pdf_path)
+        config.local_input_pdf = local_pdf_path
+        logger.info(f"Downloaded PDF to: {local_pdf_path}")
+        
+        return await handle_make_form_fields_data_points(
+            config=config,
             user_id=user_id,
             session_id=session_id,
-            use_profile_info=event.get('use_profile_info', True),
+            pdf_doc_id=pdf_doc_id,
+            notifier=notifier
         )
-        ctx.s3_input_json = input_json_s3_path
-        ctx.download_file(input_json_s3_path, ctx.local_input_json)
-        logger.info(f"Downloaded input JSON to: {ctx.local_input_json}")
-
-        try:
-            return await handle_fill_pdf_operation(
-                config=ctx,
-                user_id=user_id,
-                session_id=session_id,
-                pdf_doc_id=pdf_doc_id,
-                input_json_doc_id=input_json_doc_id,
-                notifier=notifier,
-            )
-        finally:
-            cleanup_processing_directory(ctx.processing_dir)
-
-    elif operation == 'check_embed_file':
-        user_id    = event.get('user_id')
-        pdf_doc_id = event.get('pdf_doc_id')
+    
+    elif operation == 'fill_pdf':
+        user_id      = event.get('user_id')
+        pdf_doc_id   = event.get('pdf_doc_id')
+        session_id   = event.get('session_id')
+        env          = event.get('env')
+        developer_id = event.get('developer_id')
 
         if user_id is None:
             raise ValueError("Missing required parameter: user_id")
         if pdf_doc_id is None:
             raise ValueError("Missing required parameter: pdf_doc_id")
+        if session_id is None:
+            raise ValueError("Missing required parameter: session_id")
+        if env is None:
+            raise ValueError("Missing required parameter: env")
 
-        from src.configs.file_config import get_file_config
-        from src.utils.entrypoint_helpers import create_job_context, cleanup_processing_directory
-        import os
+        config = _build_aws_config(env, developer_id, user_id, session_id, pdf_doc_id)
+        logger.info(f"AWS config built for fill_pdf: proc_dir={config.local_embedded_pdf}")
 
-        ctx = create_job_context(get_file_config(), user_id, event.get('session_id') or '', pdf_doc_id)
+        return await handle_fill_pdf_operation(
+            config=config,
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            session_id=session_id,
+            env=env,
+            developer_id=developer_id,
+            notifier=notifier,
+        )
+    
+    elif operation == 'check_embed_file':
+        user_id      = event.get('user_id')
+        pdf_doc_id   = event.get('pdf_doc_id')
+        session_id   = event.get('session_id')
+        env          = event.get('env')
+        developer_id = event.get('developer_id')
 
-        async with APIClient() as api_client:
-            embedded_pdf_s3_url = (
-                await api_client.get_document_s3_url(doc_id=pdf_doc_id)
-            ).replace('.pdf', '_embedded.pdf')
+        if user_id is None:
+            raise ValueError("Missing required parameter: user_id")
+        if pdf_doc_id is None:
+            raise ValueError("Missing required parameter: pdf_doc_id")
+        if session_id is None:
+            raise ValueError("Missing required parameter: session_id")
+        if env is None:
+            raise ValueError("Missing required parameter: env")
 
-        os.makedirs(os.path.dirname(ctx.local_embedded_pdf), exist_ok=True)
-        try:
-            ctx.download_file(embedded_pdf_s3_url, ctx.local_embedded_pdf)
-        except Exception as e:
-            logger.info(f"Embedded PDF not yet in S3 (expected on first check): {e}")
+        config = _build_aws_config(env, developer_id, user_id, session_id, pdf_doc_id)
 
-        try:
-            return await handle_check_embed_file_operation(
-                config=ctx,
-                user_id=user_id,
-                session_id=event.get('session_id'),
-            )
-        finally:
-            cleanup_processing_directory(ctx.processing_dir)
+        return await handle_check_embed_file_operation(
+            config=config,
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            session_id=session_id,
+            env=env,
+            developer_id=developer_id,
+        )
     
     else:
         raise ValueError(f"Invalid operation: {operation}")

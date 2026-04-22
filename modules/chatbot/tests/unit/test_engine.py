@@ -11,11 +11,11 @@ from unittest.mock import MagicMock, patch
 @pytest.fixture
 def engine(local_storage, form_config):
     """ConversationEngine with mocked LLM."""
-    from src.chatbot.core.engine import ConversationEngine
-    from src.chatbot.telemetry.collector import TelemetryCollector
+    from chatbot.core.engine import ConversationEngine
+    from chatbot.telemetry.collector import TelemetryCollector
 
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({"full_name": "Alice"}, 0.1, "llm"),
     ):
         engine = ConversationEngine(
@@ -30,7 +30,7 @@ def engine(local_storage, form_config):
 
 def test_process_message_returns_string_and_bool(engine, user_id, session_id):
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({}, 0.1, "llm"),
     ):
         response, complete = engine.process_message(user_id, session_id, "")
@@ -40,7 +40,7 @@ def test_process_message_returns_string_and_bool(engine, user_id, session_id):
 
 def test_process_message_saves_session_state(engine, local_storage, user_id, session_id):
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({}, 0.1, "llm"),
     ):
         engine.process_message(user_id, session_id, "")
@@ -55,7 +55,7 @@ def test_process_message_saves_conversation_log(engine, local_storage, user_id, 
     session_state.json after each turn.
     """
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({}, 0.1, "llm"),
     ):
         engine.process_message(user_id, session_id, "")
@@ -74,7 +74,7 @@ def test_process_message_saves_conversation_log(engine, local_storage, user_id, 
 
 def test_multiple_turns_accumulate_log(engine, local_storage, user_id, session_id):
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({}, 0.1, "llm"),
     ):
         engine.process_message(user_id, session_id, "")
@@ -85,17 +85,17 @@ def test_multiple_turns_accumulate_log(engine, local_storage, user_id, session_i
 
 
 def test_state_transitions_on_each_turn(engine, local_storage, user_id, session_id):
-    from src.chatbot.core.states import State
+    from chatbot.core.states import State
     with patch(
-        "src.chatbot.extraction.llm_extractor.LLMExtractor.extract",
+        "chatbot.extraction.llm_extractor.LLMExtractor.extract",
         return_value=({}, 0.1, "llm"),
     ):
-        # First turn from INIT → sends greeting and stays in INIT (waiting for yes/no)
+        # First turn from INIT -> sends greeting and stays in INIT (waiting for yes/no)
         engine.process_message(user_id, session_id, "")
         state = local_storage.get_session_state(user_id, session_id)
         assert state["state"] == State.INIT.value  # stays INIT until user says yes
 
-        # Second turn: user says "yes" → should move to INVESTOR_TYPE_SELECT (no saved data)
+        # Second turn: user says "yes" -> should move to INVESTOR_TYPE_SELECT (no saved data)
         engine.process_message(user_id, session_id, "yes")
         state = local_storage.get_session_state(user_id, session_id)
         assert state["state"] == State.INVESTOR_TYPE_SELECT.value

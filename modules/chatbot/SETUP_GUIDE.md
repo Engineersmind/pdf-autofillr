@@ -42,7 +42,7 @@ curl http://localhost:8001/health
 | Variable | Default | Description |
 |---|---|---|
 | `chatbot_STORAGE` | `local` | `local` or `s3` |
-| `chatbot_DATA_PATH` | `./chatbot_data` | Root directory for session data (local mode) |
+| `chatbot_DATA_PATH` | `./data/chatbot` | Root directory for session data (local mode) |
 | `chatbot_CONFIG_PATH` | `./config_samples` | Path to form config JSON files |
 
 ### AWS S3 (only when `chatbot_STORAGE=s3`)
@@ -114,7 +114,7 @@ chatbot_CONFIG_PATH=/path/to/your/configs
 # .env
 OPENAI_API_KEY=sk-your-key-here
 chatbot_STORAGE=local
-chatbot_DATA_PATH=./chatbot_data
+chatbot_DATA_PATH=./data/chatbot
 chatbot_CONFIG_PATH=./config_samples
 chatbot_PDF_FILLER=none
 ```

@@ -2,7 +2,7 @@
 Unit tests for state machine constants and enums.
 """
 import pytest
-from src.chatbot.core.states import (
+from chatbot.core.states import (
     State,
     INVESTOR_TYPES,
     INVESTOR_TYPE_FILES,

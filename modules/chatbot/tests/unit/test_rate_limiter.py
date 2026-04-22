@@ -5,7 +5,7 @@ Covers the Issue 6 fix: daily session counter now correctly increments
 exactly once per session_id regardless of how many messages are sent.
 """
 import pytest
-from src.chatbot.limits.rate_limiter import RateLimiter, RateLimitConfig, RateLimitExceeded
+from chatbot.limits.rate_limiter import RateLimiter, RateLimitConfig, RateLimitExceeded
 
 
 @pytest.fixture

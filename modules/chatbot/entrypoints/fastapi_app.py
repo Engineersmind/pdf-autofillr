@@ -1,8 +1,9 @@
+# chatbot/entrypoints/fastapi_app.py
 """
-FastAPI app entrypoint (no /chatbot prefix — bare routes).
+Bare FastAPI app — no /chatbot prefix on routes.
 
-Use this when you want to mount the chatbot app as a sub-application
-or when running behind a reverse proxy that adds the prefix.
+Use this when mounting into a larger application or running behind
+a reverse proxy that adds the prefix itself.
 
 Routes:
     POST   /chat
@@ -11,45 +12,93 @@ Routes:
     DELETE /session/{user_id}/{session_id}
     GET    /health
 
-Compared with api_server.py, this app uses /chat instead of /chatbot/chat.
-The api_server.py is the recommended entrypoint for standalone deployment.
+For standalone deployment use api_server.py instead (has /chatbot/* prefix).
+
+Mount example::
+
+    from entrypoints.fastapi_app import app as chatbot_app
+    main_app.mount("/onboarding", chatbot_app)
 """
 from __future__ import annotations
 
 import os
 import logging
+import sys
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 load_dotenv()
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-# Reuse the same client factory and models from api_server
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from api_server import (
-    get_client,
-    ChatRequest,
-    ChatResponse,
-    SessionDataResponse,
-)
-from src.chatbot.limits import RateLimitExceeded
+from chatbot import chatbotClient, FormConfig
+from chatbot.storage.factory import StorageFactory
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="chatbot App (bare routes)",
-    description="chatbot with /chat instead of /chatbot/chat — for sub-app mounting.",
+    title="chatbot (bare routes)",
+    description="chatbot sub-app — /chat instead of /chatbot/chat.",
     version="0.1.0",
 )
-
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+_client: Optional[chatbotClient] = None
+
+
+def _build_pdf_filler():
+    mode = os.getenv("chatbot_PDF_FILLER", "none").lower()
+    if mode in ("none", ""):
+        return None
+    if mode in ("mapper", "managed"):
+        from chatbot.pdf.mapper_filler import MapperPDFFiller
+        return MapperPDFFiller(
+            mapper_api_url=os.getenv("MAPPER_API_URL", ""),
+            mapper_api_key=os.getenv("MAPPER_API_KEY", ""),
+            config_dir=os.getenv("chatbot_CONFIG_PATH", "./configs"),
+        )
+    raise ValueError(f"Unknown chatbot_PDF_FILLER: {mode!r}. Use: none | mapper | custom")
+
+
+def get_client() -> chatbotClient:
+    global _client
+    if _client is None:
+        storage = StorageFactory.create()
+        config_path = os.getenv("chatbot_CONFIG_PATH", "./configs")
+        _client = chatbotClient(
+            # api_key read from CHATBOT_LLM_API_KEY env var automatically
+            storage=storage,
+            form_config=FormConfig.from_directory(config_path),
+            pdf_filler=_build_pdf_filler(),
+        )
+    return _client
+
+
+class ChatRequest(BaseModel):
+    user_id: str
+    session_id: str
+    message: str = ""
+    pdf_path: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    user_id: str
+    session_id: str
+    response: str
+    session_complete: bool
+    filled_data: Optional[dict] = None
+
+
+class SessionDataResponse(BaseModel):
+    user_id: str
+    session_id: str
+    data: Optional[dict]
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -67,8 +116,6 @@ def chat(req: ChatRequest):
             session_complete=complete,
             filled_data=data if complete else None,
         )
-    except RateLimitExceeded as e:
-        raise HTTPException(status_code=429, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -111,3 +158,8 @@ def health():
         "storage": os.getenv("chatbot_STORAGE", "local"),
         "pdf_filler": os.getenv("chatbot_PDF_FILLER", "none"),
     }
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    return JSONResponse(status_code=500, content={"error": str(exc)})

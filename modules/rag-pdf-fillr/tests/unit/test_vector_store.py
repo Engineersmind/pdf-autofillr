@@ -39,7 +39,7 @@ def test_below_threshold_no_match(store):
     store.add_vector("investor_name", "", "", [], make_embedding(1.0))
     # A zero vector has undefined cosine similarity to a unit vector — use a
     # clearly orthogonal embedding in the same small dimension space.
-    match = store.find_similar([0.0, 0.0, 0.0, 0.0], threshold=0.99, top_k=5)
+    match = store.find_similar([0.0, 0.0, 0.0, 1.0], threshold=0.99, top_k=5)
     assert match["matched"] is False
     assert match["best_candidate"] == "investor_name"
 
@@ -83,7 +83,7 @@ def test_update_nonexistent_vector_returns_none(store):
 
 def test_top_k_results(store):
     for i in range(5):
-        store.add_vector(f"field_{i}", "", "", [], make_embedding(float(i) / 10.0))
+        store.add_vector(f"field_{i}", "", "", [], make_embedding(float(i + 1) / 10.0))
     match = store.find_similar(make_embedding(0.4), threshold=0.0, top_k=3)
     # FIX: access top_k via dict key, not attribute
     assert len(match["top_k"]) == 3

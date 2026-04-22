@@ -1,11 +1,10 @@
-# chatbot/core/engine.py
+# chatbot/src/chatbot/core/engine.py
 """
 ConversationEngine — main orchestrator.
 
 Owns the session lifecycle, routes each turn to the correct handler,
 and coordinates extraction, storage, telemetry, and PDF workflow.
 """
-
 from __future__ import annotations
 
 import time
@@ -36,7 +35,7 @@ class ConversationEngine:
         self,
         storage: StorageBackend,
         form_config: FormConfig,
-        openai_api_key: str,
+        api_key: Optional[str],
         pdf_filler: Optional[PDFFillerInterface],
         telemetry: TelemetryCollector,
         prompt_builder=None,
@@ -44,31 +43,23 @@ class ConversationEngine:
     ):
         self.storage = storage
         self.form_config = form_config
-        self.openai_api_key = openai_api_key
+        self.api_key = api_key
         self.telemetry = telemetry
         self.settings = settings or Settings()
 
-        # Session manager (CRUD only)
         self.session_manager = SessionManager(storage=storage)
 
-        # Extraction
         self.extractor = Extractor(
-            openai_api_key=openai_api_key,
+            api_key=api_key,
             prompt_builder=prompt_builder,
         )
 
-        # PDF workflow (None if pdf_filler is None)
         self.pdf_workflow: Optional[PDFWorkflowManager] = (
-            PDFWorkflowManager(
-                filler=pdf_filler,
-                storage=storage,
-                settings=settings,
-            )
+            PDFWorkflowManager(filler=pdf_filler, storage=storage, settings=settings)
             if pdf_filler
             else None
         )
 
-        # Router is built lazily after __init__ to avoid circular imports
         self._router: Optional[StateRouter] = None
 
     @property
@@ -77,9 +68,7 @@ class ConversationEngine:
             self._router = StateRouter.build(self)
         return self._router
 
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
+    # ── Main entry point ──────────────────────────────────────────────
 
     def process_message(
         self,
@@ -96,9 +85,7 @@ class ConversationEngine:
         """
         start = time.time()
 
-        # Load or create session
         session = self.session_manager.load_or_create(user_id, session_id)
-
         state = State(session.get("state", State.INIT.value))
 
         debug and debug.log(
@@ -107,7 +94,6 @@ class ConversationEngine:
             data={"user_input": user_input[:200]},
         )
 
-        # Route to handler
         handler = self.router.get_handler(state)
         response_text, next_state = handler.handle(
             session=session,
@@ -117,24 +103,18 @@ class ConversationEngine:
             debug=debug,
         )
 
-        # Persist state
         session["state"] = next_state.value if isinstance(next_state, State) else next_state
         self.session_manager.save(user_id, session_id, session)
 
-        # FIX: persist conversation_log to its own file so it is queryable
-        # independently of session_state.json.  Previously save_conversation_log()
-        # was defined on StorageBackend but never called — the log only existed
-        # inside session_state.json.
         try:
             self.storage.save_conversation_log(
                 user_id, session_id, session.get("conversation_log", [])
             )
         except Exception:
-            pass  # non-fatal — session_state.json already has the log
+            pass
 
         session_complete = session["state"] == State.COMPLETE.value
 
-        # Telemetry — include user/session for attribution
         self.telemetry.track_state_transition(
             from_state=state.value,
             to_state=session["state"],
@@ -155,31 +135,15 @@ class ConversationEngine:
 
         return response_text, session_complete
 
-    # ------------------------------------------------------------------
-    # Finalisation helpers
-    # ------------------------------------------------------------------
+    # ── Finalisation ──────────────────────────────────────────────────
 
-    def _finalise_session(
-        self,
-        user_id: str,
-        session_id: str,
-        session: dict,
-        debug: Optional[DebugLogger],
-    ) -> None:
-        """Save final output files, generate fill report, and optionally trigger PDF workflow."""
+    def _finalise_session(self, user_id, session_id, session, debug) -> None:
         live_fill_flat = session.get("live_fill_flat", {})
 
-        # Save flat output
         self.storage.save_final_output_flat(user_id, session_id, live_fill_flat)
-
-        # Save nested output
-        nested = unflatten_dict(live_fill_flat)
-        self.storage.save_final_output(user_id, session_id, nested)
-
-        # Update user integrated info (cross-session profile)
+        self.storage.save_final_output(user_id, session_id, unflatten_dict(live_fill_flat))
         self._update_integrated_info(user_id, live_fill_flat)
 
-        # Generate and save fill statistics report
         try:
             from chatbot.pdf.fill_report import FillReport
             investor_type = session.get("investor_type", "")
@@ -201,7 +165,6 @@ class ConversationEngine:
         except Exception as e:
             debug and debug.log("state_machine", f"Fill report generation failed: {e}")
 
-        # Trigger PDF workflow asynchronously if configured
         if self.pdf_workflow and session.get("pdf_path"):
             self.pdf_workflow.trigger_async(
                 user_id=user_id,

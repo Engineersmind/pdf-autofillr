@@ -38,7 +38,7 @@ class LocalStorage(StorageBackend):
         config_path: Directory containing form config JSON files (read-only).
     """
 
-    def __init__(self, data_path: str = "./chatbot_data", config_path: str = "./configs"):
+    def __init__(self, data_path: str = "./data/chatbot", config_path: str = "./configs"):
         self.data_path = Path(data_path)
         self.config_path = Path(config_path)
         self.data_path.mkdir(parents=True, exist_ok=True)

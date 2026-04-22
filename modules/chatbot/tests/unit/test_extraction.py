@@ -15,7 +15,7 @@ from unittest.mock import patch, MagicMock
 class TestFallbackExtractor:
     @pytest.fixture
     def extractor(self):
-        from src.chatbot.extraction.fallback_extractor import FallbackExtractor
+        from chatbot.extraction.fallback_extractor import FallbackExtractor
         return FallbackExtractor()
 
     def test_extracts_email(self, extractor):
@@ -51,7 +51,7 @@ class TestFallbackExtractor:
 class TestPromptBuilder:
     @pytest.fixture
     def builder(self):
-        from src.chatbot.extraction.prompt_builder import PromptBuilder
+        from chatbot.extraction.prompt_builder import PromptBuilder
         return PromptBuilder()
 
     def test_build_returns_string(self, builder):
@@ -109,12 +109,12 @@ class TestPromptBuilder:
 class TestExtractor:
     @pytest.fixture
     def extractor(self):
-        from src.chatbot.extraction.extractor import Extractor
+        from chatbot.extraction.extractor import Extractor
         return Extractor(openai_api_key="sk-test")
 
     # def test_llm_success_returns_llm_result(self, extractor):
     #     with patch(
-    #         "src.chatbot.extraction.extractor.LLMExtractor.extract",
+    #         "chatbot.extraction.extractor.LLMExtractor.extract",
     #         return_value=({"full_name": "Alice"}, 0.05, "llm"),
     #     ):
     #         result, latency, method = extractor.extract(
@@ -129,7 +129,7 @@ class TestExtractor:
 
     def test_llm_success_returns_llm_result(self, extractor):
         with patch(
-            "src.chatbot.extraction.extractor.LLMExtractor.extract",
+            "chatbot.extraction.extractor.LLMExtractor.extract",
             return_value=({"full_name": "Alice"}, 0.05, "llm"),
         ):
             result, latency, method = extractor.extract(
@@ -144,7 +144,7 @@ class TestExtractor:
 
     def test_fallback_used_when_llm_empty(self, extractor):
         with patch(
-            "src.chatbot.extraction.extractor.LLMExtractor.extract",
+            "chatbot.extraction.extractor.LLMExtractor.extract",
             return_value=({}, 0.05, "llm"),
         ):
             result, latency, method = extractor.extract(
@@ -159,7 +159,7 @@ class TestExtractor:
 
     def test_fallback_used_when_llm_raises(self, extractor):
         with patch(
-            "src.chatbot.extraction.extractor.LLMExtractor.extract",
+            "chatbot.extraction.extractor.LLMExtractor.extract",
             side_effect=Exception("OpenAI error"),
         ):
             result, latency, method = extractor.extract(

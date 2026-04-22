@@ -9,7 +9,7 @@ from ragpdf import RAGPDFClient, LocalStorage, SentenceTransformerBackend
 from ragpdf.vector_stores import ChromaStore
 
 client = RAGPDFClient(
-    storage=LocalStorage("./ragpdf_data"),
+    storage=LocalStorage("./data/rag"),
     vector_store=ChromaStore(
         path="./chroma_data",
         collection="ragpdf_vectors",

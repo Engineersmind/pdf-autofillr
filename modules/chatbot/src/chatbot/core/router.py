@@ -1,6 +1,6 @@
 # chatbot/core/router.py
 """
-StateRouter — maps State → handler class.
+StateRouter — maps State -> handler class.
 """
 
 from __future__ import annotations

@@ -1,0 +1,47 @@
+# Never commit terraform.tfvars to git — this file is the safe example.
+#
+# Setup:
+#   cp terraform.tfvars.example terraform.tfvars
+#   # Fill in your values, then:
+#   cd modules/mapper && ./deploy.sh
+
+# ── Identity ──────────────────────────────────────────────────────────────────
+project = "pdf-autofiller-mapper"
+env     = "prod"
+region  = "us-east-1"
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+s3_bucket                = "pdf-fillr-production"
+rag_bucket               = "rag-bucket-pdf-filler"
+global_input_json_s3_uri = "s3://pdf-fillr-production/config/form_keys_flat.json"
+
+# ── LLM ──────────────────────────────────────────────────────────────────────
+llm_model            = "gpt-4o"
+default_llm_provider = "openai"
+openai_api_key       = "sk-..."          # fill in
+anthropic_api_key    = "sk-ant-..."      # fill in (optional if using OpenAI only)
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+mapper_api_token     = "your-secret-token"
+auth_api_base_url    = "https://dev-autofiller-backend.engineersmind.dev"
+auth_email           = "user@example.com"
+auth_password        = "your-password"
+auth_timeout_seconds = 30
+
+# ── RAG API ───────────────────────────────────────────────────────────────────
+# Each environment has its own RAG Lambda URL.
+# dev tfvars  → rag_api_url = "https://<dev-rag-id>.lambda-url.us-east-1.on.aws/"
+# prod tfvars → rag_api_url = "https://<prod-rag-id>.lambda-url.us-east-1.on.aws/"
+rag_api_url = "https://<rag-lambda-id>.lambda-url.us-east-1.on.aws/"
+rag_api_key = "your-rag-x-api-key"
+
+# ── Notifications (off by default) ────────────────────────────────────────────
+notifications_enabled     = false
+notifications_backend_url = ""
+notifications_api_key     = ""
+
+# ── Lambda sizing ─────────────────────────────────────────────────────────────
+lambda_memory_mb   = 3008
+lambda_timeout_sec = 900
+log_level          = "INFO"
+log_retention_days = 30

@@ -158,3 +158,33 @@ credentials
 !java_utils/lib/*.jar
 !modules/mapper/java_utils/*.jar
 target/
+
+# -----------------------------------------------------------------------------
+# Archives (local only — contains credential backups)
+# -----------------------------------------------------------------------------
+archives/
+
+# -----------------------------------------------------------------------------
+# Secrets & credentials
+# -----------------------------------------------------------------------------
+*.postman_environment.json
+*.postman_collection.json
+**/terraform.tfvars
+!**/terraform.tfvars.example
+
+# -----------------------------------------------------------------------------
+# Internal / personal files (never commit)
+# -----------------------------------------------------------------------------
+CLAUDE.md
+z_useful_cmds.sh
+prod_file_dir_structure.txt
+REFACTORING_SUMMARY.md
+TERRAFORM_COMPLETE_IaC_PLAN.md
+
+# -----------------------------------------------------------------------------
+# Terraform (state, providers, lock — never commit these)
+# -----------------------------------------------------------------------------
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.backup

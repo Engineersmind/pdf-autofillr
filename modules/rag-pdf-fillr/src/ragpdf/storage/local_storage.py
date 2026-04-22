@@ -14,10 +14,10 @@ class LocalStorage(StorageBackend):
     Filesystem-backed storage. Ideal for development and single-server deployments.
 
     Usage:
-        storage = LocalStorage(data_path="./ragpdf_data")
+        storage = LocalStorage(data_path="./data/rag")
     """
 
-    def __init__(self, data_path: str = "./ragpdf_data"):
+    def __init__(self, data_path: str = "./data/rag"):
         self.data_path = data_path
         os.makedirs(data_path, exist_ok=True)
 

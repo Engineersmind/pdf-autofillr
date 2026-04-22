@@ -1,0 +1,3862 @@
+"""
+
+Core operation handlers - source-agnostic business logic.
+
+These handlers work with ANY storage backend (AWS S3, Azure Blob, GCS, local filesystem).
+
+They use the universal storage helpers for download/upload operations.
+
+Platform-specific wrappers (lambda_handler.py, azure_function.py, etc.) call these functions.
+
+"""
+
+import os
+import time
+import json
+import asyncio
+import logging
+import shutil
+from pathlib import Path
+from typing import Optional, Dict, Any
+from pdf_autofillr_mapper.core.config import get_complete_file_config, get_processing_output_config
+from pdf_autofillr_mapper.utils.storage_helper import (
+    download_from_source,
+    upload_to_source,
+    file_exists,
+    create_storage_config,
+    get_storage_type
+)
+
+from pdf_autofillr_mapper.handlers.file_handlers import create_file_handlers
+from pdf_autofillr_mapper.extractors.detailed_fitz import DetailedFitzExtractor
+from pdf_autofillr_mapper.mappers.semantic_mapper import SemanticMapper
+from pdf_autofillr_mapper.embedders.embed_keys import run_embed_java_stage
+from pdf_autofillr_mapper.fillers.fill_pdf import fill_with_java
+from pdf_autofillr_mapper.utils.map_time_estimator import estimate_map_stage_time
+
+# Import notification system (optional)
+
+try:
+    from adapter_src.notifier import (
+        PipelineNotifier,
+        PipelineStage,
+        StageStatus,
+        NotificationLevel
+    )
+    NOTIFICATIONS_AVAILABLE = True
+
+except ImportError:
+    NOTIFICATIONS_AVAILABLE = False
+    PipelineNotifier = None
+
+logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 1: Source-Agnostic Helper Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def get_path_resolver(config, user_id: int, session_id: int, pdf_doc_id: int):
+    """
+    Get PathResolver instance from config (source-agnostic).
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    The returned resolver automatically constructs correct paths for the configured backend.
+
+    Args:
+        config: Storage config (abstracts backend details)
+        user_id: User ID for path construction
+        session_id: Session ID for path construction
+        pdf_doc_id: PDF document ID for path construction
+
+    Returns:
+        PathResolver instance ready to use
+
+    Raises:
+        ValueError: If config._sc (StorageConfig) is not available
+    """
+    if not hasattr(config, '_sc') or config._sc is None:
+        raise ValueError(
+            "config._sc (StorageConfig) not available. "
+            "Cannot construct file paths for this operation."
+        )
+    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+    return PathResolver(config._sc)
+
+
+async def save_llm_predictions_to_rag(
+    output_handler,
+    config,
+    local_path: str
+) -> Optional[str]:
+    """
+    Save LLM predictions to RAG bucket using preconfigured destination path.
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    Destination path is preconfigured in entry function (config.dest_llm_predictions_json).
+    Single source of truth: entry function builds all paths upfront.
+
+    Args:
+        output_handler: OutputFileHandler (abstracts backend)
+        config: Storage config with dest_llm_predictions_json already set
+        local_path: Path to local llm_predictions.json file
+
+    Returns:
+        Destination path where file was saved, or None if save failed
+    """
+    try:
+        destination_path = getattr(config, 'dest_llm_predictions_json', None)
+        if not destination_path:
+            logger.warning("❌ config.dest_llm_predictions_json not set by entry function")
+            return None
+
+        saved_path = output_handler.save_output(
+            local_path,
+            'llm_predictions_json',
+            destination_path=destination_path
+        )
+
+        if saved_path:
+            logger.info(f"✅ Saved LLM predictions to RAG bucket: {saved_path}")
+        else:
+            logger.warning(f"❌ Failed to save LLM predictions to RAG bucket")
+
+        return saved_path
+
+    except Exception as e:
+        logger.error(f"Error saving LLM predictions to RAG bucket: {e}", exc_info=True)
+        return None
+
+
+async def save_final_predictions_to_rag(
+    output_handler,
+    config,
+    local_path: str
+) -> Optional[str]:
+    """
+    Save final predictions to RAG bucket using preconfigured destination path.
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    Destination path is preconfigured in entry function (config.dest_final_predictions_json).
+    Single source of truth: entry function builds all paths upfront.
+
+    Args:
+        output_handler: OutputFileHandler (abstracts backend)
+        config: Storage config with dest_final_predictions_json already set
+        local_path: Path to local final_predictions.json file
+
+    Returns:
+        Destination path where file was saved, or None if save failed
+    """
+    try:
+        destination_path = getattr(config, 'dest_final_predictions_json', None)
+        if not destination_path:
+            logger.warning("❌ config.dest_final_predictions_json not set by entry function")
+            return None
+
+        saved_path = output_handler.save_output(
+            local_path,
+            'final_predictions_json',
+            destination_path=destination_path
+        )
+
+        if saved_path:
+            logger.info(f"✅ Saved final predictions to RAG bucket: {saved_path}")
+        else:
+            logger.warning(f"❌ Failed to save final predictions to RAG bucket")
+
+        return saved_path
+
+    except Exception as e:
+        logger.error(f"Error saving final predictions to RAG bucket: {e}", exc_info=True)
+        return None
+
+
+class FileDownloadManager:
+    """
+    Centralized file download manager (source-agnostic).
+
+    Handles all file downloads in the pipeline:
+    - Mapping files (mapped_json, radio_groups)
+    - Header files (headers_with_fields, final_form_fields)
+    - RAG predictions
+
+    Works with: AWS S3, Azure Blob Storage, Google Cloud Storage, Local filesystem
+
+    Downloads use InputFileHandler which abstracts backend differences.
+    Falls back to get_input() when files are pre-downloaded in processing directory.
+    """
+
+    def __init__(self, input_handler, config):
+        """Initialize download manager with file handlers."""
+        self.input_handler = input_handler
+        self.config = config
+
+    async def download_or_get_mapping(
+        self, source_path: Optional[str], local_path: str
+    ) -> str:
+        """
+        Download mapping file from source storage or use local cached copy.
+
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            source_path: Path in source storage (or None if using config)
+            local_path: Local path where file should be downloaded
+
+        Returns:
+            Path to the downloaded/cached mapping file
+        """
+        if source_path and not source_path.startswith('/tmp/processing'):
+            try:
+                # Download from source storage using InputFileHandler
+                downloaded = self.input_handler.download_input(source_path, local_path)
+                logger.info(f"📥 Downloaded mapping from source: {source_path} → {local_path}")
+                return downloaded
+            except Exception as e:
+                logger.warning(f"Could not download mapping from {source_path}: {e}, using local cache")
+
+        # Fallback: use pre-cached file in processing directory
+        cached = self.input_handler.get_input('mapped_json')
+        if cached:
+            logger.info(f"📦 Using cached mapping: {cached}")
+            return cached
+
+        raise FileNotFoundError(f"Could not locate mapping file: {source_path} or cached")
+
+    async def download_or_get_radio(
+        self, source_path: Optional[str], local_path: str
+    ) -> str:
+        """
+        Download radio groups file from source storage or use local cached copy.
+
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            source_path: Path in source storage (or None if using config)
+            local_path: Local path where file should be downloaded
+
+        Returns:
+            Path to the downloaded/cached radio groups file
+        """
+        if source_path and not source_path.startswith('/tmp/processing'):
+            try:
+                # Download from source storage using InputFileHandler
+                downloaded = self.input_handler.download_input(source_path, local_path)
+                logger.info(f"📥 Downloaded radio groups from source: {source_path} → {local_path}")
+                return downloaded
+            except Exception as e:
+                logger.warning(f"Could not download radio groups from {source_path}: {e}, using local cache")
+
+        # Fallback: use pre-cached file in processing directory
+        cached = self.input_handler.get_input('radio_json')
+        if cached:
+            logger.info(f"📦 Using cached radio groups: {cached}")
+            return cached
+
+        raise FileNotFoundError(f"Could not locate radio groups file: {source_path} or cached")
+
+    async def download_cached_headers(
+        self,
+        headers_source: Optional[str],
+        headers_local: str,
+        fields_source: Optional[str],
+        fields_local: str
+    ) -> tuple[str, str]:
+        """
+        Download cached header files from source storage to processing directory.
+
+        Used when Phase 2 cache hit occurs and we need to reuse extracted headers.
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            headers_source: Path to headers_with_fields in source storage
+            headers_local: Local destination path
+            fields_source: Path to final_form_fields in source storage
+            fields_local: Local destination path
+
+        Returns:
+            Tuple of (headers_path, fields_path)
+        """
+        downloaded_headers = None
+        downloaded_fields = None
+
+        try:
+            if headers_source and not headers_source.startswith('/tmp/processing'):
+                downloaded_headers = self.input_handler.download_input(headers_source, headers_local)
+                logger.info(f"📥 Downloaded cached headers_with_fields: {headers_source} → {headers_local}")
+            else:
+                downloaded_headers = headers_local
+        except Exception as e:
+            logger.warning(f"Could not download headers_with_fields: {e}")
+            downloaded_headers = headers_local
+
+        try:
+            if fields_source and not fields_source.startswith('/tmp/processing'):
+                downloaded_fields = self.input_handler.download_input(fields_source, fields_local)
+                logger.info(f"📥 Downloaded cached final_form_fields: {fields_source} → {fields_local}")
+            else:
+                downloaded_fields = fields_local
+        except Exception as e:
+            logger.warning(f"Could not download final_form_fields: {e}")
+            downloaded_fields = fields_local
+
+        return downloaded_headers, downloaded_fields
+
+    async def download_rag_predictions(
+        self, source_path: str, local_path: str
+    ) -> str:
+        """
+        Download RAG predictions from source storage.
+
+        Works with: AWS S3, Azure, GCS, Local filesystem
+
+        Args:
+            source_path: Path to rag_predictions.json in source storage
+            local_path: Local destination path
+
+        Returns:
+            Path to the downloaded RAG predictions file
+        """
+        try:
+            downloaded = self.input_handler.download_input(source_path, local_path)
+            logger.info(f"📥 Downloaded RAG predictions: {source_path} → {local_path}")
+            return downloaded
+        except Exception as e:
+            logger.error(f"Failed to download RAG predictions: {e}")
+            raise
+
+
+async def safe_notify(notifier, operation_name: str, *args, **kwargs) -> bool:
+    """Safely send notification without failing the pipeline."""
+    if not notifier or not NOTIFICATIONS_AVAILABLE:
+        return False
+    try:
+        if operation_name == "stage_completion":
+            return await notifier.notify_stage_completion(*args, **kwargs)
+        elif operation_name == "pipeline_completion":
+            return await notifier.notify_pipeline_completion(*args, **kwargs)
+        else:
+            logger.warning(f"Unknown notification operation: {operation_name}")
+            return False
+    except Exception as e:
+        logger.warning(f"Notification failed for {operation_name}: {e}")
+        return False
+
+
+async def handle_extract_operation(
+    config,  # Storage config (first parameter)
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    notifier: Optional[Any] = None,
+    pdf_doc_id: Optional[int] = None,
+    input_json_doc_id: Optional[int] = None,
+    input_json_path: Optional[str] = None,
+    mapping_config: Optional[dict] = None
+) -> Dict[str, Any]:
+    """
+    Extract form fields from PDF - works with ANY storage backend.
+    Args:
+        config: Storage config with pre-configured paths
+        user_id: Optional user ID for tracking
+        session_id: Optional session ID for tracking
+        notifier: Optional notification system
+        pdf_doc_id: Optional PDF document ID
+        input_json_doc_id: Optional input JSON document ID
+        input_json_path: Optional input JSON path for pre-map estimation
+        mapping_config: Optional mapping config for pre-map estimation
+    Returns:
+        Operation result with output file path
+    """
+    start_time = time.time()
+    logger.info("=" * 60)
+    logger.info("EXTRACT OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+    user_input_details = {
+        "user_id": user_id,
+        "pdf_doc_id": pdf_doc_id,
+        "input_json_doc_id": input_json_doc_id,
+        "session_id": session_id
+    }
+    try:
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
+        # Get input PDF (already downloaded by entrypoint)
+        local_pdf = input_handler.get_input('input_pdf')
+        if not local_pdf:
+            raise FileNotFoundError("Input PDF not available")
+        logger.info(f"Input PDF: {local_pdf}")
+
+        # Upload input PDF to mapper folder in S3 (store intermediate files together)
+        # Set destination to mapper folder path for upload
+        from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+        if hasattr(config, '_sc'):
+            pr = PathResolver(config._sc)
+            uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
+            mapper_input_pdf_path = pr.remote_input_pdf(uid, sid, pid)
+            config.dest_input_pdf = mapper_input_pdf_path
+            # Upload input PDF to mapper folder
+            saved_input_pdf = output_handler.save_output(local_pdf, 'input_pdf')
+            if saved_input_pdf:
+                logger.info(f"✅ Input PDF copied to mapper folder: {saved_input_pdf}")
+                # Update config to reference mapper copy for cache and subsequent operations
+                config.s3_input_pdf = saved_input_pdf
+
+        # Initialize extractor
+        extractor_config = {
+            "WIDGET_LINE_DISTANCE_THRESHOLD": 10,
+            "rounding": 1
+        }
+        extractor = DetailedFitzExtractor(extractor_config)
+        # Extract to configured path
+        extraction_output_path = config.local_extracted_json
+        storage_config = {
+            "type": "local",
+            "path": extraction_output_path
+        }
+        # Extract from PDF
+        result = extractor.extract(
+            pdf_path=local_pdf,
+            storage_config=storage_config
+        )
+        # Save output immediately to source storage
+        saved_path = output_handler.save_output(extraction_output_path, 'extracted_json')
+        if saved_path:
+            logger.info(f"✅ Saved extraction to: {saved_path}")
+        # Get PDF hash
+        pdf_hash = result.get('pdf_hash')
+        if pdf_hash:
+            logger.info(f"PDF fingerprint hash: {pdf_hash[:16]}...")
+        # Optional: pre-compute map stage estimate
+        pre_map_time_estimate = None
+        if input_json_path:
+            try:
+                pre_map_time_estimate = estimate_map_stage_time(
+                    extracted_json_path=extraction_output_path,
+                    input_json_path=input_json_path,
+                    mapping_config=mapping_config or {}
+                )
+                logger.info(f"Pre-map estimate: {pre_map_time_estimate.get('status')}")
+            except Exception as estimate_error:
+                logger.warning(f"Failed pre-map estimate: {estimate_error}")
+                pre_map_time_estimate = {"status": "error", "error": str(estimate_error)}
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Send success notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            # Use S3 paths for inputs/outputs in notification (from config)
+            input_files_notification = {
+                "pdf_s3_path": getattr(config, 's3_input_pdf', None) or local_pdf  # Consistent with final notification
+            }
+            output_files_notification = {
+                "extracted_json": saved_path or extraction_output_path  # Consistent key name
+            }
+
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.EXTRACT,
+                status=StageStatus.COMPLETED,
+                execution_time=duration,
+                input_files=input_files_notification,
+                output_files=output_files_notification,
+                user_input_details=user_input_details,
+                metadata={
+                    "storage_type": config.source_type,
+                    "extractor_config": extractor_config,
+                    "fields_extracted": len(result.get("fields", [])) if isinstance(result, dict) else None,
+                    "pre_map_time_estimate": pre_map_time_estimate
+                }
+            )
+        logger.info(f"✅ Extraction completed in {duration}s")
+        logger.info("=" * 60)
+        fields_count = sum(
+            len(page.get("form_fields", []))
+            for page in result.get("pages", [])
+        )
+        response = {
+            "operation": "extract",
+            "output_file": extraction_output_path,
+            "dest_output_file": saved_path,
+            "storage_type": config.source_type,
+            "status": "success",
+            "execution_time_seconds": duration,
+            "pdf_hash": pdf_hash,
+            "fields_count": fields_count
+        }
+        if pre_map_time_estimate:
+            response["pre_map_time_estimate"] = pre_map_time_estimate
+        return response
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Send failure notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.EXTRACT,
+                status=StageStatus.FAILED,
+                execution_time=duration,
+                error_message=str(e),
+                level=NotificationLevel.CRITICAL,
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
+            )
+        logger.error(f"❌ Extraction failed after {duration}s: {str(e)}")
+        raise
+
+
+async def handle_map_operation(
+    config,  # Storage config (first parameter)
+    mapping_config: dict,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    notifier: Optional[Any] = None,
+    pdf_doc_id: Optional[int] = None,
+    input_json_doc_id: Optional[int] = None,
+    investor_type: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Semantic mapping operation - works with ANY storage backend.
+    Args:
+        config: Storage config with pre-configured paths
+        mapping_config: Mapping configuration
+        user_id: Optional user ID
+        session_id: Optional session ID
+        notifier: Optional notification system
+        pdf_doc_id: Optional PDF document ID
+        input_json_doc_id: Optional input JSON document ID
+        investor_type: Optional investor type
+    Returns:
+        Operation result with output files
+    """
+    start_time = time.time()
+    logger.info("=" * 60)
+    logger.info("MAP OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+    logger.info(f"Investor Type: {investor_type}")
+    user_input_details = {
+        "user_id": user_id,
+        "pdf_doc_id": pdf_doc_id,
+        "input_json_doc_id": input_json_doc_id,
+        "session_id": session_id,
+        "investor_type": investor_type
+    }
+    try:
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
+        # Get input files (already downloaded by entrypoint)
+        local_extracted = input_handler.get_input('extracted_json')
+        local_input = input_handler.get_input('input_json')
+        if not local_extracted or not local_input:
+            raise FileNotFoundError("Required input files not available")
+        logger.info(f"Extracted JSON: {local_extracted}")
+        logger.info(f"Input JSON: {local_input}")
+        # Initialize mapper - use llm_model from settings (LiteLLM format)
+        from pdf_autofillr_mapper.core.config import settings
+        mapper = SemanticMapper(
+            llm_provider=mapping_config.get("llm_model", settings.llm_model),
+            confidence_threshold=mapping_config.get("confidence_threshold", 0.7),
+            chunking_strategy=mapping_config.get("chunking_strategy", "page")
+        )
+        # Use configured output paths
+        local_mapping = config.local_mapped_json
+        local_radio = config.local_radio_json
+        # Debug: Check if paths are set
+        if not local_mapping or not local_radio:
+            logger.error(f"❌ Config paths not set!")
+            logger.error(f"   local_mapped_json: {local_mapping}")
+            logger.error(f"   local_radio_json: {local_radio}")
+            raise ValueError(f"Config missing paths: local_mapped_json={local_mapping}, local_radio_json={local_radio}")
+        logger.info(f"Output paths configured:")
+        logger.info(f"   Mapping: {local_mapping}")
+        logger.info(f"   Radio groups: {local_radio}")
+        storage_config = {
+            "output_path": local_mapping,
+            "radio_groups": local_radio
+        }
+        # Perform mapping
+        mapping_result = await mapper.process_and_save(
+            extracted_path=local_extracted,
+            input_json_path=local_input,
+            original_pdf_path="",
+            storage_config=storage_config,
+            investor_type=investor_type
+        )
+        # The semantic mapper outputs dictionary format with wrapper: {"user_id": ..., "predictions": {...}}
+        # Save this as semantic_mapping.json for reference/debugging/caching
+        semantic_path = local_mapping.replace("_mapped_fields.json", "_semantic_mapping.json")
+        logger.info(f"💾 Saving semantic mapper output (for cache): {semantic_path}")
+        shutil.copy2(local_mapping, semantic_path)
+        # Now convert to Java-compatible format for the embedder
+        # Java embedder needs array format without wrapper: {"field_id": ["field_name", "", confidence]}
+        logger.info("🔄 Converting semantic mapping to Java-compatible format...")
+        with open(local_mapping, 'r') as f:
+            semantic_data = json.load(f)
+        # Strip wrapper if present
+        if isinstance(semantic_data, dict) and "predictions" in semantic_data:
+            semantic_mappings = semantic_data["predictions"]
+        else:
+            semantic_mappings = semantic_data
+        # Convert to Java array format
+        java_mapping = {}
+        for field_id, mapping_data in semantic_mappings.items():
+            if isinstance(mapping_data, dict):
+                field_name = mapping_data.get("predicted_field_name")
+                confidence = mapping_data.get("confidence", 0.0)
+                java_mapping[field_id] = [field_name, "", confidence] if field_name else [None, None, 0]
+            elif isinstance(mapping_data, list) and len(mapping_data) >= 3:
+                field_name = mapping_data[0]
+                confidence = mapping_data[2]
+                java_mapping[field_id] = [field_name, "", confidence] if field_name else [None, None, 0]
+            elif mapping_data is None:
+                java_mapping[field_id] = [None, None, 0]
+            else:
+                logger.warning(f"Field {field_id} has unexpected format: {mapping_data}")
+                java_mapping[field_id] = [None, None, 0]
+        # Save Java format to mapped_fields.json (for embedder)
+        with open(local_mapping, 'w') as f:
+            json.dump(java_mapping, f, indent=2, ensure_ascii=False)
+        logger.info(f"✅ Converted {len(java_mapping)} fields to Java format -> {local_mapping}")
+        # Save outputs immediately to source storage
+        # IMPORTANT: Save semantic mapping first (for cache), then Java format (for embedder)
+        saved_semantic = output_handler.save_output(semantic_path, 'semantic_mapping_json')
+        saved_mapping = output_handler.save_output(local_mapping, 'mapped_json')
+        saved_radio = output_handler.save_output(local_radio, 'radio_json')
+        if saved_semantic:
+            logger.info(f"✅ Saved semantic mapping (for cache): {saved_semantic}")
+        if saved_mapping:
+            logger.info(f"✅ Saved Java mapping (for embedder): {saved_mapping}")
+        if saved_radio:
+            logger.info(f"✅ Saved radio groups to: {saved_radio}")
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Extract statistics
+        field_stats = mapping_result.get("field_statistics", {})
+        # Send success notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            # Use S3 paths for inputs where available (from config)
+            input_files_notification = {
+                "extracted_json": getattr(config, 's3_extracted_json', None) or local_extracted,
+                "global_input_json": getattr(config, 's3_input_json', None) or local_input  # Consistent key name
+            }
+            output_files_notification = {
+                "mapping_json": getattr(config, 's3_mapped_json', None) or local_mapping,  # Consistent key name
+                "radio_groups_json": getattr(config, 's3_radio_json', None) or local_radio  # Consistent key name
+            }
+
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.MAP,
+                status=StageStatus.COMPLETED,
+                execution_time=duration,
+                input_files=input_files_notification,
+                output_files=output_files_notification,
+                user_input_details=user_input_details,
+                performance_metrics={
+                    "total_fields_mapped": field_stats.get("total_fields_mapped", 0),
+                    "high_confidence_count": field_stats.get("high_confidence_count", 0),
+                    "storage_type": config.source_type
+                }
+            )
+        logger.info(f"✅ Mapping completed in {duration}s")
+        logger.info("=" * 60)
+        return {
+            "operation": "map",
+            "mapping_result": {
+                "mapping_path": local_mapping,  # Local processing path
+                "radio_groups_path": local_radio,  # Local processing path
+                "field_statistics": field_stats,
+                # ADD: Destination paths for cache registration
+                "dest_mapping_path": saved_mapping,  # Where file was saved (persistent)
+                "dest_radio_groups_path": saved_radio  # Where file was saved (persistent)
+            },
+            "storage_type": config.source_type,
+            "status": "success",
+            "execution_time_seconds": duration
+        }
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.MAP,
+                status=StageStatus.FAILED,
+                execution_time=duration,
+                error_message=str(e),
+                level=NotificationLevel.CRITICAL,
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
+            )
+        logger.error(f"❌ Mapping failed after {duration}s: {str(e)}")
+        raise
+
+
+async def handle_embed_operation(
+    config,  # Storage config (first parameter)
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    notifier: Optional[Any] = None,
+    pdf_doc_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Embed operation - embeds form data into PDF using Java rebuilder.
+    Works with ANY storage backend.
+    Args:
+        config: Storage config with pre-configured paths
+        user_id: Optional user ID
+        session_id: Optional session ID
+        notifier: Optional notification system
+        pdf_doc_id: Optional PDF document ID
+    Returns:
+        Operation result with embedded PDF path
+    """
+    start_time = time.time()
+    logger.info("=" * 60)
+    logger.info("EMBED OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+    user_input_details = {
+        "user_id": user_id,
+        "pdf_doc_id": pdf_doc_id,
+        "session_id": session_id
+    }
+    try:
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
+        # Get input files
+        # PDF and extracted JSON can be downloaded if needed
+        local_pdf = input_handler.get_input('input_pdf')
+        local_extracted = input_handler.get_input('extracted_json')
+        # Mapped JSON and radio groups — download from S3 if not already local
+        # (they may have been created in a previous Lambda invocation)
+        local_mapping = input_handler.get_input('mapped_json')
+        local_radio   = input_handler.get_input('radio_json')
+        if not all([local_pdf, local_extracted, local_mapping, local_radio]):
+            missing = []
+            if not local_pdf: missing.append("PDF")
+            if not local_extracted: missing.append("extracted JSON")
+            if not local_mapping: missing.append("mapping JSON")
+            if not local_radio: missing.append("radio groups")
+            raise FileNotFoundError(f"Required input files not available: {', '.join(missing)}")
+        logger.info(f"Input PDF: {local_pdf}")
+        logger.info(f"Extracted JSON: {local_extracted}")
+        logger.info(f"Mapping JSON: {local_mapping}")
+        logger.info(f"Radio groups: {local_radio}")
+        # Use configured output path
+        local_embedded = config.local_embedded_pdf
+        storage_config = {
+            "type": "local",
+            "path": local_embedded
+        }
+        # Run Java embedder
+        embedded_pdf = await run_embed_java_stage(
+            original_pdf=local_pdf,
+            extracted_json=local_extracted,
+            mapping_json=local_mapping,
+            radio_json=local_radio,
+            storage_config=storage_config
+        )
+        # Save output immediately to source storage
+        # Use the ACTUAL output path from Java embedder, not the config path
+        logger.info(f"🔍 DEBUG: About to save embedded PDF:")
+        logger.info(f"   embedded_pdf (actual output): {embedded_pdf}")
+        logger.info(f"   config.dest_embedded_pdf: {config.dest_embedded_pdf}")
+        saved_path = output_handler.save_output(embedded_pdf, 'embedded_pdf')
+        logger.info(f"🔍 DEBUG: Save result:")
+        logger.info(f"   saved_path: {saved_path}")
+        if saved_path:
+            logger.info(f"✅ Saved embedded PDF to: {saved_path}")
+        else:
+            logger.error(f"❌ Failed to save embedded PDF!")
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Send success notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            # Use S3 paths for inputs where available (from config) - consistent key names
+            input_files_notification = {
+                "pdf_s3_path": getattr(config, 's3_input_pdf', None) or local_pdf,  # Consistent with final notification
+                "extracted_json": getattr(config, 's3_extracted_json', None) or local_extracted,  # Consistent
+                "mapping_json": getattr(config, 's3_mapped_json', None) or local_mapping,  # Consistent
+                "radio_groups_json": getattr(config, 's3_radio_json', None) or local_radio  # Consistent
+            }
+            output_files_notification = {
+                "embedded_pdf": getattr(config, 'dest_embedded_pdf', None) or getattr(config, 's3_embedded_pdf', None) or local_embedded
+            }
+
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.EMBED,
+                status=StageStatus.COMPLETED,
+                execution_time=duration,
+                input_files=input_files_notification,
+                output_files=output_files_notification,
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type}
+            )
+        logger.info(f"✅ Embedding completed in {duration}s")
+        logger.info("=" * 60)
+        return {
+            "operation": "embed",
+            "output_file": embedded_pdf,
+            "dest_output_file": saved_path,
+            "storage_type": config.source_type,
+            "status": "success",
+            "execution_time_seconds": duration
+        }
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.EMBED,
+                status=StageStatus.FAILED,
+                execution_time=duration,
+                error_message=str(e),
+                level=NotificationLevel.CRITICAL,
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
+            )
+        logger.error(f"❌ Embedding failed after {duration}s: {str(e)}")
+        raise
+
+
+async def handle_fill_operation(
+    config,  # Storage config (first parameter)
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    notifier: Optional[Any] = None,
+    pdf_doc_id: Optional[int] = None,
+    input_json_doc_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Fill operation - fills embedded PDF with user data using Java filler.
+    Works with ANY storage backend.
+    Args:
+        config: Storage config with pre-configured paths
+        user_id: Optional user ID
+        session_id: Optional session ID
+        notifier: Optional notification system
+        pdf_doc_id: Optional PDF document ID
+        input_json_doc_id: Optional input JSON document ID
+    Returns:
+        Operation result with filled PDF path
+    """
+    start_time = time.time()
+    logger.info("=" * 60)
+    logger.info("FILL OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Storage type: {config.source_type}")
+    logger.info(f"User ID: {user_id}, Session ID: {session_id}")
+    user_input_details = {
+        "user_id": user_id,
+        "pdf_doc_id": pdf_doc_id,
+        "input_json_doc_id": input_json_doc_id,
+        "session_id": session_id
+    }
+    try:
+        # Create file handlers
+        input_handler, output_handler = create_file_handlers(config)
+        # Get input files (already downloaded by entrypoint)
+        local_embedded = input_handler.get_input('embedded_pdf')
+        local_input = input_handler.get_input('input_json')
+        if not local_embedded or not local_input:
+            raise FileNotFoundError("Required input files not available")
+        logger.info(f"Embedded PDF: {local_embedded}")
+        logger.info(f"Input JSON: {local_input}")
+        # Use configured output path
+        local_filled = config.local_filled_pdf
+        storage_config = {
+            "type": "local",
+            "path": local_filled
+        }
+        # Run Java filler
+        filled_pdf = await fill_with_java(
+            embedded_pdf=local_embedded,
+            input_json=local_input,
+            output_path=local_filled,  # Tell Java where to save the output
+            storage_config=storage_config
+        )
+        # Save output immediately to source storage
+        saved_path = output_handler.save_output(local_filled, 'filled_pdf')
+        if saved_path:
+            logger.info(f"✅ Saved filled PDF to: {saved_path}")
+        # Generate presigned URL for S3 files (use saved S3 path)
+        filled_presigned_url = None
+        if config.source_type == "aws" and saved_path:
+            try:
+                from pdf_autofillr_mapper.clients.s3_client import S3Client
+                s3_client = S3Client()
+                filled_presigned_url = s3_client.generate_presigned_url(saved_path, expires_in=3600)
+                logger.info("✅ Generated presigned URL for filled PDF (expires in 1 hour)")
+            except Exception as presign_error:
+                logger.warning(f"Failed to generate presigned URL for filled PDF: {presign_error}")
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Send success notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            output_files_notification = {
+                "filled_pdf": saved_path or local_filled
+            }
+            if filled_presigned_url:
+                output_files_notification["filled_presigned_url"] = filled_presigned_url
+
+            # Use configured S3 paths for inputs (from aws_lambda.py _build_aws_config) - consistent key names
+            input_files_notification = {
+                "embedded_pdf": getattr(config, 'dest_embedded_pdf', None) or getattr(config, 's3_embedded_pdf', None) or local_embedded,
+                "global_input_json": getattr(config, 's3_input_json', None) or local_input  # Consistent key name
+            }
+
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.FILL,
+                status=StageStatus.COMPLETED,
+                execution_time=duration,
+                input_files=input_files_notification,
+                output_files=output_files_notification,
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type}
+            )
+        logger.info(f"✅ Filling completed in {duration}s")
+        logger.info("=" * 60)
+        result = {
+            "operation": "fill",
+            "output_file": saved_path or local_filled,  # Return S3 path if saved, else local
+            "dest_output_file": saved_path,  # Explicit S3 destination path (like embed operation)
+            "storage_type": config.source_type,
+            "status": "success",
+            "execution_time_seconds": duration
+        }
+        # Add presigned URL if available
+        if filled_presigned_url:
+            result["filled_presigned_url"] = filled_presigned_url
+            logger.info(f"Presigned URL included in response")
+        return result
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.FILL,
+                status=StageStatus.FAILED,
+                execution_time=duration,
+                error_message=str(e),
+                level=NotificationLevel.CRITICAL,
+                user_input_details=user_input_details,
+                metadata={"storage_type": config.source_type, "error_type": type(e).__name__}
+            )
+        logger.error(f"❌ Filling failed after {duration}s: {str(e)}")
+        raise
+
+
+async def handle_run_all_operation(
+    input_pdf: str,
+    input_json: str,
+    mapping_config: dict,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    notifier: Optional[Any] = None,
+    pdf_doc_id: Optional[int] = None,
+    input_json_doc_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Run all operation - executes complete pipeline (extract -> map -> embed -> fill).
+    Works with ANY storage backend.
+    Args:
+        input_pdf: Input PDF path (s3://, gs://, azure://, or local)
+        input_json: Input JSON with user data
+        mapping_config: Mapping configuration
+        user_id: Optional user ID
+        session_id: Optional session ID
+        notifier: Optional notification system
+        pdf_doc_id: Optional PDF document ID
+        input_json_doc_id: Optional input JSON document ID
+    Returns:
+        Complete pipeline result with all output files
+    """
+    start_time = time.time()
+    storage_type = get_storage_type(input_pdf)
+    logger.info("=" * 80)
+    logger.info("RUN ALL OPERATION - COMPLETE PIPELINE")
+    logger.info("=" * 80)
+    logger.info(f"Input PDF: {input_pdf}")
+    logger.info(f"Input JSON: {input_json}")
+    logger.info(f"Storage type: {storage_type}")
+    pipeline_results = {}
+    try:
+        # Stage 1: Extract
+        logger.info("\n[1/4] Starting EXTRACT stage...")
+        extract_result = await handle_extract_operation(
+            input_file=input_pdf,
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id,
+            input_json_doc_id=input_json_doc_id,
+            input_json_path=input_json,
+            mapping_config=mapping_config
+        )
+        pipeline_results["extract"] = extract_result
+        extracted_json = extract_result["output_file"]
+        logger.info(f"✅ EXTRACT completed: {extracted_json}")
+
+        # Update config with S3 destination path from extract operation for downstream notifications
+        dest_extracted = extract_result.get("dest_output_file")
+        if dest_extracted:
+            config.s3_extracted_json = dest_extracted
+            logger.info(f"📍 Updated config.s3_extracted_json → {dest_extracted}")
+
+        # Stage 2: Map
+        logger.info("\n[2/4] Starting MAP stage...")
+        map_result = await handle_map_operation(
+            config=config,  # Pass config instead of file paths
+            mapping_config=mapping_config,
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id,
+            input_json_doc_id=input_json_doc_id
+        )
+        pipeline_results["map"] = map_result
+        mapping_json = map_result["mapping_result"]["mapping_path"]
+        radio_groups = map_result["mapping_result"]["radio_groups_path"]
+        logger.info(f"✅ MAP completed: {mapping_json}")
+
+        # Update config with S3 destination paths from map operation for embed notification
+        dest_mapping = map_result["mapping_result"].get("dest_mapping_path")
+        dest_radio = map_result["mapping_result"].get("dest_radio_groups_path")
+        if dest_mapping:
+            config.s3_mapped_json = dest_mapping
+            logger.info(f"📍 Updated config.s3_mapped_json → {dest_mapping}")
+        if dest_radio:
+            config.s3_radio_json = dest_radio
+            logger.info(f"📍 Updated config.s3_radio_json → {dest_radio}")
+
+        # Stage 3: Embed
+        logger.info("\n[3/4] Starting EMBED stage...")
+        embed_result = await handle_embed_operation(
+            config=config,  # Pass config instead of file paths
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id
+        )
+        pipeline_results["embed"] = embed_result
+        embedded_pdf = embed_result["output_file"]
+        logger.info(f"✅ EMBED completed: {embedded_pdf}")
+
+        # Update config with S3 destination path from embed operation for fill notification
+        dest_embedded = embed_result.get("dest_output_file")
+        if dest_embedded:
+            config.dest_embedded_pdf = dest_embedded
+            config.s3_embedded_pdf = dest_embedded
+            logger.info(f"📍 Updated config.dest_embedded_pdf → {dest_embedded}")
+
+        # Stage 4: Fill
+        logger.info("\n[4/4] Starting FILL stage...")
+        fill_result = await handle_fill_operation(
+            config=config,
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id,
+            input_json_doc_id=input_json_doc_id
+        )
+        pipeline_results["fill"] = fill_result
+        filled_pdf = fill_result["output_file"]
+        logger.info(f"✅ FILL completed: {filled_pdf}")
+
+        # Pipeline complete - Build comprehensive outputs from all stages
+        end_time = time.time()
+        total_duration = round(end_time - start_time, 2)
+
+        # Aggregate all outputs from all stages into comprehensive dict
+        comprehensive_outputs = {}
+
+        # Extract outputs
+        if pipeline_results.get("extract"):
+            comprehensive_outputs["extracted_json"] = pipeline_results["extract"].get("dest_output_file") or pipeline_results["extract"].get("output_file")
+
+        # Map outputs
+        if pipeline_results.get("map"):
+            map_mapping = pipeline_results["map"]["mapping_result"].get("dest_mapping_path") or pipeline_results["map"]["mapping_result"].get("mapping_path")
+            map_radio = pipeline_results["map"]["mapping_result"].get("dest_radio_groups_path") or pipeline_results["map"]["mapping_result"].get("radio_groups_path")
+            comprehensive_outputs["mapping_json"] = map_mapping
+            comprehensive_outputs["radio_groups_json"] = map_radio
+            # Semantic mapping (for cache/reference)
+            if "semantic_mapping_path" in pipeline_results["map"]["mapping_result"]:
+                comprehensive_outputs["semantic_mapping_json"] = pipeline_results["map"]["mapping_result"]["semantic_mapping_path"]
+
+        # Embed outputs
+        if pipeline_results.get("embed"):
+            comprehensive_outputs["embedded_pdf"] = pipeline_results["embed"].get("dest_output_file") or pipeline_results["embed"].get("output_file")
+
+        # Headers outputs (from Phase 2 if cached/extracted)
+        if pipeline_results.get("headers"):
+            comprehensive_outputs["headers_with_fields"] = pipeline_results["headers"].get("headers_with_fields")
+            comprehensive_outputs["final_form_fields"] = pipeline_results["headers"].get("final_form_fields")
+
+        # RAG/Predictions outputs
+        if pipeline_results.get("rag"):
+            comprehensive_outputs["llm_predictions"] = pipeline_results["rag"].get("llm_predictions")
+            comprehensive_outputs["rag_predictions"] = pipeline_results["rag"].get("rag_predictions")
+            comprehensive_outputs["final_predictions"] = pipeline_results["rag"].get("final_predictions")
+        elif pipeline_results.get("predictions"):
+            comprehensive_outputs["llm_predictions"] = pipeline_results["predictions"].get("llm_predictions")
+            comprehensive_outputs["rag_predictions"] = pipeline_results["predictions"].get("rag_predictions")
+            comprehensive_outputs["final_predictions"] = pipeline_results["predictions"].get("final_predictions")
+
+        # Fill output
+        if pipeline_results.get("fill"):
+            comprehensive_outputs["filled_pdf"] = pipeline_results["fill"].get("dest_output_file") or pipeline_results["fill"].get("output_file")
+            if pipeline_results["fill"].get("filled_presigned_url"):
+                comprehensive_outputs["filled_presigned_url"] = pipeline_results["fill"]["filled_presigned_url"]
+
+        logger.info(f"\n📦 Comprehensive pipeline outputs ({len(comprehensive_outputs)} files):")
+        for output_name, output_path in comprehensive_outputs.items():
+            if output_path:
+                logger.info(f"   ✓ {output_name}: {output_path}")
+
+        # Send comprehensive pipeline completion notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "pipeline_completion",
+                status="completed",
+                total_time=total_duration,
+                final_output=filled_pdf,
+                output_files=comprehensive_outputs,  # All outputs from all stages
+                user_input_details={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "pdf_doc_id": pdf_doc_id,
+                    "input_json_doc_id": input_json_doc_id
+                },
+                timing_breakdown={
+                    "extract": pipeline_results.get("extract", {}).get("execution_time_seconds", 0),
+                    "map": pipeline_results.get("map", {}).get("execution_time_seconds", 0),
+                    "embed": pipeline_results.get("embed", {}).get("execution_time_seconds", 0),
+                    "fill": pipeline_results.get("fill", {}).get("execution_time_seconds", 0)
+                },
+                metadata={
+                    "storage_type": storage_type,
+                    "total_outputs": len(comprehensive_outputs),
+                    "cache_hit": cache_result is not None,
+                    "dual_mapper_enabled": use_second_mapper
+                }
+            )
+        logger.info("\n" + "=" * 80)
+        logger.info(f"✅ COMPLETE PIPELINE SUCCESS in {total_duration}s")
+        logger.info("=" * 80)
+        return {
+            "operation": "run_all",
+            "status": "success",
+            "storage_type": storage_type,
+            "total_execution_time_seconds": total_duration,
+            "final_output": filled_pdf,
+            "pipeline_results": pipeline_results
+        }
+    except Exception as e:
+        end_time = time.time()
+        total_duration = round(end_time - start_time, 2)
+        # Send pipeline failure notification
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "pipeline_completion",
+                status="failed",
+                total_duration=total_duration,
+                error_message=str(e),
+                stage_results=pipeline_results
+            )
+        logger.error("\n" + "=" * 80)
+        logger.error(f"❌ PIPELINE FAILED after {total_duration}s: {str(e)}")
+        logger.error("=" * 80)
+        raise
+
+
+async def handle_refresh_operation(
+    input_pdf: str,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    notifier: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Refresh operation - re-extracts data from PDF and updates config.
+    Works with ANY storage backend.
+    This is similar to extract but specifically for refreshing existing configs.
+    Args:
+        input_pdf: Input PDF path (s3://, gs://, azure://, or local)
+        user_id: Optional user ID
+        session_id: Optional session ID
+        notifier: Optional notification system
+    Returns:
+        Operation result with refreshed extraction
+    """
+    start_time = time.time()
+    storage_type = get_storage_type(input_pdf)
+    logger.info("=" * 60)
+    logger.info("REFRESH OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Input PDF: {input_pdf}")
+    logger.info(f"Storage type: {storage_type}")
+    logger.info("Re-extracting PDF data to refresh configuration...")
+    try:
+        # Call extract operation (refresh is essentially a re-extract)
+        result = await handle_extract_operation(
+            input_file=input_pdf,
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier
+        )
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        logger.info(f"✅ Refresh completed in {duration}s")
+        logger.info("=" * 60)
+        return {
+            "operation": "refresh",
+            "status": "success",
+            "storage_type": storage_type,
+            "execution_time_seconds": duration,
+            "refreshed_file": result["output_file"],
+            "extraction_result": result
+        }
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        logger.error(f"❌ Refresh failed after {duration}s: {str(e)}")
+        raise
+
+# ==============================================================================
+
+# PHASE 1: SEMANTIC MAPPER (with cache support)
+
+# ==============================================================================
+
+
+async def run_semantic_api_mapper(
+    extracted_json_path: str,
+    input_json_path: str,
+    storage_config: Any,
+    user_id: int,
+    pdf_doc_id: int,
+    session_id: Optional[int],
+    pdf_hash: Optional[str],
+    cache_registry_path: str,
+    investor_type: str = 'individual',
+    mapping_config: Optional[dict] = None,
+    notifier: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Run semantic mapper (Phase 1) with cache check.
+    Returns semantic_mapping.json path (raw LLM output format - this is cached).
+    Also returns radio_groups.json path.
+    Cache strategy:
+    - Check cache FIRST using pdf_hash
+    - If HIT: Download cached semantic_mapping.json + radio_groups.json -> return paths
+    - If MISS: Run semantic mapper -> save outputs -> register in cache -> return paths
+    Output format (semantic_mapping.json):
+        - If wrapped: {"user_id": "...", "predictions": {"field_2": {...}}}
+        - If unwrapped: {"field_2": {...}}
+    Args:
+        extracted_json_path: Path to extracted JSON from extract stage
+        input_json_path: Path to input/global JSON template
+        storage_config: Storage configuration object
+        user_id, pdf_doc_id, session_id: IDs for path generation
+        pdf_hash: PDF content hash for cache lookup
+        cache_registry_path: Path to cache registry file
+        investor_type: Investor type for mapping
+        mapping_config: Optional mapping configuration
+        notifier: Optional notification system
+    Returns:
+        {
+            "semantic_mapping_path": str,  # Path to semantic_mapping.json
+            "radio_groups_path": str,       # Path to radio_groups.json
+            "dest_semantic_mapping": str,   # Destination path (for cache registration)
+            "dest_radio_groups": str,       # Destination path (for cache registration)
+            "cache_hit": bool,              # Whether this was a cache hit
+            "llm_usage": dict               # LLM usage stats (model, tokens, cost)
+        }
+    """
+    from pdf_autofillr_mapper.core.config import settings
+    from pdf_autofillr_mapper.utils.hash_cache import check_hash_cache, copy_cached_files
+    import os
+    import json
+    logger.info("=" * 80)
+    logger.info("PHASE 1: SEMANTIC API MAPPER (with cache check)")
+    logger.info("=" * 80)
+    # Check cache first
+    cache_hit = False
+    cache_result = None
+    if pdf_hash:
+        try:
+            logger.info(f"🔍 Checking cache for pdf_hash: {pdf_hash[:16]}...")
+            os.makedirs(os.path.dirname(cache_registry_path), exist_ok=True)
+            cache_result = await check_hash_cache(pdf_hash, cache_registry_path)
+            # IMPORTANT: Persist updated cache registry after check (usage stats were updated)
+            if cache_result and os.path.exists(cache_registry_path):
+                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                cache_output_handler = OutputFileHandler(storage_config)
+                cache_dest = cache_output_handler.save_output(
+                    cache_registry_path, 
+                    'cache_registry_json'
+                )
+                if cache_dest:
+                    logger.info(f"📤 Cache registry updated and persisted to: {cache_dest}")
+                else:
+                    logger.debug("Cache registry persisted (local mode)")
+            if cache_result and "reference_files" in cache_result:
+                logger.info("🎯 CACHE HIT! Using cached semantic mapping")
+                cache_hit = True
+                # Check if files already downloaded by entrypoint
+                if (hasattr(storage_config, 'cached_mapping_json') and
+                    storage_config.cached_mapping_json and
+                    hasattr(storage_config, 'cached_radio_groups') and
+                    storage_config.cached_radio_groups):
+                    logger.info("✅ Using cached files from entrypoint")
+                    semantic_mapping_path = storage_config.cached_mapping_json
+                    radio_groups_path = storage_config.cached_radio_groups
+                    # Destination paths are same as source (already in persistent storage)
+                    dest_semantic_mapping = cache_result["reference_files"].get("mapping_json")
+                    dest_radio_groups = cache_result["reference_files"].get("radio_groups")
+                    return {
+                        "semantic_mapping_path": semantic_mapping_path,
+                        "radio_groups_path": radio_groups_path,
+                        "dest_semantic_mapping": dest_semantic_mapping,
+                        "dest_radio_groups": dest_radio_groups,
+                        "cache_hit": True,
+                        "llm_usage": {}  # Cache hit - no LLM calls
+                    }
+                else:
+                    # Copy cached files to processing directory
+                    logger.info("📥 Copying cached files to processing directory")
+                    target_dir = os.path.dirname(extracted_json_path)
+                    copied_files = await copy_cached_files(
+                        source_files=cache_result["reference_files"],
+                        target_dir=target_dir
+                    )
+                    semantic_mapping_path = copied_files.get("mapping_json")
+                    radio_groups_path = copied_files.get("radio_groups")
+                    if semantic_mapping_path and radio_groups_path:
+                        logger.info(f"✅ Cached semantic mapping: {semantic_mapping_path}")
+                        logger.info(f"✅ Cached radio groups: {radio_groups_path}")
+                        # Destination paths from cache
+                        dest_semantic_mapping = cache_result["reference_files"].get("mapping_json")
+                        dest_radio_groups = cache_result["reference_files"].get("radio_groups")
+                        return {
+                            "semantic_mapping_path": semantic_mapping_path,
+                            "radio_groups_path": radio_groups_path,
+                            "dest_semantic_mapping": dest_semantic_mapping,
+                            "dest_radio_groups": dest_radio_groups,
+                            "cache_hit": True,
+                            "llm_usage": {}  # Cache hit - no LLM calls
+                        }
+                    else:
+                        logger.warning("❌ Cache hit but files missing, will re-run mapper")
+                        cache_hit = False
+        except Exception as cache_error:
+            logger.warning(f"Cache check failed: {cache_error}, will run mapper")
+            cache_hit = False
+    else:
+        logger.info("⚠️  No pdf_hash available, skipping cache check")
+    # Cache miss - run semantic mapper
+    logger.info("🚀 Running semantic mapper (Phase 1)...")
+    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+    from pdf_autofillr_mapper.mappers.semantic_mapper import SemanticMapper
+    from pdf_autofillr_mapper.core.config import settings
+    # Initialize handlers
+    output_handler = OutputFileHandler(storage_config)
+    # Initialize mapper with proper configuration
+    mapper = SemanticMapper(
+        llm_provider=mapping_config.get("llm_model", settings.llm_model) if mapping_config else settings.llm_model,
+        confidence_threshold=mapping_config.get("confidence_threshold", 0.7) if mapping_config else 0.7,
+        chunking_strategy=mapping_config.get("chunking_strategy", "page") if mapping_config else "page"
+    )
+    # Run semantic mapper
+    logger.info(f"Input extracted JSON: {extracted_json_path}")
+    logger.info(f"Input template JSON: {input_json_path}")
+    # Use output paths from config (already set by entrypoint from config.ini)
+    local_mapping = storage_config.local_mapped_json
+    local_radio = storage_config.local_radio_json
+    if not local_mapping or not local_radio:
+        raise ValueError(f"Config missing output paths: local_mapped_json={local_mapping}, local_radio_json={local_radio}")
+    logger.info(f"Output semantic mapping: {local_mapping}")
+    logger.info(f"Output radio groups: {local_radio}")
+    # Create storage config dict for semantic mapper
+    mapper_storage_config = {
+        "output_path": local_mapping,
+        "radio_groups": local_radio
+    }
+    mapping_result = await mapper.process_and_save(
+        extracted_path=extracted_json_path,
+        input_json_path=input_json_path,
+        original_pdf_path="",  # Not needed for semantic mapping
+        storage_config=mapper_storage_config,
+        investor_type=investor_type
+    )
+    # Verify output paths from mapper match config paths
+    mapper_output = mapping_result.get("mapping_path")
+    mapper_radio = mapping_result.get("radio_groups_path")
+    if not mapper_output or not mapper_radio:
+        raise ValueError("Semantic mapper did not return required output paths")
+    logger.info(f"✅ Semantic mapper completed")
+    logger.info(f"   Semantic mapping (raw): {mapper_output}")
+    logger.info(f"   Radio groups: {mapper_radio}")
+    logger.info(f"   Radio groups: {local_radio}")
+    # Save to destination storage (returns destination path or None)
+    dest_semantic_mapping = output_handler.save_output(local_mapping, 'mapped_json')
+    dest_radio_groups = output_handler.save_output(local_radio, 'radio_json')
+    if dest_semantic_mapping:
+        logger.info(f"📤 Uploaded semantic mapping to: {dest_semantic_mapping}")
+    if dest_radio_groups:
+        logger.info(f"📤 Uploaded radio groups to: {dest_radio_groups}")
+    # NOTE: Phase 1 cache (semantic + radio + embedded_pdf) will be saved AFTER embed stage
+    # because embedded PDF doesn't exist yet at this point
+    return {
+        "semantic_mapping_path": local_mapping,
+        "radio_groups_path": local_radio,
+        "dest_semantic_mapping": dest_semantic_mapping,
+        "dest_radio_groups": dest_radio_groups,
+        "cache_hit": False,
+        "llm_usage": mapping_result.get("llm_usage", {})
+    }
+
+# ==============================================================================
+
+# PHASE 2: RAG MAPPER (with cache support)
+
+# ==============================================================================
+
+
+async def _handle_cache_phase(
+    cache_result: Dict[str, Any],
+    use_second_mapper: bool,
+    extracted_json: str,
+    file_config: Optional[Dict],
+    config,
+    user_id: int,
+    session_id: int,
+    pdf_doc_id: int,
+    pdf_hash: Optional[str],
+    cache_registry_path: str,
+    env: str,
+    developer_id: Optional[str],
+    notifier,
+    pipeline_results: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Handle cache hit phase - load cached files and optionally extract/cache Phase 2 headers.
+
+    Source-agnostic - works with any storage backend.
+
+    Args:
+        cache_result: Results from check_hash_cache()
+        use_second_mapper: Whether to use RAG mapper (Phase 2)
+        extracted_json: Path to extracted JSON
+        file_config: Optional file configuration for structured paths
+        config: Storage config
+        user_id, session_id, pdf_doc_id: IDs for tracking
+        pdf_hash: PDF content hash for caching
+        cache_registry_path: Path to cache registry
+        env: Environment name
+        developer_id: Developer ID
+        notifier: Notification system
+        pipeline_results: Pipeline results dictionary to update
+
+    Returns:
+        {
+            'semantic_mapping_path': str,
+            'radio_groups': str,
+            'headers_with_fields_path': str,
+            'final_form_fields_path': str,
+            'mapping_json': str,
+            'combined_mapping_path': str,
+            'saved_java_mapping': str,
+            'dest_headers_with_fields': str,
+            'dest_final_form_fields': str,
+            'rag_api_failed': bool,
+            'pdf_category': str,
+            'embedded_pdf': str,
+            'dest_embedded_pdf': str,
+            'dest_semantic_mapping': str,
+            'dest_radio_groups': str
+        }
+    """
+    logger.info(f"🎯 CACHE HIT! Using cached semantic mapping (saves ~45s + LLM costs)")
+
+    # Initialize result dict
+    cache_phase_result = {
+        'rag_api_failed': False,
+        'pdf_category': None,
+        'embedded_pdf': None,
+        'dest_embedded_pdf': None,
+        'dest_semantic_mapping': None,
+        'dest_radio_groups': None,
+        'dest_headers_with_fields': None,
+        'dest_final_form_fields': None,
+        'mapping_json': None,
+        'combined_mapping_path': None,
+        'saved_java_mapping': None
+    }
+
+    try:
+        # Get cached files from cache registry
+        ref_files = cache_result["reference_files"]
+        from pdf_autofillr_mapper.handlers.input_handler import InputFileHandler
+        _ih = InputFileHandler(config)
+        download_manager = FileDownloadManager(_ih, config)
+
+        # Download cached mapping and radio groups (source-agnostic)
+        _mapping_src = ref_files.get("mapping_json")
+        semantic_mapping_path = await download_manager.download_or_get_mapping(_mapping_src, config.local_mapped_json)
+        _radio_src = ref_files.get("radio_groups")
+        radio_groups = await download_manager.download_or_get_radio(_radio_src, config.local_radio_json)
+        logger.info(f"✅ Loaded cached files — mapping: {semantic_mapping_path}, radio: {radio_groups}")
+
+        # Get cached paths for Phase 2
+        embedded_pdf = cache_result["reference_files"].get("embedded_pdf")
+        dest_embedded_pdf = cache_result["reference_files"].get("embedded_pdf")
+        dest_semantic_mapping = cache_result["reference_files"].get("mapping_json")
+        dest_radio_groups = cache_result["reference_files"].get("radio_groups")
+
+        # Get cached headers if available
+        cached_headers_from_registry = cache_result["reference_files"].get("headers_with_fields")
+        cached_final_fields_from_registry = cache_result["reference_files"].get("final_form_fields")
+        headers_with_fields_path = (
+            config.cached_headers_with_fields if hasattr(config, 'cached_headers_with_fields') and config.cached_headers_with_fields
+            else cached_headers_from_registry
+        )
+        final_form_fields_path = (
+            config.cached_final_form_fields if hasattr(config, 'cached_final_form_fields') and config.cached_final_form_fields
+            else cached_final_fields_from_registry
+        )
+
+        # Phase 2: RAG Mapper (if enabled)
+        if use_second_mapper:
+            # If headers not cached, extract them now
+            if not headers_with_fields_path or not final_form_fields_path:
+                logger.info("\n" + "-" * 80)
+                logger.info("MAPPER PHASE 2: RAG API Mapper - Extracting Headers (Cache Hit)")
+                logger.info("-" * 80)
+                from pdf_autofillr_mapper.headers.get_form_fields_points import get_form_fields_points
+                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+
+                # Get header file paths from config
+                if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
+                    headers_output_path = config.local_headers_with_fields
+                    final_fields_output_path = config.local_final_form_fields
+                elif file_config and "headers" in file_config:
+                    headers_output_path = file_config["headers"]["headers_with_fields_path"]
+                    final_fields_output_path = file_config["headers"]["final_form_fields_path"]
+                else:
+                    raise ValueError("Missing header paths configuration")
+
+                # Extract headers
+                headers_result = await get_form_fields_points(
+                    extracted_json_path=extracted_json,
+                    headers_output_path=headers_output_path,
+                    final_fields_output_path=final_fields_output_path
+                )
+                headers_with_fields_path = headers_output_path
+                final_form_fields_path = final_fields_output_path
+                cache_phase_result['pdf_category'] = headers_result.get("pdf_category")
+
+                # Upload headers to source storage (source-agnostic)
+                output_handler = OutputFileHandler(config)
+                cache_phase_result['dest_headers_with_fields'] = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
+                cache_phase_result['dest_final_form_fields'] = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
+
+                # Track headers extraction with S3 paths
+                pipeline_results["headers"] = {
+                    "headers_with_fields": cache_phase_result['dest_headers_with_fields'],
+                    "final_form_fields": cache_phase_result['dest_final_form_fields'],
+                    "llm_usage": headers_result.get("llm_usage", {})
+                }
+
+                logger.info(f"✅ Headers extracted: {final_form_fields_path}")
+                if cache_phase_result['pdf_category']:
+                    logger.info(f"📋 PDF Category: {cache_phase_result['pdf_category']}")
+
+                # Cache Phase 2 results
+                if pdf_hash:
+                    try:
+                        from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
+                        logger.info("💾 Updating cache with Phase 2 results...")
+                        cache_headers = cache_phase_result['dest_headers_with_fields'] or headers_with_fields_path
+                        cache_final_fields = cache_phase_result['dest_final_form_fields'] or final_form_fields_path
+                        cache_mapping = dest_semantic_mapping or semantic_mapping_path
+                        cache_radio = dest_radio_groups or radio_groups
+                        cache_embedded = dest_embedded_pdf or embedded_pdf
+
+                        await save_hash_cache(
+                            pdf_hash=pdf_hash,
+                            cache_registry_path=cache_registry_path,
+                            embedded_pdf=cache_embedded,
+                            mapping_json=cache_mapping,
+                            radio_groups=cache_radio,
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            headers_with_fields=cache_headers,
+                            final_form_fields=cache_final_fields,
+                            pdf_category=cache_phase_result['pdf_category']
+                        )
+
+                        # Persist cache registry
+                        if os.path.exists(cache_registry_path):
+                            cache_output_handler = OutputFileHandler(config)
+                            cache_dest = cache_output_handler.save_output(cache_registry_path, 'cache_registry_json')
+                            if cache_dest:
+                                logger.info(f"📤 Cache registry persisted to: {cache_dest}")
+                        logger.info("✅ Phase 2 cached: headers_with_fields, final_form_fields")
+                    except Exception as cache_error:
+                        logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
+            else:
+                logger.info("\n" + "-" * 80)
+                logger.info("MAPPER PHASE 2: RAG API Mapper - Using Cached Headers")
+                logger.info("-" * 80)
+                logger.info("🔀 Using cached headers from cache registry")
+
+                # Download cached headers if needed
+                if headers_with_fields_path and final_form_fields_path:
+                    if not headers_with_fields_path.startswith('/tmp/processing'):
+                        input_handler = InputFileHandler(config)
+                        download_mgr = FileDownloadManager(input_handler, config)
+
+                        if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
+                            proc_headers = config.local_headers_with_fields
+                            proc_final_fields = config.local_final_form_fields
+                        elif file_config and "headers" in file_config:
+                            proc_headers = file_config["headers"]["headers_with_fields_path"]
+                            proc_final_fields = file_config["headers"]["final_form_fields_path"]
+                        else:
+                            raise ValueError("Missing header paths configuration")
+
+                        headers_with_fields_path, final_form_fields_path = await download_mgr.download_cached_headers(
+                            headers_source=headers_with_fields_path,
+                            headers_local=proc_headers,
+                            fields_source=final_form_fields_path,
+                            fields_local=proc_final_fields
+                        )
+
+                        # Record persistent paths
+                        if cached_headers_from_registry and not cached_headers_from_registry.startswith('/tmp'):
+                            cache_phase_result['dest_headers_with_fields'] = cached_headers_from_registry
+                        if cached_final_fields_from_registry and not cached_final_fields_from_registry.startswith('/tmp'):
+                            cache_phase_result['dest_final_form_fields'] = cached_final_fields_from_registry
+
+                # Track cached headers in pipeline results with S3 paths
+                pipeline_results["headers"] = {
+                    "headers_with_fields": cache_phase_result.get('dest_headers_with_fields') or headers_with_fields_path,
+                    "final_form_fields": cache_phase_result.get('dest_final_form_fields') or final_form_fields_path,
+                    "llm_usage": {}  # No LLM usage for cached headers (already cached from previous run)
+                }
+
+        # Set return values
+        cache_phase_result.update({
+            'semantic_mapping_path': semantic_mapping_path,
+            'radio_groups': radio_groups,
+            'headers_with_fields_path': headers_with_fields_path,
+            'final_form_fields_path': final_form_fields_path,
+            'embedded_pdf': embedded_pdf,
+            'dest_embedded_pdf': dest_embedded_pdf,
+            'dest_semantic_mapping': dest_semantic_mapping,
+            'dest_radio_groups': dest_radio_groups
+        })
+
+        logger.info(f"✅ Cache phase completed. MAP stage skipped.")
+        return cache_phase_result
+
+    except Exception as cache_error:
+        logger.error(f"Failed to process cached files: {cache_error}. Running MAP stage.")
+        raise
+
+
+async def _handle_map_phase(
+    use_second_mapper: bool,
+    extracted_json: str,
+    input_json_s3: str,
+    file_config: Optional[Dict],
+    config,
+    user_id: int,
+    session_id: int,
+    pdf_doc_id: int,
+    pdf_hash: Optional[str],
+    cache_registry_path: str,
+    env: str,
+    developer_id: Optional[str],
+    investor_type: str,
+    notifier,
+    pipeline_results: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Handle MAP phase (cache miss) - run semantic mapper, extract headers, call RAG API.
+
+    Source-agnostic - works with any storage backend.
+
+    Args:
+        use_second_mapper: Whether to use RAG mapper (Phase 2)
+        extracted_json: Path to extracted JSON
+        input_json_s3: Path to input JSON
+        file_config: Optional file configuration for structured paths
+        config: Storage config
+        user_id, session_id, pdf_doc_id: IDs for tracking
+        pdf_hash: PDF content hash for caching
+        cache_registry_path: Path to cache registry
+        env: Environment name
+        developer_id: Developer ID
+        investor_type: Investor type for mapping
+        notifier: Notification system
+        pipeline_results: Pipeline results dictionary to update
+
+    Returns:
+        {
+            'semantic_mapping_path': str,
+            'radio_groups': str,
+            'headers_with_fields_path': str,
+            'final_form_fields_path': str,
+            'mapping_json': str,
+            'combined_mapping_path': str,
+            'saved_java_mapping': str,
+            'dest_headers_with_fields': str,
+            'dest_final_form_fields': str,
+            'rag_api_failed': bool,
+            'pdf_category': str,
+            'dest_semantic_mapping': str,
+            'dest_radio_groups': str,
+            'dest_embedded_pdf': str
+        }
+    """
+    if pdf_hash:
+        logger.info(f"📭 CACHE MISS. Running semantic mapper...")
+    else:
+        logger.info("📭 No PDF hash available. Running semantic mapper...")
+
+    map_phase_result = {
+        'rag_api_failed': False,
+        'pdf_category': None,
+        'dest_headers_with_fields': None,
+        'dest_final_form_fields': None,
+        'mapping_json': None,
+        'combined_mapping_path': None,
+        'saved_java_mapping': None,
+        'dest_embedded_pdf': None
+    }
+
+    try:
+        # Phase 1: Semantic Mapper
+        logger.info("\n" + "-" * 80)
+        logger.info("MAPPER PHASE 1: Semantic API Mapper")
+        logger.info("-" * 80)
+        semantic_result = await run_semantic_api_mapper(
+            extracted_json_path=extracted_json,
+            input_json_path=getattr(config, 'local_global_json', None) or input_json_s3,
+            storage_config=config,
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            session_id=session_id,
+            pdf_hash=pdf_hash,
+            cache_registry_path=cache_registry_path,
+            investor_type=investor_type,
+            mapping_config={},
+            notifier=notifier
+        )
+        semantic_mapping_path = semantic_result["semantic_mapping_path"]
+        radio_groups = semantic_result["radio_groups_path"]
+        dest_semantic_mapping = semantic_result["dest_semantic_mapping"]
+        dest_radio_groups = semantic_result["dest_radio_groups"]
+        logger.info(f"✅ Semantic mapper completed")
+        logger.info(f"   Semantic mapping: {semantic_mapping_path}")
+        logger.info(f"   Radio groups: {radio_groups}")
+
+        # Phase 2: RAG Mapper (optional - if use_second_mapper is True)
+        if use_second_mapper:
+            logger.info("\n" + "-" * 80)
+            logger.info("MAPPER PHASE 2: RAG API Mapper")
+            logger.info("-" * 80)
+            # Extract headers (required by RAG API)
+            from pdf_autofillr_mapper.headers.get_form_fields_points import get_form_fields_points
+            from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+
+            # Get header file paths from config
+            if hasattr(config, 'local_headers_with_fields') and config.local_headers_with_fields:
+                headers_output_path = config.local_headers_with_fields
+                final_fields_output_path = config.local_final_form_fields
+            elif file_config and "headers" in file_config:
+                headers_output_path = file_config["headers"]["headers_with_fields_path"]
+                final_fields_output_path = file_config["headers"]["final_form_fields_path"]
+            else:
+                raise ValueError("Missing header paths configuration")
+
+            logger.info("📝 Extracting headers for RAG API...")
+            headers_result = await get_form_fields_points(
+                extracted_json_path=extracted_json,
+                headers_output_path=headers_output_path,
+                final_fields_output_path=final_fields_output_path
+            )
+            headers_with_fields_path = headers_output_path
+            final_form_fields_path = final_fields_output_path
+            pdf_category = headers_result.get("pdf_category")
+
+            logger.info(f"✅ Headers extracted: {final_form_fields_path}")
+            if pdf_category:
+                logger.info(f"📋 PDF Category: {pdf_category}")
+
+            # Upload header files to source storage (source-agnostic)
+            output_handler = OutputFileHandler(config)
+            map_phase_result['dest_headers_with_fields'] = output_handler.save_output(headers_with_fields_path, 'headers_with_fields_json')
+            map_phase_result['dest_final_form_fields'] = output_handler.save_output(final_form_fields_path, 'final_form_fields_json')
+
+            # Track headers extraction in pipeline results with S3 paths
+            pipeline_results["headers"] = {
+                "headers_with_fields": map_phase_result['dest_headers_with_fields'],
+                "final_form_fields": map_phase_result['dest_final_form_fields'],
+                "llm_usage": headers_result.get("llm_usage", {})
+            }
+
+            if map_phase_result['dest_headers_with_fields']:
+                logger.info(f"📤 Uploaded headers to: {map_phase_result['dest_headers_with_fields']}")
+            if map_phase_result['dest_final_form_fields']:
+                logger.info(f"📤 Uploaded final fields to: {map_phase_result['dest_final_form_fields']}")
+
+            # Cache Phase 2 results
+            if pdf_hash:
+                try:
+                    from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
+                    logger.info("💾 Updating cache with Phase 2 results...")
+                    cache_headers = map_phase_result['dest_headers_with_fields'] or headers_with_fields_path
+                    cache_final_fields = map_phase_result['dest_final_form_fields'] or final_form_fields_path
+                    cache_mapping = dest_semantic_mapping or semantic_mapping_path
+                    cache_radio = dest_radio_groups or radio_groups
+
+                    await save_hash_cache(
+                        pdf_hash=pdf_hash,
+                        cache_registry_path=cache_registry_path,
+                        embedded_pdf=None,  # Pending embed stage
+                        mapping_json=cache_mapping,
+                        radio_groups=cache_radio,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        headers_with_fields=cache_headers,
+                        final_form_fields=cache_final_fields,
+                        pdf_category=pdf_category
+                    )
+
+                    # Persist cache registry
+                    if os.path.exists(cache_registry_path):
+                        cache_output_handler = OutputFileHandler(config)
+                        cache_dest = cache_output_handler.save_output(cache_registry_path, 'cache_registry_json')
+                        if cache_dest:
+                            logger.info(f"📤 Cache registry persisted to: {cache_dest}")
+                    logger.info("✅ Phase 2 cached")
+                except Exception as cache_error:
+                    logger.warning(f"Failed to cache Phase 2 results: {cache_error}. Continuing anyway.")
+
+            map_phase_result['pdf_category'] = pdf_category
+        else:
+            headers_with_fields_path = None
+            final_form_fields_path = None
+
+        # Set return values
+        map_phase_result.update({
+            'semantic_mapping_path': semantic_mapping_path,
+            'radio_groups': radio_groups,
+            'headers_with_fields_path': headers_with_fields_path,
+            'final_form_fields_path': final_form_fields_path,
+            'dest_semantic_mapping': dest_semantic_mapping,
+            'dest_radio_groups': dest_radio_groups,
+            'phase1_llm_usage': semantic_result.get("llm_usage", {})  # Phase 1 (Semantic Mapper) token costs
+        })
+
+        logger.info(f"✅ MAP phase completed. Ready for RAG API or embedding.")
+        return map_phase_result
+
+    except Exception as map_error:
+        logger.error(f"Failed in MAP phase: {map_error}. Aborting.")
+        raise
+
+
+async def run_rag_api_mapper(
+    extracted_json_path: str,
+    headers_file_path: str,
+    storage_config: Any,
+    user_id: int,
+    pdf_doc_id: int,
+    session_id: Optional[int],
+    pdf_hash: Optional[str],
+    cache_registry_path: str,
+    env: Optional[str] = None,
+    developer_id: Optional[str] = None,
+    notifier: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Run RAG mapper (Phase 2) - always calls RAG API (NOT cached).
+    Returns rag_predictions.json path (RAG API output format).
+    Cache strategy:
+    - RAG predictions are NOT cached (always fresh API call)
+    - Only semantic mapping + headers are cached in Phase 1
+    - This ensures RAG predictions reflect latest embeddings/models
+    Output format (rag_predictions.json):
+        {
+            "user_id": "553",
+            "session_id": "...",
+            "model": "rag",
+            "predictions": {
+                "field_8": {
+                    "predicted_field_name": "investormailingaddressline1_ID",
+                    "confidence": 0.858,
+                    "vector_id": "vec_023",
+                    "top_k": [...]
+                }
+            }
+        }
+    Args:
+        extracted_json_path: Path to extracted JSON
+        headers_file_path: Path to final_form_fields.json (required by RAG API)
+        storage_config: Storage configuration object
+        user_id, pdf_doc_id, session_id: IDs for tracking
+        pdf_hash: PDF content hash (not used for RAG cache)
+        cache_registry_path: Path to cache registry (not used for RAG)
+        notifier: Optional notification system
+    Returns:
+        {
+            "rag_predictions_path": str,    # Path to rag_predictions.json
+            "dest_rag_predictions": str,    # Destination path (for optional cache registration)
+            "success": bool,                # Whether RAG API call succeeded
+            "error": str                    # Error message if failed
+        }
+    """
+    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+    import os
+    logger.info("=" * 80)
+    logger.info("PHASE 2: RAG API MAPPER (always calls RAG API - not cached)")
+    logger.info("=" * 80)
+    # RAG predictions are NOT cached - always call RAG API fresh
+    # (Only semantic mapping + headers are cached in Phase 1)
+    logger.info("📞 Calling RAG API (predictions not cached, always fresh)...")
+    try:
+        # Convert session_id to string if needed (RAG API expects string)
+        session_id_str = str(session_id) if session_id else None
+        # Call RAG API (existing function - requires headers_file_path)
+        rag_predictions_path = await call_rag_api(
+            user_id=user_id,
+            pdf_doc_id=pdf_doc_id,
+            headers_file_path=headers_file_path,  # Path to final_form_fields.json
+            extracted_json_path=extracted_json_path,
+            pdf_hash=pdf_hash,
+            storage_config=storage_config,
+            session_id=session_id_str,
+            env=env,
+            developer_id=developer_id,
+        )
+        print(f"RAG API returned predictions path: {rag_predictions_path}")
+        if not rag_predictions_path or not os.path.exists(rag_predictions_path):
+            logger.warning("❌ RAG API did not return valid predictions file")
+            return {
+                "rag_predictions_path": None,
+                "dest_rag_predictions": None,
+                "success": False,
+                "error": "RAG API returned no file"
+            }
+        logger.info(f"✅ RAG API completed: {rag_predictions_path}")
+        # Save to destination storage
+        output_handler = OutputFileHandler(storage_config)
+        dest_rag_predictions = output_handler.save_output(rag_predictions_path, 'rag_predictions_json')
+        if dest_rag_predictions:
+            logger.info(f"📤 Uploaded RAG predictions to: {dest_rag_predictions}")
+        return {
+            "rag_predictions_path": rag_predictions_path,
+            "dest_rag_predictions": dest_rag_predictions,
+            "success": True,
+            "error": None
+        }
+    except Exception as rag_error:
+        logger.error(f"❌ RAG API failed: {rag_error}")
+        return {
+            "rag_predictions_path": None,
+            "dest_rag_predictions": None,
+            "success": False,
+            "error": str(rag_error)
+        }
+
+
+async def handle_make_embed_file_operation(
+    user_id: int,
+    pdf_doc_id: int,
+    session_id: str,
+    env: str,
+    developer_id: Optional[str] = None,
+    investor_type: str = 'individual',
+    use_second_mapper: bool = False,
+    notifier: Optional[Any] = None,
+    config: Any = None,
+) -> Dict[str, Any]:
+    """
+    Make embed file operation - runs extract -> map -> embed pipeline (without fill).
+    Uses local file paths from config object (downloaded by AWS handler).
+    This creates an embedded PDF ready to be filled later.
+    Args:
+        config: Storage config with local file paths already set
+        user_id: User ID (required)
+        pdf_doc_id: PDF document ID (required)
+        session_id: Optional session ID for tracking
+        investor_type: Investor type for mapping (default: 'individual')
+        mapping_config: Optional mapping configuration
+        use_second_mapper: Whether to use second mapper (default: False)
+        notifier: Optional notification system
+    """
+    start_time = time.time()
+    logger.info("=" * 80)
+    logger.info("MAKE EMBED FILE OPERATION - Partial Pipeline (Extract -> Map -> Embed)")
+    logger.info("=" * 80)
+    logger.info(f"User ID: {user_id}, PDF Doc ID: {pdf_doc_id}")
+    logger.info(f"Session ID: {session_id}, Investor Type: {investor_type}")
+    logger.info(f"🔀 Use Second Mapper (RAG): {use_second_mapper}")
+    try:
+        import json
+        import os
+        import tempfile
+        # Build storage config from env/developer_id if not provided by caller
+        if config is None:
+            from pdf_autofillr_mapper.configs.file_config import get_file_config
+            config = get_file_config(
+                env=env,
+                developer_id=developer_id,
+                user_id=user_id,
+                session_id=session_id,
+                pdf_doc_id=pdf_doc_id,
+            )
+        # Get S3 source paths for operations (NOT local paths)
+        # Operations will download/upload using these S3 paths
+        input_pdf_s3 = config.s3_input_pdf if hasattr(config, 's3_input_pdf') and config.s3_input_pdf else config.local_input_pdf
+        input_json_s3 = (config.s3_global_json if hasattr(config, 's3_global_json') and config.s3_global_json 
+                        else config.s3_input_json if hasattr(config, 's3_input_json') and config.s3_input_json
+                        else getattr(config, 'local_global_json', None) or config.local_input_json)
+        if not input_pdf_s3:
+            raise ValueError("config.s3_input_pdf or local_input_pdf not set")
+        if not input_json_s3:
+            raise ValueError("config.s3_global_json/s3_input_json or local_input_json not set")
+        # Debug: Check if we're using S3 paths or local paths
+        if not input_pdf_s3.startswith('s3://'):
+            logger.info(f"ℹ️  Using LOCAL path for testing: {input_pdf_s3}")
+            logger.debug("(Set config.s3_input_pdf when deploying to Lambda)")
+        if not input_json_s3.startswith('s3://'):
+            logger.info(f"ℹ️  Using LOCAL path for testing: {input_json_s3}")
+            logger.debug("(Set config.s3_input_json when deploying to Lambda)")
+        logger.info(f"Input PDF: {input_pdf_s3}")
+        logger.info(f"Input JSON: {input_json_s3}")
+        storage_type = config.source_type
+        logger.info(f"Storage type: {storage_type}")
+        # For local storage, use pre-configured paths from LocalStorageConfig
+        # For cloud storage, we still need file_config for path generation
+        if storage_type == 'local':
+            # Local deployment: entrypoint already set all paths in config.local_*
+            logger.info("Using pre-configured local paths from LocalStorageConfig")
+            file_config = None
+        elif hasattr(config, 'output_base_path') and config.output_base_path:
+            # Cloud deployment: generate structured output paths
+            logger.info(f"Using structured output directory: {config.output_base_path}")
+            file_config = config.get_complete_file_config(input_pdf_s3, user_id=user_id, session_id=session_id)
+        else:
+            file_config = None
+        pipeline_results = {}
+        # Stage 1: Extract
+        logger.info("\n" + "=" * 80)
+        logger.info("[1/3] EXTRACTION STAGE")
+        logger.info("=" * 80)
+        # Check if entry point already extracted (for hash check)
+        if hasattr(config, 'cached_extraction') and config.cached_extraction:
+            logger.info("[Cache] ✅ Using cached extraction from entry point (saves ~5s)")
+            extract_result = config.cached_extraction
+            # Save to file using configured path
+            if hasattr(config, 'local_extracted_json') and config.local_extracted_json:
+                # Use pre-configured local path (set by entrypoint for both local and AWS)
+                extracted_json = config.local_extracted_json
+                os.makedirs(os.path.dirname(extracted_json), exist_ok=True)
+                with open(extracted_json, 'w') as f:
+                    json.dump(extract_result.get('extracted_data', {}), f, indent=2)
+                extract_result["output_file"] = extracted_json
+                logger.info(f"Saved cached extraction to: {extracted_json}")
+            elif file_config:
+                # Cloud: use generated structured output path
+                extracted_json = file_config["extraction_output_path"]
+                os.makedirs(os.path.dirname(extracted_json), exist_ok=True)
+                with open(extracted_json, 'w') as f:
+                    json.dump(extract_result.get('extracted_data', {}), f, indent=2)
+                extract_result["output_file"] = extracted_json
+                logger.info(f"Saved cached extraction to: {extracted_json}")
+            else:
+                # Fallback: Create temp file for extraction
+                temp_extract = tempfile.NamedTemporaryFile(mode='w', suffix='_extracted.json', delete=False)
+                json.dump(extract_result.get('extracted_data', {}), temp_extract, indent=2)
+                temp_extract.close()
+                extracted_json = temp_extract.name
+                extract_result["output_file"] = extracted_json
+                logger.info(f"Saved cached extraction to temp: {extracted_json}")
+        else:
+            # Run full extraction
+            extract_result = await handle_extract_operation(
+                config=config,  # Pass config instead of file paths
+                user_id=user_id,
+                session_id=session_id,
+                notifier=notifier,
+                pdf_doc_id=pdf_doc_id,
+                input_json_doc_id=None,
+                input_json_path=input_json_s3,  # Still pass for pre-map estimation
+                mapping_config={}
+            )
+            extracted_json = extract_result["output_file"]
+        # Show S3 path in pipeline results, keep local path in extracted_json for processing
+        pipeline_results["extract"] = {
+            **extract_result,
+            "output_file": extract_result.get("dest_output_file") or extract_result["output_file"]
+        }
+        # Early exit: if the PDF has no form fields, there is nothing to map or embed
+        if extract_result.get("fields_count", -1) == 0:
+            logger.warning(f"⚠️ PDF {pdf_doc_id} has 0 form fields — not a fillable PDF form.")
+            return {
+                "operation": "make_embed_file",
+                "status": "no_pdf_forms",
+                "message": "This PDF does not contain any fillable form fields. Mapping and embedding are not applicable.",
+                "pdf_doc_id": pdf_doc_id,
+                "extracted_json": extract_result.get("dest_output_file") or extracted_json,
+                "fields_count": 0,
+                "pdf_hash": extract_result.get("pdf_hash"),
+                "pipeline_results": pipeline_results,
+            }
+        # Track original path BEFORE any moving (for caching)
+        original_extracted_json = extracted_json
+        # If using structured output, move file to proper directory (cloud only)
+        if file_config and storage_type != 'local':
+            expected_path = file_config["extraction"]["extracted_path"]
+            if extracted_json != expected_path:
+                logger.info(f"Moving extracted file to structured output: {expected_path}")
+                os.makedirs(os.path.dirname(expected_path), exist_ok=True)
+                shutil.move(extracted_json, expected_path)
+                extracted_json = expected_path
+                extract_result["output_file"] = expected_path
+        # Store both S3 and local paths
+        if hasattr(config, 's3_extracted_json'):
+            config.s3_extracted_json = extracted_json
+        logger.info(f"✅ EXTRACT completed: {extracted_json}")
+        # Get PDF hash from extraction result
+        pdf_hash = extract_result.get('pdf_hash')
+        if pdf_hash:
+            logger.info(f"PDF fingerprint hash for pdf_doc_id={pdf_doc_id}: {pdf_hash[:16]}...")
+        else:
+            logger.warning(f"PDF hash not available for caching (pdf_doc_id={pdf_doc_id})")
+        # CHECK HASH CACHE - Skip MAP if we've processed this PDF structure before
+        from pdf_autofillr_mapper.core.config import settings
+        from pdf_autofillr_mapper.utils.hash_cache import check_hash_cache, save_hash_cache, copy_cached_files
+        pdf_cache_enabled = getattr(settings, 'pdf_cache_enabled', True)
+        cache_result = None
+        cache_hit = False
+        # cache_registry_path must always be a LOCAL path — hash_cache.py uses open()/os.path.exists().
+        # For AWS: _build_aws_config already downloaded S3 → /tmp and set config.local_cache_registry.
+        # For local: settings.cache_registry_path is set from config.ini.
+        cache_registry_path = (
+            getattr(config, 'local_cache_registry', None)
+            or settings.cache_registry_path
+            or '/tmp/processing/hash_registry.json'
+        )
+        logger.debug(f"Cache registry path (local): {cache_registry_path}")
+        # Initialize variables for dual mapper (needed in all code paths)
+        semantic_mapping_path = None
+        pdf_category = None
+        headers_with_fields_path = None
+        final_form_fields_path = None
+        combined_mapping_path = None
+        llm_predictions_path = None
+        rag_predictions_path = None
+        rag_api_failed = False
+        rag_failure_reason = None
+        # Initialize destination path variables for cache registration
+        dest_semantic_mapping = None
+        dest_radio_groups = None
+        dest_embedded_pdf = None
+        dest_headers_with_fields = None
+        dest_final_form_fields = None
+        saved_java_mapping = None
+        # Initialize semantic_result (will be populated either from cache or semantic mapper)
+        semantic_result = {"llm_usage": {}}  # Default empty when cache hit
+        # Stage 2: Mapping (with cache check)
+        logger.info("\n" + "=" * 80)
+        logger.info("[2/3] MAPPING STAGE")
+        logger.info("=" * 80)
+        logger.info(f"🔀 Use second mapper (RAG): {use_second_mapper}")
+        if pdf_cache_enabled and pdf_hash:
+            try:
+                logger.info(f"🔍 Checking hash cache at: {cache_registry_path}")
+                # Ensure cache directory exists (for local paths)
+                if not cache_registry_path.startswith(('s3://', 'gs://', 'azure://')):
+                    os.makedirs(os.path.dirname(cache_registry_path), exist_ok=True)
+                cache_result = await check_hash_cache(pdf_hash, cache_registry_path)
+                # IMPORTANT: Persist updated cache registry after check (usage stats were updated)
+                if cache_result and os.path.exists(cache_registry_path):
+                    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                    cache_output_handler = OutputFileHandler(config)
+                    cache_dest = cache_output_handler.save_output(
+                        cache_registry_path, 
+                        'cache_registry_json'
+                    )
+                    if cache_dest:
+                        logger.info(f"📤 Cache registry updated and persisted to: {cache_dest}")
+                    else:
+                        logger.debug("Cache registry persisted (local mode)")
+            except Exception as cache_error:
+                logger.warning(f"Cache check failed: {cache_error}. Proceeding with normal MAP operation.")
+        # If CACHE HIT: Use cached semantic mapping
+        if cache_result:
+            logger.info(f"🎯 CACHE HIT! Using cached semantic mapping (saves ~45s + LLM costs)")
+            cache_hit = True
+            try:
+                # Call extracted _handle_cache_phase() function (source-agnostic, consolidated)
+                cache_phase_result = await _handle_cache_phase(
+                    cache_result=cache_result,
+                    use_second_mapper=use_second_mapper,
+                    extracted_json=extracted_json,
+                    file_config=file_config,
+                    config=config,
+                    user_id=user_id,
+                    session_id=session_id,
+                    pdf_doc_id=pdf_doc_id,
+                    pdf_hash=pdf_hash,
+                    cache_registry_path=cache_registry_path,
+                    env=env,
+                    developer_id=developer_id,
+                    notifier=notifier,
+                    pipeline_results=pipeline_results
+                )
+
+                # Unpack results from cache phase
+                semantic_mapping_path = cache_phase_result['semantic_mapping_path']
+                radio_groups = cache_phase_result['radio_groups']
+                headers_with_fields_path = cache_phase_result['headers_with_fields_path']
+                final_form_fields_path = cache_phase_result['final_form_fields_path']
+                embedded_pdf = cache_phase_result['embedded_pdf']
+                dest_embedded_pdf = cache_phase_result['dest_embedded_pdf']
+                dest_semantic_mapping = cache_phase_result['dest_semantic_mapping']
+                dest_radio_groups = cache_phase_result['dest_radio_groups']
+                dest_headers_with_fields = cache_phase_result['dest_headers_with_fields']
+                dest_final_form_fields = cache_phase_result['dest_final_form_fields']
+                pdf_category = cache_phase_result['pdf_category']
+
+                # Call RAG mapper if enabled (runs for both cache hit and MAP phase)
+                if use_second_mapper:
+                    rag_result = await run_rag_api_mapper(
+                        extracted_json_path=extracted_json,
+                        headers_file_path=final_form_fields_path,
+                        storage_config=config,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        session_id=session_id,
+                        pdf_hash=pdf_hash,
+                        cache_registry_path=cache_registry_path,
+                        env=env,
+                        developer_id=developer_id,
+                        notifier=notifier
+                    )
+                    if rag_result["success"]:
+                        logger.info(f"✅ RAG predictions: {rag_result['rag_predictions_path']}")
+                        rag_predictions_path = rag_result["rag_predictions_path"]
+                        # Save LLM predictions for comparison
+                        logger.info("📋 Saving LLM predictions for comparison...")
+                        llm_predictions_path = await save_llm_predictions_to_rag_bucket(
+                            semantic_mapping_path=semantic_mapping_path,
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            storage_config=config,
+                            session_id=session_id
+                        )
+                        # Upload LLM predictions to RAG bucket
+                        from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                        from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+                        output_handler = OutputFileHandler(config)
+                        if hasattr(config, '_sc'):
+                            pr = PathResolver(config._sc)
+                            uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
+                            rag_llm_pred_path = pr.remote_llm_predictions(uid, sid, pid)
+                            dest_llm_predictions = output_handler.save_output(
+                                llm_predictions_path,
+                                'llm_predictions_json',
+                                destination_path=rag_llm_pred_path
+                            )
+                        else:
+                            dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
+                        logger.info(f"✅ LLM predictions saved and uploaded")
+                        # Combine semantic + RAG
+                        logger.info("🔄 Combining semantic + RAG predictions...")
+                        mapping_json, combined_mapping_path = await combine_mappings(
+                            semantic_mapping_path=semantic_mapping_path,
+                            rag_predictions_path=rag_predictions_path,
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            storage_config=config,
+                            session_id=session_id
+                        )
+                        logger.info(f"✅ Combined mapping created")
+                        # Save to RAG bucket
+                        saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                        saved_final_predictions = await save_final_predictions_to_rag(
+                            output_handler,
+                            config,
+                            combined_mapping_path
+                        )
+                        logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                        logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+                        rag_api_failed = False
+                    else:
+                        logger.warning(f"RAG failed: {rag_result['error']}, using semantic only")
+                        mapping_json = await convert_semantic_to_java_format(
+                            semantic_mapping_path=semantic_mapping_path,
+                            user_id=user_id,
+                            pdf_doc_id=pdf_doc_id,
+                            storage_config=config
+                        )
+                        # Save to RAG bucket
+                        from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                        output_handler = OutputFileHandler(config)
+                        saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                        saved_final_predictions = await save_final_predictions_to_rag(
+                            output_handler,
+                            config,
+                            mapping_json
+                        )
+                        logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                        logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+                        rag_api_failed = True
+                        rag_failure_reason = rag_result['error']
+                        rag_predictions_path = None
+                else:
+                    # Semantic mapper only - convert cached semantic to Java format
+                    logger.info("🔄 Converting cached semantic mapping to Java format...")
+                    mapping_json = await convert_semantic_to_java_format(
+                        semantic_mapping_path=semantic_mapping_path,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        storage_config=config
+                    )
+                    # Save to RAG bucket
+                    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                    output_handler = OutputFileHandler(config)
+                    saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    saved_final_predictions = await save_final_predictions_to_rag(
+                        output_handler,
+                        config,
+                        mapping_json
+                    )
+                    logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                    logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+
+                # Update config paths
+                config.local_mapped_json = mapping_json
+                config.local_radio_json = radio_groups
+                logger.info(f"✅ Cache processed. MAP stage skipped.")
+
+                # Send MAP stage notification for cache hit path
+                if notifier and NOTIFICATIONS_AVAILABLE:
+                    await safe_notify(
+                        notifier, "stage_completion",
+                        stage=PipelineStage.MAP,
+                        status=StageStatus.COMPLETED,
+                        execution_time=0,  # Cache hit - instant
+                        input_files={
+                            "extracted_json": dest_semantic_mapping or semantic_mapping_path or extracted_json,
+                            "global_input_json": input_json_s3  # Consistent key name
+                        },
+                        output_files={
+                            "mapping_json": dest_semantic_mapping or semantic_mapping_path,
+                            "radio_groups_json": dest_radio_groups or radio_groups
+                        },
+                        user_input_details={
+                            "user_id": user_id,
+                            "pdf_doc_id": pdf_doc_id,
+                            "session_id": session_id
+                        },
+                        metadata={
+                            "pdf_category": pdf_category,
+                            "storage_type": storage_type,
+                            "cache_hit": True
+                        }
+                    )
+            except Exception as cache_error:
+                logger.error(f"Failed to process cached files: {cache_error}. Running MAP stage.")
+                cache_hit = False
+        # Stage 2: Map (only if cache miss)
+        if not cache_hit:
+            # CACHE MISS: Call extracted _handle_map_phase() function (source-agnostic, consolidated)
+            map_phase_result = await _handle_map_phase(
+                use_second_mapper=use_second_mapper,
+                extracted_json=extracted_json,
+                input_json_s3=input_json_s3,
+                file_config=file_config,
+                config=config,
+                user_id=user_id,
+                session_id=session_id,
+                pdf_doc_id=pdf_doc_id,
+                pdf_hash=pdf_hash,
+                cache_registry_path=cache_registry_path,
+                env=env,
+                developer_id=developer_id,
+                investor_type=investor_type,
+                notifier=notifier,
+                pipeline_results=pipeline_results
+            )
+
+            # Unpack results from MAP phase
+            semantic_mapping_path = map_phase_result['semantic_mapping_path']
+            radio_groups = map_phase_result['radio_groups']
+            headers_with_fields_path = map_phase_result['headers_with_fields_path']
+            final_form_fields_path = map_phase_result['final_form_fields_path']
+            dest_semantic_mapping = map_phase_result['dest_semantic_mapping']
+            dest_radio_groups = map_phase_result['dest_radio_groups']
+            pdf_category = map_phase_result['pdf_category']
+            # Capture Phase 1 (semantic mapper) LLM usage for response
+            semantic_result['llm_usage'] = map_phase_result.get('phase1_llm_usage', {})
+
+            # Send MAP stage notification (was missing!)
+            if notifier and NOTIFICATIONS_AVAILABLE:
+                map_duration = map_phase_result.get('execution_time_seconds', 0)
+                await safe_notify(
+                    notifier, "stage_completion",
+                    stage=PipelineStage.MAP,
+                    status=StageStatus.COMPLETED,
+                    execution_time=map_duration,
+                    input_files={
+                        "extracted_json": dest_semantic_mapping or semantic_mapping_path or extracted_json,
+                        "global_input_json": input_json_s3  # Consistent key name
+                    },
+                    output_files={
+                        "mapping_json": dest_semantic_mapping or semantic_mapping_path,
+                        "radio_groups_json": dest_radio_groups or radio_groups
+                    },
+                    user_input_details={
+                        "user_id": user_id,
+                        "pdf_doc_id": pdf_doc_id,
+                        "session_id": session_id
+                    },
+                    performance_metrics={
+                        "pdf_category": pdf_category,
+                        "storage_type": storage_type
+                    }
+                )
+
+            # Call RAG mapper if enabled (runs for both cache hit and MAP phase)
+            if use_second_mapper:
+                rag_result = await run_rag_api_mapper(
+                    extracted_json_path=extracted_json,
+                    headers_file_path=final_form_fields_path,
+                    storage_config=config,
+                    user_id=user_id,
+                    pdf_doc_id=pdf_doc_id,
+                    session_id=session_id,
+                    pdf_hash=pdf_hash,
+                    cache_registry_path=cache_registry_path,
+                    env=env,
+                    developer_id=developer_id,
+                    notifier=notifier
+                )
+                if rag_result["success"]:
+                    logger.info(f"✅ RAG predictions: {rag_result['rag_predictions_path']}")
+                    rag_predictions_path = rag_result["rag_predictions_path"]
+                    # Save LLM predictions for comparison
+                    logger.info("📋 Saving LLM predictions for comparison...")
+                    llm_predictions_path = await save_llm_predictions_to_rag_bucket(
+                        semantic_mapping_path=semantic_mapping_path,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        storage_config=config,
+                        session_id=session_id
+                    )
+                    # Upload LLM predictions to RAG bucket
+                    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+                    output_handler = OutputFileHandler(config)
+                    if hasattr(config, '_sc'):
+                        pr = PathResolver(config._sc)
+                        uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
+                        rag_llm_pred_path = pr.remote_llm_predictions(uid, sid, pid)
+                        dest_llm_predictions = output_handler.save_output(
+                            llm_predictions_path,
+                            'llm_predictions_json',
+                            destination_path=rag_llm_pred_path
+                        )
+                    else:
+                        dest_llm_predictions = output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
+                    logger.info(f"✅ LLM predictions saved and uploaded")
+                    # Combine semantic + RAG
+                    logger.info("🔄 Combining semantic + RAG predictions...")
+                    mapping_json, combined_mapping_path = await combine_mappings(
+                        semantic_mapping_path=semantic_mapping_path,
+                        rag_predictions_path=rag_predictions_path,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        storage_config=config,
+                        session_id=session_id
+                    )
+                    logger.info(f"✅ Combined mapping created")
+                    # Save to RAG bucket
+                    saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    saved_final_predictions = await save_final_predictions_to_rag(
+                        output_handler,
+                        config,
+                        combined_mapping_path
+                    )
+                    logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                    logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+                    rag_api_failed = False
+                else:
+                    logger.warning(f"RAG failed: {rag_result['error']}, using semantic only")
+                    mapping_json = await convert_semantic_to_java_format(
+                        semantic_mapping_path=semantic_mapping_path,
+                        user_id=user_id,
+                        pdf_doc_id=pdf_doc_id,
+                        storage_config=config
+                    )
+                    # Save to RAG bucket
+                    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                    output_handler = OutputFileHandler(config)
+                    saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                    saved_final_predictions = await save_final_predictions_to_rag(
+                        output_handler,
+                        config,
+                        mapping_json
+                    )
+                    logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                    logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+                    rag_api_failed = True
+                    rag_failure_reason = rag_result['error']
+                    rag_predictions_path = None
+            else:
+                # Semantic mapper only - convert to Java format
+                logger.info("🔄 Converting semantic mapping to Java format...")
+                mapping_json = await convert_semantic_to_java_format(
+                    semantic_mapping_path=semantic_mapping_path,
+                    user_id=user_id,
+                    pdf_doc_id=pdf_doc_id,
+                    storage_config=config
+                )
+                # Save to RAG bucket
+                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                output_handler = OutputFileHandler(config)
+                saved_java_mapping = output_handler.save_output(mapping_json, 'java_mapping_json')
+                saved_final_predictions = await save_final_predictions_to_rag(
+                    output_handler,
+                    config,
+                    mapping_json
+                )
+                logger.info(f"📤 Uploaded Java mapping to: {saved_java_mapping}")
+                logger.info(f"📤 Uploaded final predictions to: {saved_final_predictions}")
+
+            # Update config paths
+            config.local_mapped_json = mapping_json
+            config.local_radio_json = radio_groups
+            logger.info(f"✅ MAP phase completed.")
+        # Store map result for pipeline tracking — prefer S3 dest paths over local /tmp
+        pipeline_results["map"] = {
+            "mapping_path":         saved_java_mapping or mapping_json,
+            "radio_groups_path":    dest_radio_groups  or radio_groups,
+            "semantic_mapping_path":dest_semantic_mapping or semantic_mapping_path,
+            "combined_mapping_path": combined_mapping_path if use_second_mapper and not rag_api_failed else None,
+            "pdf_category": pdf_category if use_second_mapper else None,
+            "use_second_mapper": use_second_mapper,
+            "rag_api_failed": rag_api_failed if use_second_mapper else None,
+            "rag_failure_reason": rag_failure_reason if use_second_mapper and rag_api_failed else None,
+            "llm_usage": semantic_result.get("llm_usage", {})  # Phase 1 (Semantic Mapper) token costs
+        }
+        # Store S3 paths
+        if hasattr(config, 's3_mapped_json'):
+            config.s3_mapped_json = mapping_json
+            config.s3_radio_json = radio_groups
+        # Track original paths BEFORE any moving (for caching)
+        original_mapping_json = mapping_json
+        original_radio_groups = radio_groups
+        # If using structured output, move files to proper directory (cloud only, local paths already correct)
+        if file_config and storage_type != 'local':
+            expected_mapping_path = file_config["mapping"]["mapping_path"]
+            expected_radio_path = file_config["mapping"]["radio_groups_path"]
+            if mapping_json != expected_mapping_path:
+                logger.info(f"Moving mapping file to structured output: {expected_mapping_path}")
+                os.makedirs(os.path.dirname(expected_mapping_path), exist_ok=True)
+                shutil.move(mapping_json, expected_mapping_path)
+                mapping_json = expected_mapping_path
+                pipeline_results["map"]["mapping_path"] = expected_mapping_path
+            if radio_groups != expected_radio_path:
+                logger.info(f"Moving radio groups to structured output: {expected_radio_path}")
+                os.makedirs(os.path.dirname(expected_radio_path), exist_ok=True)
+                shutil.move(radio_groups, expected_radio_path)
+                radio_groups = expected_radio_path
+                pipeline_results["map"]["radio_groups_path"] = expected_radio_path
+        logger.info(f"✅ MAP completed: {mapping_json}")
+        # Save cache after MAP so the registry exists on S3 even if embed fails.
+        # embedded_pdf is None here — updated after embed completes below.
+        # Always use S3 destination paths; saved_java_mapping is the persistent java mapping path.
+        if pdf_cache_enabled and pdf_hash and not cache_hit:
+            try:
+                from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
+                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                cache_mapping = saved_java_mapping if saved_java_mapping else (dest_semantic_mapping or mapping_json)
+                cache_radio   = dest_radio_groups  if dest_radio_groups  else radio_groups
+                await save_hash_cache(
+                    pdf_hash=pdf_hash,
+                    cache_registry_path=cache_registry_path,
+                    embedded_pdf=None,          # not available yet — updated after embed
+                    mapping_json=cache_mapping,
+                    radio_groups=cache_radio,
+                    user_id=user_id,
+                    pdf_doc_id=pdf_doc_id,
+                    pdf_category=pdf_category,  # Add pdf_category if available
+                )
+                logger.info("💾 MAP cache saved (embedded_pdf pending embed stage)")
+                if os.path.exists(cache_registry_path):
+                    output_handler = OutputFileHandler(config)
+                    output_handler.save_output(cache_registry_path, 'cache_registry_json')
+                    logger.info("📤 Cache registry uploaded to S3 after MAP")
+            except Exception as _ce:
+                logger.warning(f"Failed to save MAP cache: {_ce}")
+        # Update config with S3 paths from cache/map phase for embed notification
+        if dest_semantic_mapping:
+            config.s3_extracted_json = dest_semantic_mapping  # Use semantic mapping S3 path
+        if dest_semantic_mapping:
+            config.s3_mapped_json = dest_semantic_mapping
+        if dest_radio_groups:
+            config.s3_radio_json = dest_radio_groups
+
+        # Stage 3: Embed
+        logger.info("\n" + "=" * 80)
+        logger.info("[3/3] EMBEDDING STAGE")
+        logger.info("=" * 80)
+        embed_result = await handle_embed_operation(
+            config=config,  # Pass config instead of file paths
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id
+        )
+        pipeline_results["embed"] = {
+            **embed_result,
+            "output_file": embed_result.get("dest_output_file") or embed_result["output_file"]
+        }
+        embedded_pdf = embed_result["output_file"]
+        # Extract DESTINATION path for cache registration (where file was saved)
+        dest_embedded_pdf = embed_result.get("dest_output_file")
+        logger.info(f"🔍 DEBUG: Extracted destination paths for cache:")
+        logger.info(f"   dest_embedded_pdf: {dest_embedded_pdf}")
+        logger.info(f"   dest_semantic_mapping: {dest_semantic_mapping}")
+        logger.info(f"   dest_radio_groups: {dest_radio_groups}")
+        # Track original path BEFORE any moving (for caching)
+        original_embedded_pdf = embedded_pdf
+        # If using structured output, move file to proper directory (cloud only, local paths already correct)
+        if file_config and storage_type != 'local':
+            expected_embedded_path = file_config["embedding"]["embedded_pdf_path"]
+            if embedded_pdf != expected_embedded_path:
+                logger.info(f"Moving embedded PDF to structured output: {expected_embedded_path}")
+                os.makedirs(os.path.dirname(expected_embedded_path), exist_ok=True)
+                shutil.move(embedded_pdf, expected_embedded_path)
+                embedded_pdf = expected_embedded_path
+                embed_result["output_file"] = expected_embedded_path
+        # Store S3 path
+        if hasattr(config, 's3_embedded_pdf'):
+            config.s3_embedded_pdf = embedded_pdf
+        logger.info(f"✅ EMBED completed: {embedded_pdf}")
+        # CACHE PHASE 1 RESULTS immediately after embed stage completes
+        # Always update embedded_pdf — even on cache hit the entry starts with null.
+        if pdf_cache_enabled and pdf_hash:
+            try:
+                from pdf_autofillr_mapper.utils.hash_cache import save_hash_cache
+                from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+                logger.info("💾 Saving Phase 1 to cache (embedded_pdf + semantic_mapping + radio_groups)...")
+                # Use DESTINATION paths (where files were actually saved) for cache
+                cache_embedded = dest_embedded_pdf if dest_embedded_pdf else embedded_pdf
+                cache_mapping  = saved_java_mapping if saved_java_mapping else (dest_semantic_mapping or semantic_mapping_path)
+                cache_radio    = dest_radio_groups  if dest_radio_groups  else radio_groups
+                logger.info(f"   Cache will reference persistent paths:")
+                logger.info(f"      embedded_pdf: {cache_embedded}")
+                logger.info(f"      mapping_json: {cache_mapping}")
+                logger.info(f"      radio_groups: {cache_radio}")
+                # Include Phase 2 files if second mapper ran
+                _cache_headers      = dest_headers_with_fields if dest_headers_with_fields else headers_with_fields_path
+                _cache_final_fields = dest_final_form_fields   if dest_final_form_fields   else final_form_fields_path
+                await save_hash_cache(
+                    pdf_hash=pdf_hash,
+                    cache_registry_path=cache_registry_path,
+                    embedded_pdf=cache_embedded,
+                    mapping_json=cache_mapping,
+                    radio_groups=cache_radio,
+                    user_id=user_id,
+                    pdf_doc_id=pdf_doc_id,
+                    headers_with_fields=_cache_headers,
+                    final_form_fields=_cache_final_fields,
+                    pdf_category=pdf_category
+                )
+                logger.info(f"✅ Phase 1 cached locally to: {cache_registry_path}")
+                # IMPORTANT: Upload cache registry to source storage so it persists
+                if os.path.exists(cache_registry_path):
+                    output_handler = OutputFileHandler(config)
+                    logger.info(f"📤 Persisting cache registry: {cache_registry_path} -> source storage")
+                    cache_dest = output_handler.save_output(
+                        cache_registry_path, 
+                        'cache_registry_json'
+                    )
+                    if cache_dest:
+                        logger.info(f"✅ Cache registry persisted to: {cache_dest}")
+                    else:
+                        logger.warning("⚠️  Cache registry save returned None")
+                logger.info("✅ Phase 1 cached: embedded_pdf, mapping_json, radio_groups")
+            except Exception as cache_error:
+                logger.warning(f"Failed to cache Phase 1 results: {cache_error}. Continuing anyway.")
+        elif not pdf_hash:
+            logger.info("⚠️  No pdf_hash available, skipping Phase 1 cache")
+        # NOTE: Cache is now saved incrementally after each phase completes:
+        # - Phase 1 (After Embed): embedded_pdf, mapping_json, radio_groups  ← JUST SAVED ABOVE
+        # - Phase 2 (After Headers): headers_with_fields, final_form_fields   ← Saved in dual mapper path
+        # - Phase 3 (RAG API): Not cached (always fresh)
+        # This ensures we don't lose work if later phases fail.
+        end_time = time.time()
+        total_duration = round(end_time - start_time, 2)
+        # Get PDF hash from extract result
+        pdf_hash = extract_result.get('pdf_hash')
+
+        # Calculate cumulative LLM costs from all phases
+        phase1_llm = pipeline_results.get("map", {}).get("llm_usage", {})
+        headers_llm = pipeline_results.get("headers", {}).get("llm_usage", {}) if "headers" in pipeline_results else {}
+
+        total_llm_cost = phase1_llm.get("total_cost_usd", 0) + headers_llm.get("total_cost_usd", 0)
+        total_llm_tokens = (phase1_llm.get("total_tokens", 0) or 0) + (headers_llm.get("total_tokens", 0) or 0)
+
+        logger.info("\n" + "=" * 80)
+        logger.info(f"✅ MAKE EMBED FILE SUCCESS in {total_duration}s")
+        logger.info(f"Embedded PDF ready for filling: {embedded_pdf}")
+        if pdf_hash:
+            logger.info(f"PDF fingerprint hash: {pdf_hash[:16]}...")
+
+        # Log cumulative cost summary
+        logger.info("")
+        logger.info("💰 CUMULATIVE LLM COST SUMMARY:")
+        if phase1_llm.get('total_tokens', 0) > 0:
+            logger.info(f"   Phase 1 (Semantic Mapper):       {phase1_llm.get('total_tokens', 0):,} tokens → ${phase1_llm.get('total_cost_usd', 0):.6f}")
+        else:
+            logger.info(f"   Phase 1 (Semantic Mapper):       ✅ CACHED (0 tokens, $0.000000)")
+        if headers_llm.get('total_tokens', 0) > 0:
+            logger.info(f"   Phase 2 (Headers Extraction):    {headers_llm.get('total_tokens', 0):,} tokens → ${headers_llm.get('total_cost_usd', 0):.6f}")
+        else:
+            logger.info(f"   Phase 2 (Headers Extraction):    ✅ CACHED (0 tokens, $0.000000)")
+        logger.info(f"   ───────────────────────────────────────────────")
+        logger.info(f"   Total:                            {total_llm_tokens:,} tokens → ${total_llm_cost:.6f}")
+        logger.info("")
+        logger.info("=" * 80)
+
+        # Build comprehensive outputs dict
+        comprehensive_outputs = {
+            "extracted_json":       getattr(config, 'dest_extracted_json',           None) or extracted_json,
+            "mapping_json":         saved_java_mapping                                      or mapping_json,
+            "radio_groups_json":    dest_radio_groups                                       or radio_groups,
+            "embedded_pdf":         dest_embedded_pdf                                       or embedded_pdf,
+            "semantic_mapping_json":dest_semantic_mapping                                   or semantic_mapping_path,
+            "headers_with_fields":  dest_headers_with_fields                                or headers_with_fields_path,
+            "final_form_fields":    dest_final_form_fields                                  or final_form_fields_path,
+            "llm_predictions":      getattr(config, 'dest_llm_predictions_json',    None)  or llm_predictions_path,
+            "rag_predictions":      getattr(config, 'dest_rag_predictions_json',    None)  or rag_predictions_path,
+            "final_predictions":    saved_final_predictions                                 or combined_mapping_path,
+        }
+
+        # Send FINAL pipeline completion notification with ALL outputs + LLM costs
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "pipeline_completion",
+                status="completed",
+                total_time=total_duration,
+                output_files=comprehensive_outputs,
+                user_input_details={
+                    "user_id": user_id,
+                    "pdf_doc_id": pdf_doc_id,
+                    "session_id": session_id
+                },
+                timing_breakdown={
+                    "extract": pipeline_results.get("extract", {}).get("execution_time_seconds", 0),
+                    "map": pipeline_results.get("map", {}).get("execution_time_seconds", 0),
+                    "embed": pipeline_results.get("embed", {}).get("execution_time_seconds", 0)
+                },
+                performance_metrics={
+                    "llm_cost_summary": {
+                        "phase_1_semantic_mapper": phase1_llm,
+                        "phase_2_headers_extraction": headers_llm,
+                        "total_tokens": total_llm_tokens,
+                        "total_cost_usd": total_llm_cost
+                    }
+                },
+                metadata={
+                    "storage_type": storage_type,
+                    "total_outputs": len([v for v in comprehensive_outputs.values() if v]),
+                    "cache_hit": cache_hit,
+                    "dual_mapper_enabled": use_second_mapper,
+                    "investor_type": investor_type
+                }
+            )
+
+        return {
+            "operation": "make_embed_file",
+            "investor_type": investor_type,
+            "inputs": {
+                "pdf_doc_id": pdf_doc_id,
+                "pdf_s3_path": input_pdf_s3,
+                "global_input_json": input_json_s3
+            },
+            "outputs": comprehensive_outputs,
+            "pdf_category": pdf_category,
+            "pdf_hash": pdf_hash,
+            "cache_hit": cache_hit,
+            "dual_mapper_info": {
+                "enabled": use_second_mapper,
+                "rag_api_failed": rag_api_failed,
+                "rag_failure_reason": rag_failure_reason if rag_api_failed else None,
+                "mapper_used": "Semantic + RAG" if use_second_mapper and not rag_api_failed else "Semantic only"
+            },
+            "status": "success",
+            "llm_cost_summary": {
+                "phase_1_semantic_mapper": phase1_llm,
+                "phase_2_headers_extraction": headers_llm,
+                "total_tokens": total_llm_tokens,
+                "total_cost_usd": round(total_llm_cost, 6)
+            },
+            "pipeline_results": pipeline_results,
+            "timing": {
+                "total_pipeline_seconds": total_duration,
+                "stage_breakdown": pipeline_results
+            },
+            "storage_type": storage_type,
+            "execution_time_seconds": total_duration
+        }
+    except Exception as e:
+        end_time = time.time()
+        total_duration = round(end_time - start_time, 2)
+        logger.error("\n" + "=" * 80)
+        logger.error(f"❌ MAKE EMBED FILE FAILED after {total_duration}s: {str(e)}")
+        logger.error("=" * 80)
+        raise
+
+
+async def handle_make_form_fields_data_points(
+    config: Any,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    pdf_doc_id: Optional[int] = None,
+    notifier: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Make form fields data points - extracts form fields and processes headers.
+    Uses local file paths from config object.
+    This is typically used for initial PDF analysis to understand form structure.
+    Args:
+        config: Storage config with local file paths already set
+        user_id: Optional user ID
+        session_id: Optional session ID
+        pdf_doc_id: Optional PDF document ID
+        notifier: Optional notification system
+    Returns:
+        Operation result with form fields data
+    """
+    start_time = time.time()
+    # Get local PDF from config
+    input_pdf = config.local_input_pdf
+    if not input_pdf:
+        raise ValueError("config.local_input_pdf not set - AWS handler must download PDF first")
+    storage_type = config.source_type
+    logger.info("=" * 60)
+    logger.info("MAKE FORM FIELDS DATA POINTS OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Input PDF: {input_pdf}")
+    logger.info(f"Storage type: {storage_type}")
+    logger.info("Extracting form fields and analyzing structure...")
+    try:
+        import tempfile
+        # Extract PDF data (includes form fields and headers)
+        extract_result = await handle_extract_operation(
+            input_file=input_pdf,
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id
+        )
+        extracted_json_path = extract_result["output_file"]
+        # Load and process the extracted data directly
+        import json
+        with open(extracted_json_path, 'r') as f:
+            extracted_data = json.load(f)
+        # Extract form fields data points
+        form_fields = extracted_data.get("fields", [])
+        headers = extracted_data.get("headers", [])
+        pages = extracted_data.get("pages", [])
+        # Create analysis
+        analysis = {
+            "total_fields": len(form_fields),
+            "total_headers": len(headers),
+            "total_pages": len(pages),
+            "field_types": {},
+            "field_names": [f.get("name", "") for f in form_fields if isinstance(f, dict)]
+        }
+        # Count field types
+        for field in form_fields:
+            if isinstance(field, dict):
+                field_type = field.get("type", "unknown")
+                analysis["field_types"][field_type] = analysis["field_types"].get(field_type, 0) + 1
+        # Save analysis result
+        file_config = get_complete_file_config(input_pdf, user_id, session_id)
+        analysis_output_path = file_config["extraction"]["extracted_path"].replace(".json", "_analysis.json")
+        # Save directly to output path
+        with open(analysis_output_path, 'w') as f:
+            json.dump(analysis, f, indent=2)
+        logger.info(f"Analysis saved to: {analysis_output_path}")
+        # Get PDF hash from extract result
+        pdf_hash = extract_result.get('pdf_hash')
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        logger.info(f"✅ Form fields analysis completed in {duration}s")
+        logger.info(f"   Total fields: {analysis['total_fields']}")
+        logger.info(f"   Total headers: {analysis['total_headers']}")
+        logger.info(f"   Total pages: {analysis['total_pages']}")
+        if pdf_hash:
+            logger.info(f"   PDF hash: {pdf_hash[:16]}...")
+        logger.info("=" * 60)
+        return {
+            "operation": "make_form_fields_data_points",
+            "status": "success",
+            "storage_type": storage_type,
+            "execution_time_seconds": duration,
+            "extracted_json": extracted_json_path,
+            "analysis_json": analysis_output_path,
+            "analysis": analysis,
+            "pdf_hash": pdf_hash  # Include PDF hash
+        }
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        logger.error(f"❌ Form fields analysis failed after {duration}s: {str(e)}")
+        raise
+
+
+async def handle_fill_pdf_operation(
+    user_id: int,
+    pdf_doc_id: int,
+    session_id: str,
+    env: str,
+    developer_id: Optional[str] = None,
+    notifier: Optional[Any] = None,
+    safe_mode: bool = True,
+    config: Any = None,
+) -> Dict[str, Any]:
+    """
+    Fill PDF operation - fills embedded PDF with data (with optional safety checks).
+    Uses local file paths from config object.
+    This is similar to handle_fill_operation but with additional safety checks.
+    Args:
+        config: Storage config with local file paths already set
+        user_id: Optional user ID
+        session_id: Optional session ID
+        pdf_doc_id: Optional PDF document ID
+        input_json_doc_id: Optional input JSON document ID
+        notifier: Optional notification system
+        safe_mode: If True, checks if embedded PDF exists before filling
+    Returns:
+        Operation result with filled PDF path or error status
+    """
+    start_time = time.time()
+    # Build storage config from env/developer_id if not provided by caller
+    if config is None:
+        from pdf_autofillr_mapper.configs.file_config import get_file_config
+        config = get_file_config(
+            env=env,
+            developer_id=developer_id,
+            user_id=user_id,
+            session_id=session_id,
+            pdf_doc_id=pdf_doc_id,
+        )
+    # Get paths via PathResolver
+    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+    pr = PathResolver(config._sc) if hasattr(config, '_sc') else None
+    uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
+    embedded_pdf_path = pr.remote_embedded(uid, sid, pid) if pr else (
+        config.s3_embedded_pdf if hasattr(config, 's3_embedded_pdf') and config.s3_embedded_pdf else config.local_embedded_pdf
+    )
+    input_json_path = pr.remote_input_json(uid, sid) if pr else (
+        config.s3_input_json if hasattr(config, 's3_input_json') and config.s3_input_json else config.local_input_json
+    )
+    if not embedded_pdf_path:
+        raise ValueError("config.s3_embedded_pdf or local_embedded_pdf not set - must run embed operation first or set manually")
+    if not input_json_path:
+        raise ValueError("config.s3_input_json or local_input_json not set - AWS handler must download JSON first")
+    storage_type = config.source_type
+    logger.info("=" * 60)
+    logger.info("FILL PDF OPERATION" + (" (SAFE MODE)" if safe_mode else ""))
+    logger.info("=" * 60)
+    logger.info(f"Embedded PDF (S3): {embedded_pdf_path}")
+    logger.info(f"Input JSON (S3): {input_json_path}")
+    logger.info(f"Storage type: {storage_type}")
+    user_input_details = {
+        "user_id": user_id,
+        "pdf_doc_id": pdf_doc_id,
+        "session_id": session_id
+    }
+    try:
+        # Check if embedded PDF exists before filling
+        if safe_mode:
+            if storage_type == 'local':
+                local_embedded = getattr(config, 'local_embedded_pdf', None)
+                if local_embedded and not os.path.exists(local_embedded):
+                    logger.error(f"❌ Embedded PDF not found locally: {local_embedded}")
+                    return {
+                        "operation": "fill_pdf",
+                        "status": "error",
+                        "error": f"Embedded PDF file not found: {local_embedded}",
+                        "pdf_file_path": None,
+                        "storage_type": storage_type
+                    }
+            else:
+                # For S3/cloud: check remote existence
+                if not config.file_exists(embedded_pdf_path):
+                    logger.error(f"❌ Embedded PDF not found on S3: {embedded_pdf_path}")
+                    return {
+                        "operation": "fill_pdf",
+                        "status": "error",
+                        "error": f"Embedded PDF not found on S3 — run make_embed_file first: {embedded_pdf_path}",
+                        "pdf_file_path": None,
+                        "storage_type": storage_type
+                    }
+        # Check extracted JSON for zero form fields before filling
+        extracted_json_path = (
+            getattr(config, 's3_extracted_json', None)
+            or getattr(config, 'dest_extracted_json', None)
+        )
+        if extracted_json_path:
+            try:
+                import tempfile, json as _json
+                _tmp = tempfile.NamedTemporaryFile(suffix='_extracted.json', delete=False)
+                _tmp.close()
+                config.download_file(extracted_json_path, _tmp.name)
+                with open(_tmp.name) as _f:
+                    _extracted = _json.load(_f)
+                os.unlink(_tmp.name)
+                _fields_count = sum(len(page.get('form_fields', [])) for page in _extracted.get('pages', []))
+                if _fields_count == 0:
+                    logger.warning(f"⚠️ PDF {pdf_doc_id} has 0 form fields — not a fillable PDF form.")
+                    end_time = time.time()
+                    return {
+                        "operation": "fill_pdf",
+                        "status": "no_pdf_forms",
+                        "message": "This PDF does not contain any fillable form fields.",
+                        "pdf_doc_id": pdf_doc_id,
+                        "fields_count": 0,
+                        "storage_type": storage_type,
+                        "execution_time_seconds": round(end_time - start_time, 2)
+                    }
+            except Exception as _fe:
+                logger.debug(f"Could not check extracted JSON for field count: {_fe}")
+
+        # Call the standard fill operation with config
+        fill_result = await handle_fill_operation(
+            config=config,
+            user_id=user_id,
+            session_id=session_id,
+            notifier=notifier,
+            pdf_doc_id=pdf_doc_id,
+        )
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Use S3 path if available (dest_output_file), else local path
+        filled_pdf_path = fill_result.get("dest_output_file") or fill_result["output_file"]
+        filled_presigned_url = fill_result.get("filled_presigned_url")
+        logger.info(f"✅ Fill PDF completed in {duration}s")
+        logger.info("=" * 60)
+        # Match original lambda_handler.py return structure
+        return {
+            "operation": "fill_pdf",
+            "inputs": {
+                "pdf_doc_id": pdf_doc_id,
+                "embedded_pdf": embedded_pdf_path,
+                "combined_input_json": input_json_path,
+                "user_id": user_id,
+                "session_id": session_id,
+                "use_profile_info": True  # Default behavior
+            },
+            "outputs": {
+                "filled_pdf": filled_pdf_path,
+                "filled_presigned_url": filled_presigned_url
+            },
+            "status": "success",
+            "timing": {
+                "total_pipeline_seconds": duration,
+                "stage_breakdown": {"fill": duration}
+            },
+            "storage_type": storage_type,
+            "execution_time_seconds": duration
+        }
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "stage_completion",
+                stage=PipelineStage.FILL,
+                status=StageStatus.FAILED,
+                execution_time=duration,
+                error_message=str(e),
+                level=NotificationLevel.CRITICAL,
+                user_input_details=user_input_details
+            )
+        logger.error(f"❌ Fill PDF failed after {duration}s: {str(e)}")
+        if safe_mode:
+            # In safe mode, return error dict instead of raising
+            return {
+                "operation": "fill_pdf",
+                "status": "error",
+                "error": str(e),
+                "pdf_file_path": None,
+                "storage_type": storage_type,
+                "execution_time_seconds": duration
+            }
+        else:
+            raise
+
+
+async def handle_check_embed_file_operation(
+    user_id: int,
+    pdf_doc_id: int,
+    session_id: str,
+    env: str,
+    developer_id: Optional[str] = None,
+    config: Any = None,
+) -> Dict[str, Any]:
+    """
+    Check embed file operation - verifies if embedded PDF exists.
+    Uses local file paths from config object.
+    This is a lightweight check operation used to verify if an embedded PDF
+    is available before attempting to fill it.
+    Args:
+        config: Storage config with local file paths already set
+        user_id: Optional user ID
+        session_id: Optional session ID
+    Returns:
+        Operation result with existence status and metadata
+    """
+    start_time = time.time()
+    # Build storage config from env/developer_id if not provided by caller
+    if config is None:
+        from pdf_autofillr_mapper.configs.file_config import get_file_config
+        config = get_file_config(
+            env=env,
+            developer_id=developer_id,
+            user_id=user_id,
+            session_id=session_id,
+            pdf_doc_id=pdf_doc_id,
+        )
+    # Resolve embedded PDF path via PathResolver
+    from pdf_autofillr_mapper.storage.paths.resolver import PathResolver
+    uid, sid, pid = str(user_id), str(session_id), str(pdf_doc_id)
+    pr = PathResolver(config._sc) if hasattr(config, '_sc') else None
+    if pr:
+        embedded_pdf_path = pr.remote_embedded(uid, sid, pid)
+    else:
+        embedded_pdf_path = getattr(config, 'local_embedded_pdf', None)
+    if not embedded_pdf_path:
+        raise ValueError("Could not resolve embedded PDF path — run make_embed_file first")
+    storage_type = config.source_type
+    logger.info("=" * 60)
+    logger.info("CHECK EMBED FILE OPERATION")
+    logger.info("=" * 60)
+    logger.info(f"Checking: {embedded_pdf_path}")
+    logger.info(f"Storage type: {storage_type}")
+    try:
+        # Check extracted JSON for zero form fields before anything else
+        extracted_json_path = (
+            getattr(config, 's3_extracted_json', None)
+            or getattr(config, 'dest_extracted_json', None)
+            or (pr.remote_extracted(uid, sid, pid) if pr else None)
+        )
+        if extracted_json_path:
+            try:
+                import tempfile, json as _json
+                _tmp = tempfile.NamedTemporaryFile(suffix='_extracted.json', delete=False)
+                _tmp.close()
+                config.download_file(extracted_json_path, _tmp.name)
+                with open(_tmp.name) as _f:
+                    _extracted = _json.load(_f)
+                os.unlink(_tmp.name)
+                _fields_count = sum(len(page.get('form_fields', [])) for page in _extracted.get('pages', []))
+                if _fields_count == 0:
+                    logger.warning(f"⚠️ PDF {pdf_doc_id} has 0 form fields — not a fillable PDF form.")
+                    end_time = time.time()
+                    return {
+                        "operation": "check_embed_file",
+                        "status": "no_pdf_forms",
+                        "exists": False,
+                        "embedded_pdf_path": embedded_pdf_path,
+                        "storage_type": storage_type,
+                        "message": "This PDF does not contain any fillable form fields.",
+                        "fields_count": 0,
+                        "execution_time_seconds": round(end_time - start_time, 2)
+                    }
+            except Exception as _fe:
+                logger.debug(f"Could not check extracted JSON for field count: {_fe}")
+
+        # Check if file exists — use storage backend for S3, local os.path for local
+        if embedded_pdf_path.startswith('s3://') or embedded_pdf_path.startswith('az://') or embedded_pdf_path.startswith('gs://'):
+            exists = config.file_exists(embedded_pdf_path)
+        else:
+            exists = os.path.exists(embedded_pdf_path)
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        if exists:
+            logger.info(f"✅ Embedded PDF exists: {embedded_pdf_path}")
+            logger.info(f"   Check completed in {duration}s")
+            logger.info("=" * 60)
+            return {
+                "operation": "check_embed_file",
+                "status": "success",
+                "exists": True,
+                "embedded_pdf_path": embedded_pdf_path,
+                "storage_type": storage_type,
+                "message": "Embedded PDF file found and ready for filling",
+                "execution_time_seconds": duration
+            }
+        else:
+            logger.warning(f"⚠️  Embedded PDF not found: {embedded_pdf_path}")
+            logger.info(f"   Check completed in {duration}s")
+            logger.info("=" * 60)
+            return {
+                "operation": "check_embed_file",
+                "status": "not_found",
+                "exists": False,
+                "embedded_pdf_path": embedded_pdf_path,
+                "storage_type": storage_type,
+                "message": "Embedded PDF file not found. You may need to run make_embed_file operation first.",
+                "execution_time_seconds": duration
+            }
+    except Exception as e:
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        logger.error(f"❌ Check embed file failed after {duration}s: {str(e)}")
+        logger.info("=" * 60)
+        return {
+            "operation": "check_embed_file",
+            "status": "error",
+            "exists": False,
+            "embedded_pdf_path": embedded_pdf_path,
+            "storage_type": storage_type,
+            "error": str(e),
+            "message": f"Failed to check embedded PDF: {str(e)}",
+            "execution_time_seconds": duration
+        }
+
+# ============================================================================
+
+# DUAL MAPPER HELPER FUNCTIONS (RAG Integration)
+
+# ============================================================================
+
+
+async def call_rag_api(
+    user_id: int,
+    pdf_doc_id: int,
+    headers_file_path: str,
+    extracted_json_path: str,
+    pdf_hash: str,
+    storage_config: Any,
+    session_id: Optional[str] = None,
+    env: Optional[str] = None,
+    developer_id: Optional[str] = None,
+) -> str:
+    """
+    Call RAG pipeline — either inprocess (ragpdf SDK) or http (remote Lambda/API).
+    Controlled by RAG_MODE env var / mapper_config.ini [rag] mode.
+    Steps:
+      1. Create header_file.json from final_form_fields.json
+      2a. inprocess: call RAGPDFClient.get_predictions() directly
+      2b. http: POST to remote RAG API, download rag_predictions.json
+    Args:
+        user_id:             User ID (int)
+        pdf_doc_id:          PDF document ID (int)
+        headers_file_path:   Local path to final_form_fields.json
+        extracted_json_path: Local path to extracted JSON (not used directly)
+        pdf_hash:            PDF content hash
+        storage_config:      Storage config with local_header_file, local_rag_predictions, etc.
+        session_id:          Optional session ID string
+    Returns:
+        Local path to rag_predictions.json
+    """
+    import json as _json
+    import os
+    import uuid
+    from pdf_autofillr_mapper.headers.create_rag_files import create_rag_api_files
+    from pdf_autofillr_mapper.core.config import settings
+    if not session_id:
+        session_id = f"session_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    rag_mode = getattr(settings, 'rag_mode', None) or os.getenv('RAG_MODE', 'inprocess')
+    logger.info("=" * 80)
+    logger.info(f"RAG PIPELINE — mode={rag_mode}, session={session_id}")
+    logger.info("=" * 80)
+    # ── Step 1: Build header_file.json from final_form_fields ────────────────
+    header_file_output_path  = getattr(storage_config, 'local_header_file', None)
+    section_file_output_path = getattr(storage_config, 'local_section_file', None)
+    if not header_file_output_path:
+        raise ValueError(
+            "storage_config.local_header_file is not set. "
+            "Make sure the storage config is initialised with RAG paths before calling call_rag_api()."
+        )
+    # Ensure final_form_fields is local — download from S3 if needed
+    local_final_fields = getattr(storage_config, 'local_final_form_fields', None)
+    if headers_file_path and headers_file_path.startswith('s3://'):
+        if not local_final_fields:
+            import tempfile
+            _tmp = tempfile.NamedTemporaryFile(suffix='_final_form_fields.json', delete=False)
+            _tmp.close()
+            local_final_fields = _tmp.name
+        from pdf_autofillr_mapper.clients.s3_client import S3Client
+        S3Client().download_file_from_s3(headers_file_path, local_final_fields)
+        logger.info(f"📥 Downloaded final_form_fields from S3: {headers_file_path} → {local_final_fields}")
+        headers_file_path = local_final_fields
+    elif not os.path.exists(headers_file_path) and local_final_fields and os.path.exists(local_final_fields):
+        headers_file_path = local_final_fields
+
+    logger.info(f"Step 1: Creating header_file.json from: {headers_file_path}")
+    rag_files = await create_rag_api_files(
+        final_form_fields_path=headers_file_path,
+        header_file_output_path=header_file_output_path,
+        section_file_output_path=section_file_output_path or header_file_output_path.replace(
+            "header_file.json", "section_file.json"
+        ),
+        user_id=user_id,
+        session_id=session_id,
+        pdf_doc_id=pdf_doc_id,
+        pdf_hash=pdf_hash
+    )
+    header_file_local = rag_files["header_file"]
+    section_file_local = rag_files.get("section_file") or (section_file_output_path or header_file_output_path.replace("header_file.json", "section_file.json"))
+    logger.info(f"✅ header_file.json created: {header_file_local}")
+
+    # Upload header_file and section_file to RAG input subfolder on S3
+    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+    _out = OutputFileHandler(storage_config)
+    _dest_header  = _out.save_output(header_file_local,  'header_file_json')
+    _dest_section = _out.save_output(section_file_local, 'section_file_json')
+    if _dest_header:
+        logger.info(f"📤 Uploaded header_file to: {_dest_header}")
+    if _dest_section:
+        logger.info(f"📤 Uploaded section_file to: {_dest_section}")
+    # ── Step 2A: inprocess — call ragpdf SDK directly ─────────────────────────
+    if rag_mode == "inprocess":
+        logger.info("Step 2: inprocess — calling ragpdf SDK directly")
+        try:
+            from ragpdf import RAGPDFClient
+        except ImportError:
+            raise ImportError(
+                "RAG_MODE=inprocess requires the ragpdf SDK. "
+                "Install it: pip install pdf-autofillr-rag[transformers]\n"
+                "Or switch to RAG_MODE=http and point RAG_API_URL at a running RAG server."
+            )
+        with open(header_file_local, "r", encoding="utf-8") as f:
+            header_data = _json.load(f)
+        fields       = header_data.get("fields", [])
+        pdf_category = header_data.get("pdf_category", {
+            "category": "unknown",
+            "sub_category": "unknown",
+            "document_type": "unknown"
+        })
+        logger.info(f"Calling RAGPDFClient.get_predictions() — {len(fields)} fields")
+        client = RAGPDFClient.from_env()
+        client.get_predictions(
+            user_id=str(user_id),
+            session_id=session_id,
+            pdf_id=str(pdf_doc_id),
+            fields=fields,
+            pdf_hash=pdf_hash,
+            pdf_category=pdf_category,
+        )
+        # ragpdf saves rag_predictions.json under RAGPDF_DATA_PATH
+        # Copy it to the path the mapper expects (storage_config.local_rag_predictions)
+        ragpdf_data    = os.getenv("RAGPDF_DATA_PATH", "./data/rag")
+        rag_preds_src  = os.path.join(
+            ragpdf_data,
+            f"predictions/{user_id}/{session_id}/{pdf_doc_id}/predictions/rag_predictions.json"
+        )
+        local_rag_path = getattr(storage_config, 'local_rag_predictions', None)
+        if not local_rag_path:
+            raise ValueError(
+                "storage_config.local_rag_predictions is not set. "
+                "Cannot copy rag_predictions.json to mapper output."
+            )
+        if not os.path.exists(rag_preds_src):
+            raise FileNotFoundError(
+                f"ragpdf SDK ran but rag_predictions.json not found at {rag_preds_src}. "
+                f"Check RAGPDF_DATA_PATH={ragpdf_data} is correct."
+            )
+        import shutil
+        os.makedirs(os.path.dirname(local_rag_path), exist_ok=True)
+        shutil.copy2(rag_preds_src, local_rag_path)
+        logger.info(f"✅ RAG predictions (inprocess) copied to: {local_rag_path}")
+        logger.info("=" * 80)
+        return local_rag_path
+    # ── Step 2B: http — call remote RAG API ───────────────────────────────────
+    import aiohttp
+    from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+    rag_api_url = (
+        getattr(settings, 'rag_api_url', '') or
+        os.getenv('RAG_API_URL', '')
+    )
+    rag_api_key = (
+        getattr(settings, 'rag_api_key', '') or
+        os.getenv('RAG_API_KEY', '')
+    )
+    if not rag_api_url:
+        raise RuntimeError(
+            "RAG_MODE=http requires RAG_API_URL to be set. "
+            "Either set it in mapper_config.ini [rag] api_url, or switch to RAG_MODE=inprocess."
+        )
+    logger.info(f"Step 2: http — uploading header file and calling: {rag_api_url}")
+    # Upload header_file to storage so remote API can read it
+    output_handler = OutputFileHandler(storage_config)
+    dest_header    = output_handler.save_output(header_file_local, 'header_file_json')
+    header_for_api = dest_header if dest_header else header_file_local
+    payload = {
+        "api_name":            "get_rag_predictions",
+        "user_id":             str(user_id),
+        "session_id":          session_id,
+        "pdf_id":              str(pdf_doc_id),
+        "pdf_hash":            pdf_hash,
+        "header_file_location": header_for_api,
+        "env":                 env or "",
+        "developer_id":        developer_id or "",
+    }
+    req_headers = {"Content-Type": "application/json"}
+    if rag_api_key:
+        req_headers["X-API-Key"] = rag_api_key
+    async with aiohttp.ClientSession() as sess:
+        async with sess.post(
+            rag_api_url,
+            json=payload,
+            headers=req_headers,
+            timeout=aiohttp.ClientTimeout(total=300)
+        ) as resp:
+            if resp.status != 200:
+                err = await resp.text()
+                raise RuntimeError(f"RAG API returned HTTP {resp.status}: {err}")
+            result = await resp.json()
+    if result.get("status") != "success":
+        raise RuntimeError(f"RAG API returned failure: {result}")
+    rag_source_path = (
+        result.get("rag_predictions_path") or
+        result.get("data", {}).get("rag_predictions") or
+        result.get("data", {}).get("s3_paths", {}).get("rag_predictions")
+    )
+    if not rag_source_path:
+        raise RuntimeError(
+            f"RAG API returned success but no predictions path found in response: {result}"
+        )
+    logger.info(f"✅ RAG API response — predictions at: {rag_source_path}")
+    # Download from RAG storage to mapper local path (source-agnostic)
+    local_rag_path = getattr(storage_config, 'local_rag_predictions', None)
+    if not local_rag_path:
+        raise ValueError("storage_config.local_rag_predictions is not set.")
+    from pdf_autofillr_mapper.handlers.input_handler import InputFileHandler
+    input_handler = InputFileHandler(storage_config)
+    download_manager = FileDownloadManager(input_handler, storage_config)
+    downloaded = await download_manager.download_rag_predictions(rag_source_path, local_rag_path)
+    if not downloaded or not os.path.exists(downloaded):
+        raise RuntimeError(
+            f"Failed to download RAG predictions from {rag_source_path} to {local_rag_path}"
+        )
+    logger.info(f"✅ RAG predictions downloaded to: {downloaded}")
+    logger.info("=" * 80)
+    return downloaded
+
+
+async def convert_semantic_to_java_format(
+    semantic_mapping_path: str,
+    user_id: int,
+    pdf_doc_id: int,
+    storage_config: Any
+) -> str:
+    """
+    Convert semantic mapping format to Java-compatible format.
+    Source-agnostic - works with s3://, gs://, azure://, or local paths.
+    CRITICAL: The semantic mapper outputs format: {field_id: [field_name, actual_value, confidence]}
+    where actual_value is the data from input JSON (e.g., "553", "John Doe", etc.)
+    But the Java embedder expects format: {field_id: [field_name, "", confidence]}
+    where the middle element MUST be an empty string.
+    If we pass semantic mapping directly to Java, it tries to parse the actual_value
+    as an array and fails with errors like "Not a JSON Array: \"553\"".
+    This function strips out the actual values and replaces them with empty strings.
+    Args:
+        semantic_mapping_path: Path to semantic mapping file (any storage type)
+        user_id: User ID
+        pdf_doc_id: PDF document ID
+        storage_config: Storage configuration with paths from config.ini
+    Returns:
+        Path to Java-compatible mapping file (same storage type as input)
+    """
+    logger.info("🔄 Converting semantic mapping to Java-compatible format...")
+    logger.info(f"   Input: {semantic_mapping_path}")
+    # Load semantic mapping directly (download_from_source handles local/cloud paths)
+    with open(semantic_mapping_path, 'r') as f:
+        semantic_data = json.load(f)
+    # Handle both formats:
+    # 1. New format (with predictions wrapper): {"user_id": ..., "predictions": {...}}
+    # 2. Old format (direct mappings): {"field_id": [...], ...}
+    if isinstance(semantic_data, dict) and "predictions" in semantic_data:
+        logger.info("📦 Detected wrapped format with 'predictions' key")
+        semantic_mappings = semantic_data["predictions"]
+    else:
+        logger.info("📋 Detected direct format (no wrapper)")
+        semantic_mappings = semantic_data
+    logger.info(f"📊 Loaded semantic mapping with {len(semantic_mappings)} fields")
+    # Convert to Java format: replace middle element (actual value) with empty string
+    java_mapping = {}
+    for field_id, mapping_data in semantic_mappings.items():
+        # Handle three possible formats:
+        # 1. Array format (old): ["field_name", "actual_value", confidence]
+        # 2. Dict format (new): {"predicted_field_name": "...", "confidence": 0.95}
+        # 3. Dict format (with value): {"predicted_field_name": "...", "value": "...", "confidence": 0.95}
+        if isinstance(mapping_data, dict):
+            # New dictionary format
+            field_name = mapping_data.get("predicted_field_name")
+            confidence = mapping_data.get("confidence", 0.0)
+            if field_name:
+                java_mapping[field_id] = [field_name, "", confidence]
+            else:
+                java_mapping[field_id] = [None, None, 0]
+        elif isinstance(mapping_data, list) and len(mapping_data) >= 3:
+            # Old array format: [field_name, actual_value, confidence]
+            # Convert to: [field_name, "", confidence]
+            field_name = mapping_data[0]
+            confidence = mapping_data[2]
+            if field_name:
+                java_mapping[field_id] = [field_name, "", confidence]
+            else:
+                java_mapping[field_id] = [None, None, 0]
+        else:
+            # Fallback for unexpected format
+            logger.warning(f"Field {field_id} has unexpected format: {mapping_data}")
+            java_mapping[field_id] = [None, None, 0]
+    logger.info(f"✅ Converted to Java format with {len(java_mapping)} fields")
+    # Get output path from config (set from config.ini pattern)
+    java_mapping_path = storage_config.local_java_mapping
+    if not java_mapping_path:
+        raise ValueError(
+            "Java mapping path not configured. "
+            "Check config.local_java_mapping"
+        )
+    # Save Java-compatible mapping
+    with open(java_mapping_path, 'w') as f:
+        json.dump(java_mapping, f, indent=2, ensure_ascii=False)
+    logger.info(f"📤 Java-compatible mapping saved to: {java_mapping_path}")
+    logger.info(f"   ✅ Format: {{'field_id': [field_name, '', confidence]}}")
+    logger.info(f"   ✅ Middle element is EMPTY STRING (not actual value from input)")
+    # Verify format
+    with open(java_mapping_path, 'r') as f:
+        verify_data = json.load(f)
+        sample_keys = list(verify_data.keys())[:3]
+        logger.info(f"   ✅ Sample keys: {sample_keys}")
+        if "user_id" in verify_data or "final_predictions" in verify_data:
+            logger.error(f"   ❌ ERROR: File has wrong structure! Keys: {list(verify_data.keys())[:10]}")
+            raise ValueError("Java mapping conversion failed - wrong structure")
+        else:
+            # Show sample entries
+            for key in sample_keys:
+                logger.info(f"   ✅ Field {key}: {verify_data[key]}")
+    return java_mapping_path
+
+
+async def save_llm_predictions_to_rag_bucket(
+    semantic_mapping_path: str,
+    user_id: int,
+    pdf_doc_id: int,
+    storage_config: Any,
+    session_id: Optional[str] = None
+) -> str:
+    """
+    Save a copy of the semantic mapping (LLM predictions) to the RAG bucket predictions folder.
+    Source-agnostic - works with s3://, gs://, azure://, or local paths.
+    This allows comparison between LLM and RAG predictions.
+    Args:
+        semantic_mapping_path: Path to semantic mapping JSON (any storage type)
+        user_id: User ID
+        pdf_doc_id: PDF document ID
+        storage_config: Storage configuration with paths from config.ini
+        session_id: Session ID for path construction
+    Returns:
+        Path to saved LLM predictions JSON (same storage type as input)
+    """
+    from datetime import datetime
+    from pdf_autofillr_mapper.core.config import settings
+    logger.info("📋 Saving LLM predictions to RAG bucket...")
+    # Load semantic mapping directly
+    with open(semantic_mapping_path, 'r') as f:
+        semantic_data = json.load(f)
+    # Create LLM predictions structure (similar to RAG format for easy comparison)
+    llm_predictions = {
+        "user_id": str(user_id),
+        "session_id": session_id or f"session_{int(time.time())}",
+        "pdf_id": str(pdf_doc_id),
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "source": "llm_semantic_mapper",
+        "predictions": {}
+    }
+    # Convert semantic mapping format to predictions format
+    for field_id, field_data in semantic_data.items():
+        field_key = f"field_{int(field_id)}"
+        field_name = field_data[0] if field_data and field_data[0] else None
+        confidence = field_data[2] if field_data and len(field_data) > 2 else 0.0
+        if field_name:
+            llm_predictions["predictions"][field_key] = {
+                "predicted_field_name": field_name,
+                "confidence": confidence
+            }
+        else:
+            llm_predictions["predictions"][field_key] = None
+    # Get output path from config (set from config.ini pattern)
+    llm_predictions_path = storage_config.local_llm_predictions
+    if not llm_predictions_path:
+        raise ValueError(
+            "LLM predictions path not configured. "
+            "Check config.local_llm_predictions"
+        )
+    # Save to output path
+    with open(llm_predictions_path, 'w') as f:
+        json.dump(llm_predictions, f, indent=2, ensure_ascii=False)
+    logger.info(f"✅ LLM predictions saved to local: {llm_predictions_path}")
+    logger.info(f"   📊 Total predictions: {len(llm_predictions['predictions'])}")
+    # Try to upload to RAG source storage (optional, non-blocking)
+    try:
+        from pdf_autofillr_mapper.handlers.output_handler import OutputFileHandler
+        rag_output_handler = OutputFileHandler(storage_config)
+        rag_dest_path = rag_output_handler.save_output(llm_predictions_path, 'llm_predictions_json')
+        if rag_dest_path:
+            logger.info(f"✅ LLM predictions uploaded to RAG storage: {rag_dest_path}")
+        else:
+            logger.warning("⚠️  LLM predictions not uploaded to RAG storage (upload returned None)")
+    except Exception as upload_error:
+        logger.warning(f"⚠️  Failed to upload LLM predictions to RAG storage: {upload_error}")
+        logger.warning("   Continuing anyway - file is saved locally")
+    return llm_predictions_path
+
+
+async def combine_mappings(
+    semantic_mapping_path: str,
+    rag_predictions_path: str,
+    user_id: int,
+    pdf_doc_id: int,
+    storage_config: Any,
+    session_id: Optional[str] = None
+) -> tuple:
+    """
+    Combine semantic mapper output (first phase) with RAG predictions to create final mapping.
+    Source-agnostic - works with s3://, gs://, azure://, or local paths.
+    Strategy:
+    - Compare semantic mapping [field_name, null, confidence] with RAG predictions
+    - RAG prediction selected if both agree OR RAG has higher confidence
+    - Format output as final_predictions with detailed reasoning
+    - Save alongside input files with appropriate naming
+    Args:
+        semantic_mapping_path: Path to first phase mapping JSON (any storage type)
+        rag_predictions_path: Path to RAG predictions JSON (any storage type)
+        user_id: User ID
+        pdf_doc_id: PDF document ID
+        storage_config: Storage configuration with paths from config.ini
+        session_id: Session ID for path construction
+    Returns:
+        Tuple of (java_mapping_path, final_predictions_path):
+        - java_mapping_path: Path to Java-compatible mapping for embedder
+        - final_predictions_path: Path to detailed predictions with reasoning
+    """
+    from datetime import datetime
+    from pdf_autofillr_mapper.core.config import settings
+    logger.info("🔄 Combining semantic mapping with RAG predictions...")
+    # Load semantic mapping (first phase format: {field_id: [field_name, null, confidence]})
+    with open(semantic_mapping_path, 'r') as f:
+        semantic_data = json.load(f)
+    # Load RAG predictions (format: {predictions: {field_1: {...}, field_2: null, ...}})
+    with open(rag_predictions_path, 'r') as f:
+        rag_data = json.load(f)
+    rag_predictions = rag_data.get('predictions', {})
+    logger.info(f"📊 Semantic mapping has {len(semantic_data)} fields")
+    logger.info(f"📊 RAG predictions has {len(rag_predictions)} predictions")
+    # Create final predictions with reasoning
+    final_predictions = {}
+    stats = {
+        "both_agreed_rag_selected": 0,
+        "both_agreed_llm_selected": 0,
+        "disagreed_rag_selected": 0,
+        "disagreed_llm_selected": 0,
+        "neither_predicted": 0,
+        "only_rag": 0,
+        "only_llm": 0
+    }
+    # Get all unique field IDs from both sources
+    all_field_ids = set()
+    # Add semantic field IDs (keys are integers like "1", "2", etc.)
+    for fid in semantic_data.keys():
+        all_field_ids.add(int(fid))
+    # Add RAG field IDs (keys are like "field_1", "field_2", etc.)
+    for field_key in rag_predictions.keys():
+        if field_key.startswith("field_"):
+            fid = field_key.replace("field_", "")
+            if fid.isdigit():
+                all_field_ids.add(int(fid))
+    logger.info(f"🔍 Processing {len(all_field_ids)} unique fields...")
+    # Process each field
+    for fid in sorted(all_field_ids):
+        field_key = f"field_{fid}"  # Format as field_1, field_2, etc.
+        # Get semantic prediction (format: [field_name, null, confidence])
+        semantic_pred = semantic_data.get(str(fid))
+        llm_field_name = semantic_pred[0] if semantic_pred and semantic_pred[0] else None
+        llm_confidence = semantic_pred[2] if semantic_pred and len(semantic_pred) > 2 else 0.0
+        # Get RAG prediction
+        rag_field_key = f"field_{fid}"
+        rag_pred = rag_predictions.get(rag_field_key)
+        rag_field_name = None
+        rag_confidence = None
+        if rag_pred and isinstance(rag_pred, dict):
+            rag_field_name = rag_pred.get('predicted_field_name')
+            rag_confidence = rag_pred.get('confidence')
+        # Decision logic
+        selected_name = None
+        selected_from = None
+        reason = None
+        if rag_field_name and llm_field_name:
+            # Both predicted
+            if rag_field_name == llm_field_name:
+                # Both agree
+                selected_name = rag_field_name
+                selected_from = "rag"
+                reason = "Both agreed, RAG selected as primary"
+                stats["both_agreed_rag_selected"] += 1
+            else:
+                # Disagreement - select higher confidence
+                if rag_confidence >= llm_confidence:
+                    selected_name = rag_field_name
+                    selected_from = "rag"
+                    reason = f"RAG and LLM disagreed, RAG selected due to higher confidence"
+                    stats["disagreed_rag_selected"] += 1
+                else:
+                    selected_name = llm_field_name
+                    selected_from = "llm"
+                    reason = f"RAG and LLM disagreed, LLM selected due to higher confidence"
+                    stats["disagreed_llm_selected"] += 1
+        elif rag_field_name:
+            # Only RAG predicted
+            selected_name = rag_field_name
+            selected_from = "rag"
+            reason = "Only RAG predicted"
+            stats["only_rag"] += 1
+        elif llm_field_name:
+            # Only LLM predicted
+            selected_name = llm_field_name
+            selected_from = "llm"
+            reason = "Only LLM predicted"
+            stats["only_llm"] += 1
+        else:
+            # Neither predicted
+            reason = "Neither RAG nor LLM predicted"
+            stats["neither_predicted"] += 1
+        # Add to final predictions
+        final_predictions[field_key] = {
+            "selected_field_name": selected_name,
+            "selected_from": selected_from,
+            "rag_confidence": rag_confidence,
+            "llm_confidence": llm_confidence,
+            "reason": reason
+        }
+    # Create final output structure
+    final_output = {
+        "user_id": str(user_id),
+        "session_id": session_id or rag_data.get('session_id', 'unknown'),
+        "pdf_id": str(pdf_doc_id),
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "pdf_hash": rag_data.get('pdf_hash', ''),
+        "final_predictions": final_predictions,
+        "summary": {
+            "total_fields": len(all_field_ids),
+            "predicted_fields": len(all_field_ids) - stats["neither_predicted"],
+            "unpredicted_fields": stats["neither_predicted"],
+            "both_agreed": stats["both_agreed_rag_selected"],
+            "disagreed_rag_won": stats["disagreed_rag_selected"],
+            "disagreed_llm_won": stats["disagreed_llm_selected"],
+            "only_rag": stats["only_rag"],
+            "only_llm": stats["only_llm"]
+        }
+    }
+    logger.info(f"✅ Final predictions created:")
+    logger.info(f"   Total fields: {final_output['summary']['total_fields']}")
+    logger.info(f"   Predicted: {final_output['summary']['predicted_fields']}")
+    logger.info(f"   Both agreed: {stats['both_agreed_rag_selected']}")
+    logger.info(f"   RAG won disagreement: {stats['disagreed_rag_selected']}")
+    logger.info(f"   LLM won disagreement: {stats['disagreed_llm_selected']}")
+    # Create Java-compatible mapping format [field_name, "", confidence]
+    logger.info("📋 Creating Java-compatible mapping format...")
+    java_mapping = {}
+    for fid in sorted(all_field_ids):
+        field_key = f"field_{fid}"
+        prediction = final_predictions[field_key]
+        field_name = prediction["selected_field_name"]
+        # Determine confidence (use the selected source's confidence)
+        if prediction["selected_from"] == "rag" and prediction["rag_confidence"]:
+            confidence = prediction["rag_confidence"]
+        elif prediction["selected_from"] == "llm" and prediction["llm_confidence"]:
+            confidence = prediction["llm_confidence"]
+        else:
+            confidence = 0.0
+        # Format as [field_name, "", confidence] or [null, null, 0] if not predicted
+        if field_name:
+            java_mapping[str(fid)] = [field_name, "", round(confidence, 2)]
+        else:
+            java_mapping[str(fid)] = [None, None, 0]
+    logger.info(f"✅ Java-compatible mapping created with {len(java_mapping)} fields")
+    # Get output paths from config (set from config.ini patterns)
+    final_predictions_path = storage_config.local_final_predictions
+    java_mapping_path = storage_config.local_java_mapping
+    if not final_predictions_path:
+        raise ValueError(
+            "Final predictions path not configured. "
+            "Check config.local_final_predictions"
+        )
+    if not java_mapping_path:
+        raise ValueError(
+            "Java mapping path not configured. "
+            "Check config.local_java_mapping"
+        )
+    # Save detailed predictions
+    with open(final_predictions_path, 'w') as f:
+        json.dump(final_output, f, indent=2, ensure_ascii=False)
+    logger.info(f"📤 Final predictions saved to: {final_predictions_path}")
+    # Save Java-compatible mapping for Java embedder
+    # CRITICAL: Java embedder expects simple format {field_id: [name, "", conf]}
+    with open(java_mapping_path, 'w') as f:
+        json.dump(java_mapping, f, indent=2, ensure_ascii=False)
+    logger.info(f"📤 Java-compatible mapping saved to: {java_mapping_path}")
+    logger.info(f"   ✅ Format: {{'field_id': [field_name, '', confidence]}}")
+    logger.info(f"   ✅ This is the EXACT file Java embedder will receive")
+    # Verify the file was saved correctly (debug)
+    with open(java_mapping_path, 'r') as f:
+        saved_data = json.load(f)
+        logger.info(f"   ✅ Verified: File contains {len(saved_data)} field mappings")
+        if "user_id" in saved_data or "final_predictions" in saved_data:
+            logger.error(f"   ❌ ERROR: Java mapping file contains wrong structure!")
+            logger.error(f"   Keys found: {list(saved_data.keys())[:10]}")
+            raise ValueError("Java mapping file has wrong structure - contains detailed predictions instead of simple array format")
+        else:
+            logger.info(f"   ✅ Correct format: Keys are field IDs like '1', '2', '3'...")
+            # Show first few entries for verification
+            sample_items = list(saved_data.items())[:3]
+            for fid, mapping in sample_items:
+                logger.info(f"   ✅ Field {fid}: {mapping}")
+    # Return both the Java mapping (for embedder) and detailed predictions (for output notification)
+    logger.info(f"✅ Returning both paths:")
+    logger.info(f"   📋 Java mapping: {java_mapping_path}")
+    logger.info(f"   📊 Detailed predictions: {final_predictions_path}")
+    return java_mapping_path, final_predictions_path

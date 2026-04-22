@@ -1,65 +1,71 @@
+# chatbot/src/chatbot/entrypoints/aws_lambda.py
 """
 AWS Lambda handler for pdf-autofillr-chatbot.
 
-Deploy as a Lambda function — drop this in as your handler.
+Lambda handler path:  chatbot.entrypoints.aws_lambda.handler
 
-Lambda handler: chatbot.entrypoints.aws_lambda.handler
+Expected event::
 
-Expected event format:
     {
-        "user_id": "investor_123",
+        "user_id":    "investor_123",
         "session_id": "session_abc",
-        "message": "my name is John Smith",
-        "pdf_path": "s3://your-bucket/blank_form.pdf"   # optional
+        "message":    "my name is John Smith",
+        "pdf_path":   "s3://your-bucket/blank_form.pdf"   # optional
     }
+
+Recommended env vars:
+    CHATBOT_LLM_MODEL=openai/gpt-4o-mini
+    CHATBOT_LLM_API_KEY=sk-...  (or OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+    chatbot_STORAGE=s3
+    AWS_OUTPUT_BUCKET=...
+    AWS_CONFIG_BUCKET=...
+    chatbot_PDF_FILLER=mapper   (optional)
+    MAPPER_API_URL=...          (optional — for HTTP mapper mode)
 """
 from __future__ import annotations
-import json, os, logging
+
+import json
+import logging
+import os
+
 from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=os.getenv("chatbot_LOG_LEVEL", "INFO"))
+
+_client = None
 
 
-def _get_client():
-    from chatbot import chatbotClient, LocalStorage, S3Storage, FormConfig
+def _build_client():
+    from chatbot import chatbotClient, FormConfig
+    from chatbot.storage.factory import StorageFactory
 
-    if os.getenv("chatbot_STORAGE", "local").lower() == "s3":
-        storage = S3Storage(
-            output_bucket=os.environ["AWS_OUTPUT_BUCKET"],
-            config_bucket=os.environ["AWS_CONFIG_BUCKET"],
-            region=os.getenv("AWS_REGION", "us-east-1"),
-        )
-    else:
-        storage = LocalStorage(
-            data_path=os.getenv("chatbot_DATA_PATH", "/tmp/chatbot_data"),
-            config_path=os.getenv("chatbot_CONFIG_PATH", "./configs"),
-        )
+    storage = StorageFactory.create()
+    config_path = os.getenv("chatbot_CONFIG_PATH", "./configs")
+    form_config = FormConfig.from_directory(config_path)
 
     pdf_filler = None
-    if os.getenv("chatbot_PDF_FILLER", "none").lower() == "mapper":
+    if os.getenv("chatbot_PDF_FILLER", "none").lower() in ("mapper", "managed"):
         from chatbot.pdf.mapper_filler import MapperPDFFiller
         pdf_filler = MapperPDFFiller(
-            mapper_api_url=os.getenv("MAPPER_API_URL", "http://localhost:8000"),
+            mapper_api_url=os.getenv("MAPPER_API_URL", ""),
             mapper_api_key=os.getenv("MAPPER_API_KEY", ""),
         )
 
     return chatbotClient(
-        openai_api_key=os.environ["OPENAI_API_KEY"],
+        # api_key read from CHATBOT_LLM_API_KEY env var automatically
         storage=storage,
-        form_config=FormConfig.from_directory(os.getenv("chatbot_CONFIG_PATH", "./configs")),
+        form_config=form_config,
         pdf_filler=pdf_filler,
     )
-
-
-_client = None
 
 
 def handler(event, context):
     global _client
     try:
         if _client is None:
-            _client = _get_client()
+            _client = _build_client()
 
         user_id    = event["user_id"]
         session_id = event["session_id"]
@@ -79,11 +85,11 @@ def handler(event, context):
                 "response": response,
                 "session_complete": complete,
                 "filled_data": data if complete else None,
-            })
+            }, default=str),
         }
+
+    except (KeyError, ValueError) as e:
+        return {"statusCode": 400, "body": json.dumps({"error": str(e)})}
     except Exception as e:
         logger.exception("Lambda handler error")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}

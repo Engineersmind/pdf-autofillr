@@ -73,7 +73,7 @@ def test_submission_id_format():
     # Format is "{user_id}_{session_id}_{pdf_id}_{frequency}_{unix_timestamp}",
     # NOT "__"-separated and NOT "f1" as the 4th part.
     mock_storage = MagicMock()
-    mock_storage.load_json.return_value = None  # no existing mapping → frequency=1
+    mock_storage.load_json.return_value = None  # no existing mapping -> frequency=1
     submission_id, frequency, is_duplicate = generate_submission_id(
         "user1", "sess1", "pdf1", "somehash", mock_storage
     )
@@ -123,7 +123,7 @@ def test_get_pdf_frequency_none_mapping():
 
 
 def test_get_pdf_frequency_existing():
-    # FIX: mapping key is pdf_hash → {"pdf_count": N}, not "total_submissions"
+    # FIX: mapping key is pdf_hash -> {"pdf_count": N}, not "total_submissions"
     mock_storage = MagicMock()
     mock_storage.load_json.return_value = {"abc123": {"pdf_count": 4}}
     assert get_pdf_frequency("abc123", mock_storage) == 5

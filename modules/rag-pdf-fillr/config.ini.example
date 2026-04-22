@@ -1,6 +1,6 @@
 [storage]
 backend = local
-data_path = ./ragpdf_data
+data_path = ./data/rag
 s3_bucket =
 s3_region = us-east-1
 s3_prefix = ragpdf/

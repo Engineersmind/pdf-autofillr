@@ -58,10 +58,8 @@ tmp/
 temp/
 
 # Module-specific excludes
-entrypoints/
 modules/
 setup.py
-pyproject.toml
 requirements-aws.txt
 requirements-azure.txt
 requirements-gcp.txt

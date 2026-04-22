@@ -9,8 +9,8 @@ import os
 from ragpdf import RAGPDFClient, LocalStorage, LocalVectorStore, OpenAIEmbeddingBackend, OpenAICorrectorBackend
 
 client = RAGPDFClient(
-    storage=LocalStorage("./ragpdf_data"),
-    vector_store=LocalVectorStore("./ragpdf_data"),
+    storage=LocalStorage("./data/rag"),
+    vector_store=LocalVectorStore("./data/rag"),
     embedding_backend=OpenAIEmbeddingBackend(
         api_key=os.environ["OPENAI_API_KEY"],
         model="text-embedding-3-small",  # or text-embedding-3-large

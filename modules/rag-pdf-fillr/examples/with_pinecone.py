@@ -9,7 +9,7 @@ from ragpdf import RAGPDFClient, LocalStorage, SentenceTransformerBackend
 from ragpdf.vector_stores import PineconeStore
 
 client = RAGPDFClient(
-    storage=LocalStorage("./ragpdf_data"),
+    storage=LocalStorage("./data/rag"),
     vector_store=PineconeStore(
         api_key=os.environ["PINECONE_API_KEY"],
         index_name="ragpdf-vectors",

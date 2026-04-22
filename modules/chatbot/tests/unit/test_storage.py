@@ -11,7 +11,7 @@ from pathlib import Path
 
 @pytest.fixture
 def storage(temp_dir):
-    from src.chatbot.storage.local_storage import LocalStorage
+    from chatbot.storage.local_storage import LocalStorage
     return LocalStorage(
         data_path=str(temp_dir / "data"),
         config_path=str(temp_dir / "configs"),

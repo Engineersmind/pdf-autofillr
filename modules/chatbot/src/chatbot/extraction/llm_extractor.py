@@ -1,31 +1,42 @@
-# chatbot/extraction/llm_extractor.py
+# chatbot/src/chatbot/extraction/llm_extractor.py
 """
-LLMExtractor — uses GPT-4o-mini via LangChain to extract field values.
+LLMExtractor — extracts form field values using any LiteLLM-supported model.
+
+Replaces the previous hardcoded ChatOpenAI / GPT-4o-mini implementation.
+Model is configured via CHATBOT_LLM_MODEL in .env.
 """
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Optional
 
-from langchain_openai import ChatOpenAI
-
+from chatbot.extraction.llm_client import LLMClient
 from chatbot.extraction.prompt_builder import PromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class LLMExtractor:
-    """Extracts structured form field values using GPT-4o-mini."""
+    """
+    Extracts structured form field values using any LiteLLM-supported model.
 
-    MODEL = "gpt-4o-mini"
+    Args:
+        api_key:        Optional API key. Passed to LLMClient which resolves
+                        the right provider key automatically.
+        prompt_builder: Optional PromptBuilder subclass for custom prompts.
+        model:          Optional model override. Defaults to CHATBOT_LLM_MODEL env var.
+    """
 
-    def __init__(self, openai_api_key: str, prompt_builder=None):
-        self.openai_api_key = openai_api_key
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        prompt_builder=None,
+        model: Optional[str] = None,
+    ):
         self.prompt_builder = prompt_builder or PromptBuilder()
-        self.llm = ChatOpenAI(
-            model=self.MODEL,
-            temperature=0.0,
-            openai_api_key=self.openai_api_key,
-        )
+        self.llm = LLMClient(model=model, api_key=api_key)
 
     def extract(
         self,
@@ -37,11 +48,10 @@ class LLMExtractor:
         investor_type: Optional[str] = None,
     ) -> tuple:
         """
-        Call GPT-4o-mini with the full form schema and return extracted fields.
+        Call the configured LLM with the full form schema and return extracted fields.
 
         Returns:
-            (extracted_dict, latency_seconds, method) — 3-tuple.
-            Callers must unpack all 3 values.
+            (extracted_dict, latency_seconds, method)
         """
         start = time.time()
 
@@ -54,16 +64,19 @@ class LLMExtractor:
             user_input=user_input,
         )
 
-        result = self.llm.invoke(prompt)
-        raw = result.content if hasattr(result, "content") else str(result)
+        raw = self.llm.call(prompt)
 
         extracted = self._parse_json(raw)
         known_keys = set(live_fill_flat.keys())
         filtered = {k: v for k, v in extracted.items() if k in known_keys}
         latency = time.time() - start
-        return filtered, latency, "llm"
 
-    # ------------------------------------------------------------------
+        logger.debug(
+            "LLMExtractor: model=%s extracted=%d fields latency=%.2fs",
+            self.llm.model, len(filtered), latency,
+        )
+
+        return filtered, latency, "llm"
 
     def _parse_json(self, raw: str) -> dict:
         raw = raw.strip()
@@ -75,4 +88,5 @@ class LLMExtractor:
         try:
             return json.loads(raw.strip())
         except json.JSONDecodeError:
+            logger.warning("LLMExtractor: could not parse JSON from model response")
             return {}

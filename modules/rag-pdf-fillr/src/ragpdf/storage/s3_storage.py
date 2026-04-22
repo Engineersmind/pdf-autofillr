@@ -17,7 +17,7 @@ class S3Storage(StorageBackend):
         storage = S3Storage(bucket="my-ragpdf-bucket", region="us-east-1")
 
     AWS credentials are resolved via the standard boto3 chain:
-    env vars → ~/.aws/credentials → IAM role.
+    env vars -> ~/.aws/credentials -> IAM role.
     """
 
     def __init__(self, bucket: str, region: str = "us-east-1", prefix: str = ""):

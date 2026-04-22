@@ -69,7 +69,7 @@ from chatbot import chatbotClient, LocalStorage, FormConfig
 
 client = chatbotClient(
     openai_api_key="sk-...",
-    storage=LocalStorage("./chatbot_data", "./configs"),
+    storage=LocalStorage("./data/chatbot", "./configs"),
     form_config=FormConfig.from_directory("./configs"),
 )
 
@@ -106,7 +106,7 @@ main_app.mount("/onboarding", chatbot_app)
 |---|---|---|
 | `OPENAI_API_KEY` | — | **Required** |
 | `chatbot_STORAGE` | `local` | `local` or `s3` |
-| `chatbot_DATA_PATH` | `./chatbot_data` | Where sessions are saved |
+| `chatbot_DATA_PATH` | `./data/chatbot` | Where sessions are saved |
 | `chatbot_CONFIG_PATH` | `./configs` | Your configs folder |
 | `chatbot_PDF_FILLER` | `none` | `none`, `mapper`, or `managed` |
 | `chatbot_PDF_PATH` | — | Path to blank PDF |

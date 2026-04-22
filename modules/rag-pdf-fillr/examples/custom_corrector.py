@@ -31,8 +31,8 @@ Respond with JSON only: {{"corrected_field_name": "name", "confidence": 0.9, "re
 
 
 client = RAGPDFClient(
-    storage=LocalStorage("./ragpdf_data"),
-    vector_store=LocalVectorStore("./ragpdf_data"),
+    storage=LocalStorage("./data/rag"),
+    vector_store=LocalVectorStore("./data/rag"),
     embedding_backend=SentenceTransformerBackend("all-MiniLM-L6-v2"),
     corrector=OllamaCorrectorBackend(model="llama3.2"),
 )

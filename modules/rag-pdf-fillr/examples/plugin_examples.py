@@ -74,7 +74,7 @@ def example_c_local_chroma():
     from ragpdf.correctors.noop_corrector import NoOpCorrectorBackend
 
     client = RAGPDFClient(
-        storage=LocalStorage(data_path="./ragpdf_data"),
+        storage=LocalStorage(data_path="./data/rag"),
         vector_store=ChromaStore(
             path="./chroma_data",
             collection="ragpdf_vectors",   # fixed: was collection_name=
