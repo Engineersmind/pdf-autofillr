@@ -161,13 +161,12 @@ Every package must follow this layout:
   - `deploy/terraform/` (where applicable)
   - `pyproject.toml`
   - `.env.example`
-- [ ] `modules/chatbot/` — verify it has the above structure, add missing pieces
-- [ ] `modules/rag/` — verify structure, confirm rename from `rag-pdf-fillr` is complete across all references
+- [x] `modules/chatbot/` — removed legacy api_server.py, API_SERVER.md, MANIFEST.in, SETUP_GUIDE.md
+- [ ] `modules/rag-pdf-fillr/` — verify structure
 - [ ] `modules/doc_upload/` — verify structure
-- [ ] `modules/pdf_autofillr/` — verify orchestrator is wired up correctly
+- [ ] `modules/pdf_autofillr/` (in packages/) — verify orchestrator is wired up correctly
 
 ### RAG module
-- [ ] Rename all internal references from `rag-pdf-fillr` → `rag` across config files, READMEs, docker-compose, terraform
 - [ ] Verify `ragpdf_data/` (test data + metrics that exists on `main`) is either migrated to `benchmarks/` or preserved on `dev`
 
 ### SDK + OpenAPI
@@ -176,10 +175,10 @@ Every package must follow this layout:
 - [ ] `sdks/generate.sh` — verify it still works with updated OpenAPI specs
 
 ### CI/CD
-- [ ] Update `mapper-tests.yml` to use new `src/pdf_autofillr_mapper/` path (not old flat `src/`)
+- [x] Updated `mapper-tests.yml` to use new `src/pdf_autofillr_mapper/` path
 - [x] Updated `sdk-tests.yml` to point to `sdks/python/`
 - [x] Added `dev`/`prod` trigger branches to all workflows
-- [ ] Add `modules/doc_upload/` and `modules/rag-pdf-fillr/` test jobs to CI
+- [x] Added `module-tests.yml` — chatbot, doc_upload, rag-pdf-fillr jobs with Python matrix + coverage
 
 ---
 
