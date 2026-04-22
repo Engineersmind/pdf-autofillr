@@ -1,0 +1,49 @@
+name: SDK Tests
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "sdks/python/**"
+      - ".github/workflows/sdk-tests.yml"
+  pull_request:
+    branches: [main, dev, prod]
+    paths:
+      - "sdks/python/**"
+      - ".github/workflows/sdk-tests.yml"
+
+jobs:
+  test:
+    name: Run Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    defaults:
+      run:
+        working-directory: sdks/python
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install SDK + test dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest tests/ --tb=short -q
+
+      - name: Verify package imports cleanly
+        run: |
+          python -c "
+          from pdf_autofiller import PDFMapperClient
+          print('All imports OK')
+          "

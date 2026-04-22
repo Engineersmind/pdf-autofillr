@@ -92,10 +92,26 @@ dist/
 !**/terraform.tfvars.example
 
 # ======================
-# Secrets
+# Secrets & credentials
 # ======================
 *.key
 *.pem
+*.postman_environment.json
+*.postman_collection.json
+
+# ======================
+# Archives (local only, never commit)
+# ======================
+archives/
+
+# ======================
+# Internal / personal files
+# ======================
+CLAUDE.md
+z_useful_cmds.sh
+prod_file_dir_structure.txt
+REFACTORING_SUMMARY.md
+TERRAFORM_COMPLETE_IaC_PLAN.md
 
 # ======================
 # Misc

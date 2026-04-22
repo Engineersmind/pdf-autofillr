@@ -134,7 +134,7 @@ class PipelineNotifier:
             logger.warning("No active pipeline - call start_pipeline() first")
             return False
         
-        # Build payload
+        # Build payload mirroring backend response structure
         payload = {
             "event_type": "pipeline_stage_completed",
             "pipeline_id": self._pipeline_id,
@@ -143,33 +143,41 @@ class PipelineNotifier:
             "status": status.value,
             "level": level.value
         }
-        
-        # Add optional fields
+
+        # Add timing information
         if execution_time is not None:
             payload["execution_time_seconds"] = execution_time
-        
+
         if self._pipeline_start_time:
             elapsed = time.time() - self._pipeline_start_time
             payload["pipeline_elapsed_seconds"] = round(elapsed, 2)
-        
-        if input_files:
-            payload["input_files"] = input_files
-        
+
+        # Structure inputs similar to backend response
+        if input_files or user_input_details:
+            inputs = {}
+            if user_input_details:
+                inputs.update(user_input_details)  # user_id, session_id, pdf_doc_id, etc.
+            if input_files:
+                inputs.update(input_files)  # actual file paths
+            payload["inputs"] = inputs
+
+        # Structure outputs similar to backend response
         if output_files:
-            payload["output_files"] = output_files
-        
-        if user_input_details:
-            payload["user_input_details"] = user_input_details
-        
+            payload["outputs"] = output_files  # filled_pdf, filled_presigned_url, etc.
+
+        # Add performance/timing breakdown
         if timing_breakdown:
             payload["timing_breakdown"] = timing_breakdown
-        
+
+        # Add performance metrics (field counts, etc.)
         if performance_metrics:
             payload["performance_metrics"] = performance_metrics
-        
+
+        # Add error details if present
         if error_message:
             payload["error_message"] = error_message
-        
+
+        # Add custom metadata
         if metadata:
             payload["metadata"] = metadata
         
@@ -234,10 +242,11 @@ class PipelineNotifier:
     
     async def notify_pipeline_completion(
         self,
-        status: StageStatus,
+        status: str,
         total_time: Optional[float] = None,
         final_output: Optional[str] = None,
         stage_breakdown: Optional[Dict[str, float]] = None,
+        timing_breakdown: Optional[Dict[str, float]] = None,
         performance_metrics: Optional[Dict[str, Any]] = None,
         input_files: Optional[Dict[str, str]] = None,
         output_files: Optional[Dict[str, str]] = None,
@@ -246,20 +255,21 @@ class PipelineNotifier:
         metadata: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
-        Send pipeline completion notification.
-        
+        Send comprehensive pipeline completion notification.
+
         Args:
-            status: Final pipeline status
+            status: Final pipeline status (completed/failed)
             total_time: Total execution time
             final_output: Final output file
-            stage_breakdown: Stage timing breakdown
+            stage_breakdown: Stage timing breakdown (deprecated - use timing_breakdown)
+            timing_breakdown: Stage timing breakdown
             performance_metrics: Performance metrics
             input_files: Input files dict
-            output_files: Output files dict
-            user_input_details: User input tracking details (user_id, pdf_doc_id, input_json_doc_id)
+            output_files: Comprehensive output files dict (ALL outputs from all stages)
+            user_input_details: User input tracking (user_id, pdf_doc_id, session_id, input_json_doc_id)
             error_message: Error message if failed
-            metadata: Additional metadata
-            
+            metadata: Additional metadata (storage_type, total_outputs, cache_hit, etc.)
+
         Returns:
             True if successful
         """
@@ -270,48 +280,60 @@ class PipelineNotifier:
         # Calculate total time
         if total_time is None and self._pipeline_start_time:
             total_time = round(time.time() - self._pipeline_start_time, 2)
-        
+
+        # Handle both string and enum status
+        status_str = status.value if hasattr(status, 'value') else str(status)
+
         # Determine level
-        level = NotificationLevel.CRITICAL if status == StageStatus.FAILED else NotificationLevel.HIGH
-        
-        # Build payload
+        is_failed = status_str in ["failed", "error", StageStatus.FAILED.value]
+        level = NotificationLevel.CRITICAL if is_failed else NotificationLevel.HIGH
+
+        # Build comprehensive payload
         payload = {
             "event_type": "pipeline_completed",
             "pipeline_id": self._pipeline_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": status.value,
+            "status": status_str,
             "level": level.value
         }
-        
-        # Add optional fields
+
+        # Add timing information
         if total_time is not None:
             payload["execution_time_seconds"] = total_time
-        
-        if final_output:
-            if not output_files:
-                output_files = {}
-            output_files["final_output"] = final_output
-        
-        if input_files:
-            payload["input_files"] = input_files
-        
+
+        # Structure inputs (if provided)
+        if input_files or user_input_details:
+            inputs = {}
+            if user_input_details:
+                inputs.update(user_input_details)
+            if input_files:
+                inputs.update(input_files)
+            payload["inputs"] = inputs
+
+        # Structure comprehensive outputs (ALL outputs from all stages)
         if output_files:
-            payload["output_files"] = output_files
-        
-        if user_input_details:
-            payload["user_input_details"] = user_input_details
-        
-        if stage_breakdown:
-            payload["timing_breakdown"] = stage_breakdown
-        
+            payload["outputs"] = output_files
+
+        # Add final output if not already in outputs
+        if final_output:
+            if "outputs" not in payload:
+                payload["outputs"] = {}
+            if "final_output" not in payload["outputs"]:
+                payload["outputs"]["final_output"] = final_output
+
+        # Add timing breakdown (stage-by-stage execution time)
+        timing_to_use = timing_breakdown or stage_breakdown
+        if timing_to_use:
+            payload["timing_breakdown"] = timing_to_use
+
+        # Add performance metrics with pipeline tracking
         if performance_metrics:
-            if not performance_metrics:
-                performance_metrics = {}
-            performance_metrics.update({
+            enhanced_metrics = dict(performance_metrics)
+            enhanced_metrics.update({
                 "total_notifications_sent": self._notification_count,
                 "failed_notifications": self._failed_notifications
             })
-            payload["performance_metrics"] = performance_metrics
+            payload["performance_metrics"] = enhanced_metrics
         
         if error_message:
             payload["error_message"] = error_message
@@ -336,9 +358,9 @@ class PipelineNotifier:
                 
                 if response.success:
                     http_success = True
-                    logger.info(f"🎉 HTTP Pipeline completion notification sent: {status.value}")
+                    logger.info(f"🎉 HTTP Pipeline completion notification sent: {status_str}")
                 else:
-                    logger.error(f"💥 HTTP Pipeline completion notification failed: {status.value}")
+                    logger.error(f"💥 HTTP Pipeline completion notification failed: {status_str}")
                     
             except Exception as e:
                 logger.error(f"HTTP Pipeline completion notification error: {e}")
@@ -348,7 +370,7 @@ class PipelineNotifier:
             try:
                 # Build Teams-specific MessageCard payload
                 teams_payload = self._build_teams_pipeline_card(
-                    status=status.value,
+                    status=status_str,
                     pipeline_id=self._pipeline_id,
                     total_time=total_time,
                     output_files=output_files,
@@ -364,9 +386,9 @@ class PipelineNotifier:
                 
                 if response.success:
                     teams_success = True
-                    logger.info(f"🎉 Teams Pipeline completion notification sent: {status.value}")
+                    logger.info(f"🎉 Teams Pipeline completion notification sent: {status_str}")
                 else:
-                    logger.error(f"💥 Teams Pipeline completion notification failed: {status.value}")
+                    logger.error(f"💥 Teams Pipeline completion notification failed: {status_str}")
                     
             except Exception as e:
                 logger.error(f"Teams Pipeline completion notification error: {e}")

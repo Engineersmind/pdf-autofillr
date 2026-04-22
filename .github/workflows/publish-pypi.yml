@@ -1,0 +1,132 @@
+name: Publish to PyPI
+
+# Triggered by version tags pushed on main.
+#
+# Tag format → Package published:
+#   sdk-v1.2.3      → pdf-autofiller         (sdks/python/)
+#   core-v1.0.5     → pdf-autofiller-core    (packages/core/)
+#   plugins-v1.1.0  → pdf-autofiller-plugins (packages/plugins/)
+#
+# How to release:
+#   1. Update version in pyproject.toml and __init__.py of the target package
+#   2. Update CHANGELOG.md for that package
+#   3. Merge to main
+#   4. Push the tag: git tag sdk-v1.2.3 && git push origin sdk-v1.2.3
+#
+# PyPI Trusted Publishing (OIDC — no token needed):
+#   Set up at https://pypi.org/manage/account/publishing/
+#   Owner: Engineersmind | Repo: pdf-autofillr | Workflow: publish-pypi.yml | Env: pypi
+
+on:
+  push:
+    tags:
+      - 'sdk-v*'
+      - 'core-v*'
+      - 'plugins-v*'
+
+jobs:
+  # ── Resolve which package to publish ────────────────────────────────────────
+  resolve:
+    name: Resolve package from tag
+    runs-on: ubuntu-latest
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      package_name: ${{ steps.resolve.outputs.package_name }}
+      version: ${{ steps.resolve.outputs.version }}
+
+    steps:
+      - name: Resolve tag to package
+        id: resolve
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == sdk-v* ]]; then
+            echo "package_dir=sdks/python" >> $GITHUB_OUTPUT
+            echo "package_name=pdf-autofiller" >> $GITHUB_OUTPUT
+            echo "version=${TAG#sdk-v}" >> $GITHUB_OUTPUT
+          elif [[ "$TAG" == core-v* ]]; then
+            echo "package_dir=packages/core" >> $GITHUB_OUTPUT
+            echo "package_name=pdf-autofiller-core" >> $GITHUB_OUTPUT
+            echo "version=${TAG#core-v}" >> $GITHUB_OUTPUT
+          elif [[ "$TAG" == plugins-v* ]]; then
+            echo "package_dir=packages/plugins" >> $GITHUB_OUTPUT
+            echo "package_name=pdf-autofiller-plugins" >> $GITHUB_OUTPUT
+            echo "version=${TAG#plugins-v}" >> $GITHUB_OUTPUT
+          else
+            echo "Unknown tag format: $TAG" && exit 1
+          fi
+
+  # ── Run tests before publishing ─────────────────────────────────────────────
+  test:
+    name: Test ${{ needs.resolve.outputs.package_name }}
+    runs-on: ubuntu-latest
+    needs: resolve
+    defaults:
+      run:
+        working-directory: ${{ needs.resolve.outputs.package_dir }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest tests/ --tb=short -q
+
+  # ── Build distribution ───────────────────────────────────────────────────────
+  build:
+    name: Build ${{ needs.resolve.outputs.package_name }}
+    runs-on: ubuntu-latest
+    needs: [resolve, test]
+    defaults:
+      run:
+        working-directory: ${{ needs.resolve.outputs.package_dir }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION="${{ needs.resolve.outputs.version }}"
+          PKG_VERSION=$(python -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
+          print(data['project']['version'])
+          ")
+          echo "Tag: $TAG_VERSION | pyproject.toml: $PKG_VERSION"
+          [ "$TAG_VERSION" = "$PKG_VERSION" ] || (echo "Version mismatch" && exit 1)
+
+      - name: Build wheel + sdist
+        run: pip install build && python -m build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ needs.resolve.outputs.package_name }}
+          path: ${{ needs.resolve.outputs.package_dir }}/dist/
+
+  # ── Publish to PyPI ──────────────────────────────────────────────────────────
+  publish:
+    name: Publish ${{ needs.resolve.outputs.package_name }} to PyPI
+    runs-on: ubuntu-latest
+    needs: [resolve, build]
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.resolve.outputs.package_name }}
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

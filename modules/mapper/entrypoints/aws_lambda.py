@@ -130,14 +130,26 @@ async def async_lambda_handler(event, context):
         
         # Create notification system
         notifier = get_pipeline_notifier()
-        
+
         # Parse operation
         operation = event.get('operation')
         if not operation:
             raise ValueError("Missing required parameter: operation")
-        
+
         logger.info(f"Operation: {operation}")
-        
+
+        # Initialize pipeline tracking for notifications
+        if notifier:
+            notifier.start_pipeline(
+                pipeline_id=f"{operation}_{int(time.time())}",
+                metadata={
+                    "user_id": event.get('user_id'),
+                    "session_id": event.get('session_id'),
+                    "pdf_doc_id": event.get('pdf_doc_id')
+                }
+            )
+            logger.info(f"Pipeline tracking initialized for {operation}")
+
         # Route to appropriate handler
         result = await route_operation(event, operation, notifier)
         

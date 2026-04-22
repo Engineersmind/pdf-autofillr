@@ -449,13 +449,21 @@ async def handle_extract_operation(
         duration = round(end_time - start_time, 2)
         # Send success notification
         if notifier and NOTIFICATIONS_AVAILABLE:
+            # Use S3 paths for inputs/outputs in notification (from config)
+            input_files_notification = {
+                "pdf_s3_path": getattr(config, 's3_input_pdf', None) or local_pdf  # Consistent with final notification
+            }
+            output_files_notification = {
+                "extracted_json": saved_path or extraction_output_path  # Consistent key name
+            }
+
             await safe_notify(
                 notifier, "stage_completion",
                 stage=PipelineStage.EXTRACT,
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
-                input_files={"pdf": local_pdf},
-                output_files={"extracted_json": extraction_output_path},
+                input_files=input_files_notification,
+                output_files=output_files_notification,
                 user_input_details=user_input_details,
                 metadata={
                     "storage_type": config.source_type,
@@ -633,19 +641,23 @@ async def handle_map_operation(
         field_stats = mapping_result.get("field_statistics", {})
         # Send success notification
         if notifier and NOTIFICATIONS_AVAILABLE:
+            # Use S3 paths for inputs where available (from config)
+            input_files_notification = {
+                "extracted_json": getattr(config, 's3_extracted_json', None) or local_extracted,
+                "global_input_json": getattr(config, 's3_input_json', None) or local_input  # Consistent key name
+            }
+            output_files_notification = {
+                "mapping_json": getattr(config, 's3_mapped_json', None) or local_mapping,  # Consistent key name
+                "radio_groups_json": getattr(config, 's3_radio_json', None) or local_radio  # Consistent key name
+            }
+
             await safe_notify(
                 notifier, "stage_completion",
                 stage=PipelineStage.MAP,
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
-                input_files={
-                    "extracted_json": local_extracted,
-                    "input_keys": local_input
-                },
-                output_files={
-                    "mapping": local_mapping,
-                    "radio_groups": local_radio
-                },
+                input_files=input_files_notification,
+                output_files=output_files_notification,
                 user_input_details=user_input_details,
                 performance_metrics={
                     "total_fields_mapped": field_stats.get("total_fields_mapped", 0),
@@ -769,18 +781,24 @@ async def handle_embed_operation(
         duration = round(end_time - start_time, 2)
         # Send success notification
         if notifier and NOTIFICATIONS_AVAILABLE:
+            # Use S3 paths for inputs where available (from config) - consistent key names
+            input_files_notification = {
+                "pdf_s3_path": getattr(config, 's3_input_pdf', None) or local_pdf,  # Consistent with final notification
+                "extracted_json": getattr(config, 's3_extracted_json', None) or local_extracted,  # Consistent
+                "mapping_json": getattr(config, 's3_mapped_json', None) or local_mapping,  # Consistent
+                "radio_groups_json": getattr(config, 's3_radio_json', None) or local_radio  # Consistent
+            }
+            output_files_notification = {
+                "embedded_pdf": getattr(config, 'dest_embedded_pdf', None) or getattr(config, 's3_embedded_pdf', None) or local_embedded
+            }
+
             await safe_notify(
                 notifier, "stage_completion",
                 stage=PipelineStage.EMBED,
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
-                input_files={
-                    "pdf": local_pdf,
-                    "extracted": local_extracted,
-                    "mapping": local_mapping,
-                    "radio_groups": local_radio
-                },
-                output_files={"embedded_pdf": local_embedded},
+                input_files=input_files_notification,
+                output_files=output_files_notification,
                 user_input_details=user_input_details,
                 metadata={"storage_type": config.source_type}
             )
@@ -886,16 +904,25 @@ async def handle_fill_operation(
         duration = round(end_time - start_time, 2)
         # Send success notification
         if notifier and NOTIFICATIONS_AVAILABLE:
+            output_files_notification = {
+                "filled_pdf": saved_path or local_filled
+            }
+            if filled_presigned_url:
+                output_files_notification["filled_presigned_url"] = filled_presigned_url
+
+            # Use configured S3 paths for inputs (from aws_lambda.py _build_aws_config) - consistent key names
+            input_files_notification = {
+                "embedded_pdf": getattr(config, 'dest_embedded_pdf', None) or getattr(config, 's3_embedded_pdf', None) or local_embedded,
+                "global_input_json": getattr(config, 's3_input_json', None) or local_input  # Consistent key name
+            }
+
             await safe_notify(
                 notifier, "stage_completion",
                 stage=PipelineStage.FILL,
                 status=StageStatus.COMPLETED,
                 execution_time=duration,
-                input_files={
-                    "embedded_pdf": local_embedded,
-                    "input_json": local_input
-                },
-                output_files={"filled_pdf": saved_path or local_filled},
+                input_files=input_files_notification,
+                output_files=output_files_notification,
                 user_input_details=user_input_details,
                 metadata={"storage_type": config.source_type}
             )
@@ -982,6 +1009,13 @@ async def handle_run_all_operation(
         pipeline_results["extract"] = extract_result
         extracted_json = extract_result["output_file"]
         logger.info(f"✅ EXTRACT completed: {extracted_json}")
+
+        # Update config with S3 destination path from extract operation for downstream notifications
+        dest_extracted = extract_result.get("dest_output_file")
+        if dest_extracted:
+            config.s3_extracted_json = dest_extracted
+            logger.info(f"📍 Updated config.s3_extracted_json → {dest_extracted}")
+
         # Stage 2: Map
         logger.info("\n[2/4] Starting MAP stage...")
         map_result = await handle_map_operation(
@@ -997,6 +1031,17 @@ async def handle_run_all_operation(
         mapping_json = map_result["mapping_result"]["mapping_path"]
         radio_groups = map_result["mapping_result"]["radio_groups_path"]
         logger.info(f"✅ MAP completed: {mapping_json}")
+
+        # Update config with S3 destination paths from map operation for embed notification
+        dest_mapping = map_result["mapping_result"].get("dest_mapping_path")
+        dest_radio = map_result["mapping_result"].get("dest_radio_groups_path")
+        if dest_mapping:
+            config.s3_mapped_json = dest_mapping
+            logger.info(f"📍 Updated config.s3_mapped_json → {dest_mapping}")
+        if dest_radio:
+            config.s3_radio_json = dest_radio
+            logger.info(f"📍 Updated config.s3_radio_json → {dest_radio}")
+
         # Stage 3: Embed
         logger.info("\n[3/4] Starting EMBED stage...")
         embed_result = await handle_embed_operation(
@@ -1009,6 +1054,14 @@ async def handle_run_all_operation(
         pipeline_results["embed"] = embed_result
         embedded_pdf = embed_result["output_file"]
         logger.info(f"✅ EMBED completed: {embedded_pdf}")
+
+        # Update config with S3 destination path from embed operation for fill notification
+        dest_embedded = embed_result.get("dest_output_file")
+        if dest_embedded:
+            config.dest_embedded_pdf = dest_embedded
+            config.s3_embedded_pdf = dest_embedded
+            logger.info(f"📍 Updated config.dest_embedded_pdf → {dest_embedded}")
+
         # Stage 4: Fill
         logger.info("\n[4/4] Starting FILL stage...")
         fill_result = await handle_fill_operation(
@@ -1022,17 +1075,84 @@ async def handle_run_all_operation(
         pipeline_results["fill"] = fill_result
         filled_pdf = fill_result["output_file"]
         logger.info(f"✅ FILL completed: {filled_pdf}")
-        # Pipeline complete
+
+        # Pipeline complete - Build comprehensive outputs from all stages
         end_time = time.time()
         total_duration = round(end_time - start_time, 2)
-        # Send pipeline completion notification
+
+        # Aggregate all outputs from all stages into comprehensive dict
+        comprehensive_outputs = {}
+
+        # Extract outputs
+        if pipeline_results.get("extract"):
+            comprehensive_outputs["extracted_json"] = pipeline_results["extract"].get("dest_output_file") or pipeline_results["extract"].get("output_file")
+
+        # Map outputs
+        if pipeline_results.get("map"):
+            map_mapping = pipeline_results["map"]["mapping_result"].get("dest_mapping_path") or pipeline_results["map"]["mapping_result"].get("mapping_path")
+            map_radio = pipeline_results["map"]["mapping_result"].get("dest_radio_groups_path") or pipeline_results["map"]["mapping_result"].get("radio_groups_path")
+            comprehensive_outputs["mapping_json"] = map_mapping
+            comprehensive_outputs["radio_groups_json"] = map_radio
+            # Semantic mapping (for cache/reference)
+            if "semantic_mapping_path" in pipeline_results["map"]["mapping_result"]:
+                comprehensive_outputs["semantic_mapping_json"] = pipeline_results["map"]["mapping_result"]["semantic_mapping_path"]
+
+        # Embed outputs
+        if pipeline_results.get("embed"):
+            comprehensive_outputs["embedded_pdf"] = pipeline_results["embed"].get("dest_output_file") or pipeline_results["embed"].get("output_file")
+
+        # Headers outputs (from Phase 2 if cached/extracted)
+        if pipeline_results.get("headers"):
+            comprehensive_outputs["headers_with_fields"] = pipeline_results["headers"].get("headers_with_fields")
+            comprehensive_outputs["final_form_fields"] = pipeline_results["headers"].get("final_form_fields")
+
+        # RAG/Predictions outputs
+        if pipeline_results.get("rag"):
+            comprehensive_outputs["llm_predictions"] = pipeline_results["rag"].get("llm_predictions")
+            comprehensive_outputs["rag_predictions"] = pipeline_results["rag"].get("rag_predictions")
+            comprehensive_outputs["final_predictions"] = pipeline_results["rag"].get("final_predictions")
+        elif pipeline_results.get("predictions"):
+            comprehensive_outputs["llm_predictions"] = pipeline_results["predictions"].get("llm_predictions")
+            comprehensive_outputs["rag_predictions"] = pipeline_results["predictions"].get("rag_predictions")
+            comprehensive_outputs["final_predictions"] = pipeline_results["predictions"].get("final_predictions")
+
+        # Fill output
+        if pipeline_results.get("fill"):
+            comprehensive_outputs["filled_pdf"] = pipeline_results["fill"].get("dest_output_file") or pipeline_results["fill"].get("output_file")
+            if pipeline_results["fill"].get("filled_presigned_url"):
+                comprehensive_outputs["filled_presigned_url"] = pipeline_results["fill"]["filled_presigned_url"]
+
+        logger.info(f"\n📦 Comprehensive pipeline outputs ({len(comprehensive_outputs)} files):")
+        for output_name, output_path in comprehensive_outputs.items():
+            if output_path:
+                logger.info(f"   ✓ {output_name}: {output_path}")
+
+        # Send comprehensive pipeline completion notification
         if notifier and NOTIFICATIONS_AVAILABLE:
             await safe_notify(
                 notifier, "pipeline_completion",
                 status="completed",
-                total_duration=total_duration,
+                total_time=total_duration,
                 final_output=filled_pdf,
-                stage_results=pipeline_results
+                output_files=comprehensive_outputs,  # All outputs from all stages
+                user_input_details={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "pdf_doc_id": pdf_doc_id,
+                    "input_json_doc_id": input_json_doc_id
+                },
+                timing_breakdown={
+                    "extract": pipeline_results.get("extract", {}).get("execution_time_seconds", 0),
+                    "map": pipeline_results.get("map", {}).get("execution_time_seconds", 0),
+                    "embed": pipeline_results.get("embed", {}).get("execution_time_seconds", 0),
+                    "fill": pipeline_results.get("fill", {}).get("execution_time_seconds", 0)
+                },
+                metadata={
+                    "storage_type": storage_type,
+                    "total_outputs": len(comprehensive_outputs),
+                    "cache_hit": cache_result is not None,
+                    "dual_mapper_enabled": use_second_mapper
+                }
             )
         logger.info("\n" + "=" * 80)
         logger.info(f"✅ COMPLETE PIPELINE SUCCESS in {total_duration}s")
@@ -2239,6 +2359,33 @@ async def handle_make_embed_file_operation(
                 config.local_mapped_json = mapping_json
                 config.local_radio_json = radio_groups
                 logger.info(f"✅ Cache processed. MAP stage skipped.")
+
+                # Send MAP stage notification for cache hit path
+                if notifier and NOTIFICATIONS_AVAILABLE:
+                    await safe_notify(
+                        notifier, "stage_completion",
+                        stage=PipelineStage.MAP,
+                        status=StageStatus.COMPLETED,
+                        execution_time=0,  # Cache hit - instant
+                        input_files={
+                            "extracted_json": dest_semantic_mapping or semantic_mapping_path or extracted_json,
+                            "global_input_json": input_json_s3  # Consistent key name
+                        },
+                        output_files={
+                            "mapping_json": dest_semantic_mapping or semantic_mapping_path,
+                            "radio_groups_json": dest_radio_groups or radio_groups
+                        },
+                        user_input_details={
+                            "user_id": user_id,
+                            "pdf_doc_id": pdf_doc_id,
+                            "session_id": session_id
+                        },
+                        metadata={
+                            "pdf_category": pdf_category,
+                            "storage_type": storage_type,
+                            "cache_hit": True
+                        }
+                    )
             except Exception as cache_error:
                 logger.error(f"Failed to process cached files: {cache_error}. Running MAP stage.")
                 cache_hit = False
@@ -2273,6 +2420,33 @@ async def handle_make_embed_file_operation(
             pdf_category = map_phase_result['pdf_category']
             # Capture Phase 1 (semantic mapper) LLM usage for response
             semantic_result['llm_usage'] = map_phase_result.get('phase1_llm_usage', {})
+
+            # Send MAP stage notification (was missing!)
+            if notifier and NOTIFICATIONS_AVAILABLE:
+                map_duration = map_phase_result.get('execution_time_seconds', 0)
+                await safe_notify(
+                    notifier, "stage_completion",
+                    stage=PipelineStage.MAP,
+                    status=StageStatus.COMPLETED,
+                    execution_time=map_duration,
+                    input_files={
+                        "extracted_json": dest_semantic_mapping or semantic_mapping_path or extracted_json,
+                        "global_input_json": input_json_s3  # Consistent key name
+                    },
+                    output_files={
+                        "mapping_json": dest_semantic_mapping or semantic_mapping_path,
+                        "radio_groups_json": dest_radio_groups or radio_groups
+                    },
+                    user_input_details={
+                        "user_id": user_id,
+                        "pdf_doc_id": pdf_doc_id,
+                        "session_id": session_id
+                    },
+                    performance_metrics={
+                        "pdf_category": pdf_category,
+                        "storage_type": storage_type
+                    }
+                )
 
             # Call RAG mapper if enabled (runs for both cache hit and MAP phase)
             if use_second_mapper:
@@ -2447,6 +2621,14 @@ async def handle_make_embed_file_operation(
                     logger.info("📤 Cache registry uploaded to S3 after MAP")
             except Exception as _ce:
                 logger.warning(f"Failed to save MAP cache: {_ce}")
+        # Update config with S3 paths from cache/map phase for embed notification
+        if dest_semantic_mapping:
+            config.s3_extracted_json = dest_semantic_mapping  # Use semantic mapping S3 path
+        if dest_semantic_mapping:
+            config.s3_mapped_json = dest_semantic_mapping
+        if dest_radio_groups:
+            config.s3_radio_json = dest_radio_groups
+
         # Stage 3: Embed
         logger.info("\n" + "=" * 80)
         logger.info("[3/3] EMBEDDING STAGE")
@@ -2571,6 +2753,54 @@ async def handle_make_embed_file_operation(
         logger.info("")
         logger.info("=" * 80)
 
+        # Build comprehensive outputs dict
+        comprehensive_outputs = {
+            "extracted_json":       getattr(config, 'dest_extracted_json',           None) or extracted_json,
+            "mapping_json":         saved_java_mapping                                      or mapping_json,
+            "radio_groups_json":    dest_radio_groups                                       or radio_groups,
+            "embedded_pdf":         dest_embedded_pdf                                       or embedded_pdf,
+            "semantic_mapping_json":dest_semantic_mapping                                   or semantic_mapping_path,
+            "headers_with_fields":  dest_headers_with_fields                                or headers_with_fields_path,
+            "final_form_fields":    dest_final_form_fields                                  or final_form_fields_path,
+            "llm_predictions":      getattr(config, 'dest_llm_predictions_json',    None)  or llm_predictions_path,
+            "rag_predictions":      getattr(config, 'dest_rag_predictions_json',    None)  or rag_predictions_path,
+            "final_predictions":    saved_final_predictions                                 or combined_mapping_path,
+        }
+
+        # Send FINAL pipeline completion notification with ALL outputs + LLM costs
+        if notifier and NOTIFICATIONS_AVAILABLE:
+            await safe_notify(
+                notifier, "pipeline_completion",
+                status="completed",
+                total_time=total_duration,
+                output_files=comprehensive_outputs,
+                user_input_details={
+                    "user_id": user_id,
+                    "pdf_doc_id": pdf_doc_id,
+                    "session_id": session_id
+                },
+                timing_breakdown={
+                    "extract": pipeline_results.get("extract", {}).get("execution_time_seconds", 0),
+                    "map": pipeline_results.get("map", {}).get("execution_time_seconds", 0),
+                    "embed": pipeline_results.get("embed", {}).get("execution_time_seconds", 0)
+                },
+                performance_metrics={
+                    "llm_cost_summary": {
+                        "phase_1_semantic_mapper": phase1_llm,
+                        "phase_2_headers_extraction": headers_llm,
+                        "total_tokens": total_llm_tokens,
+                        "total_cost_usd": total_llm_cost
+                    }
+                },
+                metadata={
+                    "storage_type": storage_type,
+                    "total_outputs": len([v for v in comprehensive_outputs.values() if v]),
+                    "cache_hit": cache_hit,
+                    "dual_mapper_enabled": use_second_mapper,
+                    "investor_type": investor_type
+                }
+            )
+
         return {
             "operation": "make_embed_file",
             "investor_type": investor_type,
@@ -2579,18 +2809,7 @@ async def handle_make_embed_file_operation(
                 "pdf_s3_path": input_pdf_s3,
                 "global_input_json": input_json_s3
             },
-            "outputs": {
-                "extracted_json":       getattr(config, 'dest_extracted_json',           None) or extracted_json,
-                "mapping_json":         saved_java_mapping                                      or mapping_json,
-                "radio_groups_json":    dest_radio_groups                                       or radio_groups,
-                "embedded_pdf":         dest_embedded_pdf                                       or embedded_pdf,
-                "semantic_mapping_json":dest_semantic_mapping                                   or semantic_mapping_path,
-                "headers_with_fields":  dest_headers_with_fields                                or headers_with_fields_path,
-                "final_form_fields":    dest_final_form_fields                                  or final_form_fields_path,
-                "llm_predictions":      getattr(config, 'dest_llm_predictions_json',    None)  or llm_predictions_path,
-                "rag_predictions":      getattr(config, 'dest_rag_predictions_json',    None)  or rag_predictions_path,
-                "final_predictions":    saved_final_predictions                                 or combined_mapping_path,
-            },
+            "outputs": comprehensive_outputs,
             "pdf_category": pdf_category,
             "pdf_hash": pdf_hash,
             "cache_hit": cache_hit,
