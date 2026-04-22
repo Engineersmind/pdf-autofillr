@@ -1,10 +1,13 @@
 # ---------------------------------------------------------------------------
 # ECR — dev container image repository
 #
-# This repo was created manually as "pdf-autofiller-mapper-lambda-dev".
-# Set ecr_repository_name = "pdf-autofiller-mapper-lambda-dev" in terraform.tfvars
-# then run: terraform import aws_ecr_repository.mapper pdf-autofiller-mapper-lambda-dev
+# import block auto-imports the manually-created repo on first apply.
 # ---------------------------------------------------------------------------
+
+import {
+  to = aws_ecr_repository.mapper
+  id = local.ecr_name
+}
 
 resource "aws_ecr_repository" "mapper" {
   name                 = local.ecr_name

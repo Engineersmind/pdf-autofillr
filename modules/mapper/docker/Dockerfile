@@ -62,10 +62,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-CMD if [ "$DEPLOY_MODE" = "local" ]; then \
-      exec python entrypoints/local.py; \
-    elif [ "$DEPLOY_MODE" = "cli" ]; then \
-      exec python entrypoints/cli.py; \
-    else \
-      exec python -m uvicorn entrypoints.fastapi_app:app --host 0.0.0.0 --port ${PORT}; \
-    fi
+COPY --chown=mapper:mapper docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["entrypoints.aws_lambda.lambda_handler"]

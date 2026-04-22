@@ -23,12 +23,6 @@ resource "aws_lambda_function" "mapper" {
   timeout       = var.lambda_timeout_sec
   memory_size   = var.lambda_memory_mb
 
-  # Point Lambda runtime at the AWS entrypoint handler
-  image_config {
-    entry_point = ["/usr/local/bin/python", "-m", "awslambdaric"]
-    command     = ["entrypoints.aws_lambda.lambda_handler"]
-  }
-
   ephemeral_storage {
     size = 2048  # /tmp for intermediate PDF/JSON files during processing
   }

@@ -10,10 +10,23 @@ resource "aws_cloudwatch_log_group" "mapper" {
 # ---------------------------------------------------------------------------
 # Lambda — PDF autofiller mapper (dev)
 #
-# This function was created manually as "pdf-autofiller-mapper-dev".
-# Import it before first apply:
-#   terraform import aws_lambda_function.mapper pdf-autofiller-mapper-dev
+# import blocks auto-import the manually-created Lambda and log group on first apply.
 # ---------------------------------------------------------------------------
+
+import {
+  to = aws_lambda_function.mapper
+  id = local.name
+}
+
+import {
+  to = aws_cloudwatch_log_group.mapper
+  id = "/aws/lambda/${local.name}"
+}
+
+import {
+  to = aws_lambda_function_url.mapper
+  id = local.name
+}
 
 resource "aws_lambda_function" "mapper" {
   function_name = local.name
@@ -23,11 +36,6 @@ resource "aws_lambda_function" "mapper" {
   image_uri     = "${aws_ecr_repository.mapper.repository_url}:latest"
   timeout       = var.lambda_timeout_sec
   memory_size   = var.lambda_memory_mb
-
-  image_config {
-    entry_point = ["/usr/local/bin/python", "-m", "awslambdaric"]
-    command     = ["entrypoints.aws_lambda.lambda_handler"]
-  }
 
   ephemeral_storage {
     size = 2048

@@ -2,132 +2,160 @@
 # deploy.sh — build, push, and deploy the mapper module
 #
 # Usage:
-#   CLOUD_PROVIDER=aws ENV=dev ./deploy/deploy.sh
-#   CLOUD_PROVIDER=azure ENV=staging ./deploy/deploy.sh
-#   CLOUD_PROVIDER=gcp ENV=prod ./deploy/deploy.sh
-#   CLOUD_PROVIDER=local ./deploy/deploy.sh   # docker compose only
+#   ./deploy/deploy.sh --env dev               # full deploy (build + push + terraform apply)
+#   ./deploy/deploy.sh --env prod              # prod full deploy
+#   ./deploy/deploy.sh --env dev  --update     # code-only: rebuild image + update Lambda (skip terraform)
+#   ./deploy/deploy.sh --env prod --update
+#   ./deploy/deploy.sh --cloud azure
+#   ./deploy/deploy.sh --cloud gcp
+#   ./deploy/deploy.sh --cloud local
 #
-# Required env vars per cloud:
-#   AWS:   AWS_ACCOUNT_ID, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-#   Azure: AZURE_REGISTRY (e.g. myregistry.azurecr.io), az login required
-#   GCP:   GCP_PROJECT_ID, GCP_REGION, gcloud auth required
+# --update is faster when only Python code changed (no infra/env-var changes).
 
 set -euo pipefail
 
-CLOUD_PROVIDER=${CLOUD_PROVIDER:-local}
-ENV=${ENV:-dev}
 MODULE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-IMAGE_NAME="pdf-autofillr-mapper"
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+
+ENV="dev"
+CLOUD="aws"
+UPDATE=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env)    ENV="$2";   shift 2 ;;
+    --cloud)  CLOUD="$2"; shift 2 ;;
+    --update) UPDATE=true; shift  ;;
+    *) echo "Unknown option: $1"; echo "Usage: $0 [--env dev|prod] [--cloud aws|azure|gcp|local] [--update]"; exit 1 ;;
+  esac
+done
+
 IMAGE_TAG="${ENV}-$(git -C "$MODULE_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)"
+echo "==> Cloud: $CLOUD | Env: $ENV | Tag: $IMAGE_TAG | Update-only: $UPDATE"
 
-echo "==> Cloud: $CLOUD_PROVIDER | Env: $ENV | Tag: $IMAGE_TAG"
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-# ── Build Docker image ────────────────────────────────────────────────────────
 build_image() {
-  local full_uri=$1
-  echo "==> Building image: $full_uri"
-  docker build \
-    -f "$MODULE_DIR/docker/Dockerfile" \
-    --tag "$full_uri" \
-    "$MODULE_DIR"
+  local uri="$1"
+  echo "==> Building: $uri"
+  docker build -f "$MODULE_DIR/docker/Dockerfile" --tag "$uri" "$MODULE_DIR"
+}
+
+_tfvar() {
+  local key="$1" dir="$2"
+  awk -F'"' "/^${key}[[:space:]]*=/{print \$2; exit}" "${dir}/terraform.tfvars" 2>/dev/null || true
 }
 
 # ── AWS ───────────────────────────────────────────────────────────────────────
+
 deploy_aws() {
-  : "${AWS_ACCOUNT_ID:?AWS_ACCOUNT_ID required}"
-  : "${AWS_REGION:?AWS_REGION required}"
+  local tf_dir
+  [[ "$ENV" == "prod" ]] && tf_dir="$MODULE_DIR/deploy/terraform/aws" \
+                         || tf_dir="$MODULE_DIR/deploy/terraform/aws-dev"
 
-  local registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-  local image_uri="${registry}/${IMAGE_NAME}:${IMAGE_TAG}"
+  echo "==> Terraform dir: ${tf_dir}"
 
-  # Create ECR repo if it doesn't exist
-  aws ecr describe-repositories --repository-names "$IMAGE_NAME" --region "$AWS_REGION" 2>/dev/null || \
-    aws ecr create-repository --repository-name "$IMAGE_NAME" --region "$AWS_REGION"
+  if [[ ! -f "${tf_dir}/terraform.tfvars" ]]; then
+    echo "ERROR: ${tf_dir}/terraform.tfvars not found."
+    echo "       cp ${tf_dir}/terraform.tfvars.example ${tf_dir}/terraform.tfvars  # then fill in values"
+    exit 1
+  fi
 
-  # Login, build, push
-  aws ecr get-login-password --region "$AWS_REGION" | \
+  echo "==> Resolving AWS identity..."
+  local region ecr_repo account_id
+  account_id=$(aws sts get-caller-identity --query Account --output text) \
+    || { echo "ERROR: aws sts get-caller-identity failed — is your AWS profile active?"; exit 1; }
+  region=$(aws configure get region 2>/dev/null || true)
+  [[ -z "$region" ]] && region=$(_tfvar region "$tf_dir")
+  [[ -z "$region" ]] && region="us-east-1"
+  ecr_repo=$(_tfvar ecr_repository_name "$tf_dir")
+  [[ -z "$ecr_repo" ]] && ecr_repo="pdf-autofiller-mapper-${ENV}"
+
+  local registry="${account_id}.dkr.ecr.${region}.amazonaws.com"
+  local image_uri="${registry}/${ecr_repo}:${IMAGE_TAG}"
+  local lambda_name
+  lambda_name="$(_tfvar project "$tf_dir")-${ENV}"
+
+  echo "==> Account: ${account_id} | Region: ${region} | ECR: ${ecr_repo}"
+
+  aws ecr get-login-password --region "$region" | \
     docker login --username AWS --password-stdin "$registry"
+
+  local latest_uri="${registry}/${ecr_repo}:latest"
 
   build_image "$image_uri"
   docker push "$image_uri"
+  docker tag "$image_uri" "$latest_uri"
+  docker push "$latest_uri"
 
-  # Terraform apply
-  cd "$MODULE_DIR/deploy/terraform/aws"
-  terraform init -reconfigure
-  terraform apply \
-    -var="env=$ENV" \
-    -var="region=$AWS_REGION" \
-    -var="image_uri=$image_uri" \
-    -var="llm_model=${LLM_MODEL:-gpt-4o}" \
-    -var="rag_api_url=${RAG_API_URL:-}" \
-    -auto-approve
+  if $UPDATE; then
+    echo "==> --update: skipping terraform, updating Lambda image directly"
+    aws lambda update-function-code \
+      --function-name "$lambda_name" \
+      --image-uri     "$latest_uri" \
+      --region        "$region" \
+      --output text --query 'FunctionArn'
+    echo "==> Waiting for update to complete..."
+    aws lambda wait function-updated \
+      --function-name "$lambda_name" \
+      --region        "$region"
+  else
+    cd "$tf_dir"
+    terraform init -reconfigure
+    terraform apply -auto-approve
+    echo ""
+    terraform output function_url
+  fi
 
-  echo "==> AWS deploy complete"
-  terraform output api_url
+  echo "==> AWS [${ENV}] deploy complete"
 }
 
 # ── Azure ─────────────────────────────────────────────────────────────────────
+
 deploy_azure() {
-  : "${AZURE_REGISTRY:?AZURE_REGISTRY required (e.g. myregistry.azurecr.io)}"
-
-  local image_uri="${AZURE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-
+  : "${AZURE_REGISTRY:?--cloud azure requires AZURE_REGISTRY env var}"
+  local image_uri="${AZURE_REGISTRY}/pdf-autofillr-mapper:${IMAGE_TAG}"
   az acr login --name "${AZURE_REGISTRY%%.*}"
   build_image "$image_uri"
   docker push "$image_uri"
-
   cd "$MODULE_DIR/deploy/terraform/azure"
   terraform init -reconfigure
-  terraform apply \
-    -var="env=$ENV" \
-    -var="image_uri=$image_uri" \
-    -var="llm_model=${LLM_MODEL:-gpt-4o}" \
-    -var="rag_api_url=${RAG_API_URL:-}" \
-    -auto-approve
-
-  echo "==> Azure deploy complete"
+  terraform apply -var="env=$ENV" -auto-approve
   terraform output app_url
+  echo "==> Azure [${ENV}] deploy complete"
 }
 
 # ── GCP ───────────────────────────────────────────────────────────────────────
+
 deploy_gcp() {
-  : "${GCP_PROJECT_ID:?GCP_PROJECT_ID required}"
-  GCP_REGION=${GCP_REGION:-us-central1}
-
-  local registry="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/mapper"
-  local image_uri="${registry}/${IMAGE_NAME}:${IMAGE_TAG}"
-
-  gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+  : "${GCP_PROJECT_ID:?--cloud gcp requires GCP_PROJECT_ID env var}"
+  local region="${GCP_REGION:-us-central1}"
+  local registry="${region}-docker.pkg.dev/${GCP_PROJECT_ID}/mapper"
+  local image_uri="${registry}/pdf-autofillr-mapper:${IMAGE_TAG}"
+  gcloud auth configure-docker "${region}-docker.pkg.dev" --quiet
   build_image "$image_uri"
   docker push "$image_uri"
-
   cd "$MODULE_DIR/deploy/terraform/gcp"
   terraform init -reconfigure
-  terraform apply \
-    -var="env=$ENV" \
-    -var="project_id=$GCP_PROJECT_ID" \
-    -var="region=$GCP_REGION" \
-    -var="image_uri=$image_uri" \
-    -var="llm_model=${LLM_MODEL:-gpt-4o}" \
-    -var="rag_api_url=${RAG_API_URL:-}" \
-    -auto-approve
-
-  echo "==> GCP deploy complete"
+  terraform apply -var="env=$ENV" -var="project_id=$GCP_PROJECT_ID" -var="region=$region" -auto-approve
   terraform output service_url
+  echo "==> GCP [${ENV}] deploy complete"
 }
 
-# ── Local (docker compose) ────────────────────────────────────────────────────
+# ── Local ─────────────────────────────────────────────────────────────────────
+
 deploy_local() {
-  echo "==> Starting local docker compose"
   docker compose -f "$MODULE_DIR/docker/docker-compose.yml" up --build -d
   echo "==> Running at http://localhost:8000"
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
-case "$CLOUD_PROVIDER" in
+
+case "$CLOUD" in
   aws)   deploy_aws   ;;
   azure) deploy_azure ;;
   gcp)   deploy_gcp   ;;
   local) deploy_local ;;
-  *)     echo "Unknown CLOUD_PROVIDER: $CLOUD_PROVIDER (use aws|azure|gcp|local)"; exit 1 ;;
+  *) echo "Unknown --cloud: $CLOUD (aws|azure|gcp|local)"; exit 1 ;;
 esac
