@@ -41,27 +41,18 @@ Things missing on `dev` (experiment-001) that need to be added.
 
 ### Bring from `main`
 
-- [ ] Bring full `benchmarks/` structure: `git checkout main -- benchmarks/`
-  - Currently `dev` only has `benchmarks/README.md`
-  - `main` has full 6-domain structure (financial, government, hr, insurance, legal, medical) with datasets, metrics, models, tasks
-- [ ] Bring `.github/workflows/`: `git checkout main -- .github/`
-  - `dev` has zero CI/CD workflows — `main` has 3
-  - After bringing over, update trigger branches in each workflow to include `dev`
+- [x] Brought full `benchmarks/` structure (6 domains: financial, government, hr, insurance, legal, medical)
+- [x] Brought `.github/workflows/` — updated triggers for `dev`/`prod`, fixed paths, renamed `publish-sdk.yml` → `publish-pypi.yml` with tag-based routing for all 3 packages
 
-### Clean up personal/internal files (don't commit these)
+### Clean up personal/internal files
 
-- [ ] Add to `.gitignore` and remove from tracking:
-  - `z_useful_cmds.sh`
-  - `prod_file_dir_structure.txt`
-  - `REFACTORING_SUMMARY.md`
-  - `TERRAFORM_COMPLETE_IaC_PLAN.md`
-  - `CLAUDE.md`
+- [x] Added to `.gitignore`: `CLAUDE.md`, `z_useful_cmds.sh`, `prod_file_dir_structure.txt`, `REFACTORING_SUMMARY.md`, `TERRAFORM_COMPLETE_IaC_PLAN.md`
 
 ### Structural
 
-- [ ] Consolidate `sdks/python/` — confirm it is the authoritative Python SDK location
-- [ ] Add `BRANCHING.md` and `TODO.md` (this file) to the `dev` commit
-- [ ] Add `GETTING_STARTED.md`, `ARCHITECTURE.md`, `COMMANDS.md` — check if they are up to date with the new module structure
+- [x] `sdks/python/pyproject.toml` created — authoritative build config
+- [x] `BRANCHING.md` and `TODO.md` committed to `dev`
+- [ ] Review `GETTING_STARTED.md`, `ARCHITECTURE.md`, `COMMANDS.md` — update to reflect new module structure (5 modules, new paths)
 
 ---
 
