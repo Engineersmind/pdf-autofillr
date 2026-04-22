@@ -1,40 +1,60 @@
 # Never commit terraform.tfvars to git — this file is the safe example.
+# See terraform.tfvars.example for the template.
 #
 # Setup:
 #   cp terraform.tfvars.example terraform.tfvars
-#   # Fill in your values, then run import.sh before first apply.
+#   # Fill in all values marked "fill in", then:
+#   cd modules/mapper/deploy/terraform/aws-dev
+#   terraform init && ./import.sh && terraform plan && terraform apply
 
 # ── Identity ──────────────────────────────────────────────────────────────────
 project = "pdf-autofiller-mapper"
 env     = "dev"
 region  = "us-east-1"
 
-# ── ECR override (repo was created manually with a non-standard name) ─────────
+# ── ECR (manually created with a non-standard name) ───────────────────────────
 ecr_repository_name = "pdf-autofiller-mapper-lambda-dev"
 
-# ── Storage (same buckets as prod — env routing handled by MAPPER_ENV) ────────
+# ── Storage (same buckets as prod — MAPPER_ENV routes to dev subfolder) ───────
 s3_bucket                = "pdf-fillr-production"
 rag_bucket               = "rag-bucket-pdf-filler"
 uploads_bucket           = "pdf-autofiller-dev"
 global_input_json_s3_uri = "s3://pdf-fillr-production/config/form_keys_flat.json"
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
-llm_model            = "gpt-4o"
-default_llm_provider = "openai"
-openai_api_key       = "sk-..."
-anthropic_api_key    = ""
+llm_model            = "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+default_llm_provider = "bedrock"
+openai_api_key       = "sk-..."          # fill in
+anthropic_api_key    = "sk-ant-..."      # fill in (optional)
+llm_temperature      = 0.0
+llm_max_tokens       = 20000
+llm_timeout          = 120
+llm_max_retries      = 3
+
+# ── Headers extraction LLM ────────────────────────────────────────────────────
+headers_llm_provider    = "openai"
+headers_openai_model_id = "gpt-4.1"
+headers_chunk_size      = 5
+headers_temperature     = 0.0
+headers_max_tokens      = 32000
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-mapper_api_token  = "your-dev-secret-token"
-auth_api_base_url = "https://dev-autofiller-backend.engineersmind.dev"
-auth_email        = "user@example.com"
-auth_password     = "your-password"
+mapper_api_token     = "your-dev-secret-token"               # fill in
+auth_api_base_url    = "https://dev-autofiller-backend.engineersmind.dev"
+auth_email           = "user@example.com"                    # fill in
+auth_password        = "your-password"                       # fill in
+auth_timeout_seconds = 30
 
-# ── RAG API (dev Lambda URL) ──────────────────────────────────────────────────
-rag_api_url = "https://<dev-rag-id>.lambda-url.us-east-1.on.aws/"
-rag_api_key = "your-dev-rag-api-key"
+# ── RAG API ───────────────────────────────────────────────────────────────────
+rag_api_url = "https://<dev-rag-id>.lambda-url.us-east-1.on.aws/"   # fill in
+rag_api_key = "your-dev-rag-x-api-key"                              # fill in
 
-# ── Lambda sizing (lighter than prod) ────────────────────────────────────────
+# ── Notifications ─────────────────────────────────────────────────────────────
+notifications_enabled     = false
+notifications_backend_url = ""
+notifications_api_key     = ""
+
+# ── Lambda sizing ─────────────────────────────────────────────────────────────
 lambda_memory_mb   = 2048
 lambda_timeout_sec = 900
 log_level          = "DEBUG"
