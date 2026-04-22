@@ -11,7 +11,7 @@
 - [x] Added `archives/`, `*.postman_environment.json`, `*.postman_collection.json` to `.gitignore`
 - [x] Added internal files to `.gitignore`: `CLAUDE.md`, `z_useful_cmds.sh`, `prod_file_dir_structure.txt`, `REFACTORING_SUMMARY.md`, `TERRAFORM_COMPLETE_IaC_PLAN.md`
 - [x] Confirmed `terraform.tfvars` is not tracked (only `.example` is)
-- [ ] Scan for any other accidental secrets: `git grep -i "password\|api_key\|secret" -- "*.json" "*.yaml" "*.env"`
+- [x] Scan for any other accidental secrets: `git grep -i "password\|api_key\|secret" -- "*.json" "*.yaml" "*.env"` — only env var name references found (no values)
 
 ---
 
