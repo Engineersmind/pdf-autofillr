@@ -186,7 +186,7 @@ def create_header_file(
         "session_id": session_id,
         "pdf_id": str(pdf_doc_id),
         "pdf_hash": pdf_hash,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "fields": header_file_fields
     }
     
@@ -328,7 +328,7 @@ def create_section_file(
         "user_id": str(user_id),
         "session_id": session_id,
         "pdf_id": str(pdf_doc_id),
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "sections": sections
     }
     
