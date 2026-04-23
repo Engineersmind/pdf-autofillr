@@ -36,10 +36,19 @@ echo "==> Cloud: $CLOUD | Env: $ENV | Tag: $IMAGE_TAG | Update-only: $UPDATE"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-build_image() {
-  local uri="$1"
-  echo "==> Building: $uri"
-  docker build -f "$MODULE_DIR/docker/Dockerfile" --tag "$uri" "$MODULE_DIR"
+build_and_push() {
+  # Builds for linux/amd64 and pushes with Docker v2.2 manifest format (required by Lambda).
+  # Uses BuildKit but disables OCI mediatypes so Lambda accepts the image.
+  local image_uri="$1" latest_uri="$2"
+  echo "==> Building and pushing: $image_uri"
+  docker buildx build \
+    --platform linux/amd64 \
+    --provenance=false \
+    --output "type=image,push=true,oci-mediatypes=false,compression=gzip" \
+    -f "$MODULE_DIR/docker/Dockerfile" \
+    --tag "$image_uri" \
+    --tag "$latest_uri" \
+    "$MODULE_DIR"
 }
 
 _tfvar() {
@@ -84,10 +93,7 @@ deploy_aws() {
 
   local latest_uri="${registry}/${ecr_repo}:latest"
 
-  build_image "$image_uri"
-  docker push "$image_uri"
-  docker tag "$image_uri" "$latest_uri"
-  docker push "$latest_uri"
+  build_and_push "$image_uri" "$latest_uri"
 
   if $UPDATE; then
     echo "==> --update: skipping terraform, updating Lambda image directly"
@@ -117,8 +123,7 @@ deploy_azure() {
   : "${AZURE_REGISTRY:?--cloud azure requires AZURE_REGISTRY env var}"
   local image_uri="${AZURE_REGISTRY}/pdf-autofillr-mapper:${IMAGE_TAG}"
   az acr login --name "${AZURE_REGISTRY%%.*}"
-  build_image "$image_uri"
-  docker push "$image_uri"
+  build_and_push "$image_uri" "$image_uri"
   cd "$MODULE_DIR/deploy/terraform/azure"
   terraform init -reconfigure
   terraform apply -var="env=$ENV" -auto-approve
@@ -134,8 +139,7 @@ deploy_gcp() {
   local registry="${region}-docker.pkg.dev/${GCP_PROJECT_ID}/mapper"
   local image_uri="${registry}/pdf-autofillr-mapper:${IMAGE_TAG}"
   gcloud auth configure-docker "${region}-docker.pkg.dev" --quiet
-  build_image "$image_uri"
-  docker push "$image_uri"
+  build_and_push "$image_uri" "$image_uri"
   cd "$MODULE_DIR/deploy/terraform/gcp"
   terraform init -reconfigure
   terraform apply -var="env=$ENV" -var="project_id=$GCP_PROJECT_ID" -var="region=$region" -auto-approve

@@ -1652,6 +1652,9 @@ async def _handle_cache_phase(
                         if cached_final_fields_from_registry and not cached_final_fields_from_registry.startswith('/tmp'):
                             cache_phase_result['dest_final_form_fields'] = cached_final_fields_from_registry
 
+                # Read pdf_category from cache registry (it was saved there when headers were first extracted)
+                cache_phase_result['pdf_category'] = cache_result.get('pdf_category')
+
                 # Track cached headers in pipeline results with S3 paths
                 pipeline_results["headers"] = {
                     "headers_with_fields": cache_phase_result.get('dest_headers_with_fields') or headers_with_fields_path,
@@ -2564,7 +2567,7 @@ async def handle_make_embed_file_operation(
             "mapping_path":         saved_java_mapping or mapping_json,
             "radio_groups_path":    dest_radio_groups  or radio_groups,
             "semantic_mapping_path":dest_semantic_mapping or semantic_mapping_path,
-            "combined_mapping_path": combined_mapping_path if use_second_mapper and not rag_api_failed else None,
+            "combined_mapping_path": saved_final_predictions if use_second_mapper and not rag_api_failed else None,
             "pdf_category": pdf_category if use_second_mapper else None,
             "use_second_mapper": use_second_mapper,
             "rag_api_failed": rag_api_failed if use_second_mapper else None,
