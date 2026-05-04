@@ -1,0 +1,123 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Branch naming ─────────────────────────────────────────────────────────────
+  branch-naming:
+    name: Branch naming
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch name
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          PATTERN="^(feature|bug|task|hotfix|refactor)/[a-z][a-z0-9-]+/[A-Z]+-[0-9]+"
+          PROTECTED="^(dev|main|prod|staging)$"
+          DEPENDABOT="^dependabot/"
+
+          if [[ "$BRANCH" =~ $PROTECTED || "$BRANCH" =~ $DEPENDABOT ]]; then
+            echo "✅ Protected/dependabot branch — skipping name check"
+            exit 0
+          fi
+
+          if [[ "$BRANCH" =~ $PATTERN ]]; then
+            echo "✅ Branch name valid: $BRANCH"
+          else
+            echo "❌ Branch name invalid: $BRANCH"
+            echo ""
+            echo "Required format: {type}/{author-slug}/PDFAUTO-NNN-optional-description"
+            echo "  type:   feature | bug | task | hotfix | refactor"
+            echo "  author: lowercase slug (e.g. em-raghavamahanthi)"
+            echo "  ticket: uppercase prefix + number (e.g. PDFAUTO-206)"
+            echo ""
+            echo "Examples:"
+            echo "  feature/em-raghavamahanthi/PDFAUTO-206-rag-integration"
+            echo "  bug/shreyash/PDFAUTO-312-cache-null-category"
+            echo "  task/em-raghavamahanthi/PDFAUTO-073-add-pr-checks"
+            exit 1
+          fi
+
+  # ── Commit messages ───────────────────────────────────────────────────────────
+  commit-messages:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    # Skip dependabot — it uses its own commit format
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate commit messages
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          # Conventional commit with optional scope + ticket reference
+          # type(scope): TICKET-NNN description
+          # type: TICKET-NNN description
+          PATTERN="^(feat|fix|refactor|test|docs|chore|ci|build|perf|style|hotfix)(\([a-z-]+\))?: [A-Z]+-[0-9]+"
+          EXEMPT="^(Merge |Revert )"
+
+          FAILED=0
+          while IFS= read -r MSG; do
+            if [[ "$MSG" =~ $EXEMPT ]]; then
+              echo "⏭  Skipped (merge/revert): $MSG"
+              continue
+            fi
+            if [[ "$MSG" =~ $PATTERN ]]; then
+              echo "✅ $MSG"
+            else
+              echo "❌ $MSG"
+              FAILED=1
+            fi
+          done < <(git log "$BASE..$HEAD" --pretty=format:"%s")
+
+          if [[ $FAILED -eq 1 ]]; then
+            echo ""
+            echo "Required format: type(scope): TICKET-NNN short description"
+            echo "  type:   feat | fix | refactor | test | docs | chore | ci | build | perf | style"
+            echo "  scope:  optional lowercase module (e.g. mapper, rag, api)"
+            echo "  ticket: uppercase prefix + number (e.g. PDFAUTO-206)"
+            echo ""
+            echo "Examples:"
+            echo "  feat(mapper): PDFAUTO-206 add RAG predictions to response"
+            echo "  fix(mapper): PDFAUTO-312 pdf_category null on cache hit"
+            echo "  chore(ci): PDFAUTO-073 add pr-checks workflow"
+            exit 1
+          fi
+
+  # ── Lint (mapper) ─────────────────────────────────────────────────────────────
+  lint-mapper:
+    name: Lint — mapper
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/mapper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: modules/mapper/requirements*.txt
+
+      - name: Install dev dependencies
+        run: pip install black flake8 mypy
+
+      - name: black (format check)
+        run: black --check src/ --diff
+
+      - name: flake8
+        run: flake8 src/ --max-line-length=120 --extend-ignore=E203,W503
+
+      - name: mypy
+        run: mypy src/ --ignore-missing-imports --no-error-summary
+        continue-on-error: true  # non-blocking until type coverage improves
