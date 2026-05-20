@@ -1,7 +1,7 @@
 # PDF Autofillr
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://github.com/EngineersMind/pdf-autofillr/actions/workflows/mapper-tests.yml/badge.svg)](https://github.com/EngineersMind/pdf-autofillr/actions/workflows/mapper-tests.yml)
+[![Mapper Tests](https://github.com/EngineersMind/pdf-autofillr/actions/workflows/mapper-tests.yml/badge.svg?event=pull_request)](https://github.com/EngineersMind/pdf-autofillr/actions/workflows/mapper-tests.yml)
 [![Platform](https://img.shields.io/badge/platform-pdffillr.ai-blue)](https://pdffillr.ai)
 
 > **Live platform:** [pdffillr.ai](https://pdffillr.ai) — fill PDF forms in your browser with no setup.
