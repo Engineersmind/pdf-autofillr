@@ -1,5 +1,11 @@
 # PDF Autofillr
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Mapper Tests](https://github.com/EngineersMind/pdf-autofillr/actions/workflows/mapper-tests.yml/badge.svg?event=pull_request)](https://github.com/EngineersMind/pdf-autofillr/actions/workflows/mapper-tests.yml)
+[![Platform](https://img.shields.io/badge/platform-pdffillr.ai-blue)](https://pdffillr.ai)
+
+> **Live platform:** [pdffillr.ai](https://pdffillr.ai) — fill PDF forms in your browser with no setup.
+
 AI-powered PDF form filling system. Extracts fields from PDF forms, maps them to your data schema using an LLM, and fills them automatically.
 
 ---
@@ -223,6 +229,16 @@ venv/bin/python -m pytest tests/ -q
 | Module guides | [`docs/guides/`](docs/guides/) |
 | OpenAPI specs | [`sdks/`](sdks/) |
 | Benchmarks | [`benchmarks/README.md`](benchmarks/README.md) |
+
+---
+
+## Contributing
+
+Contributions are welcome! Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+
+- Report bugs via [GitHub Issues](https://github.com/EngineersMind/pdf-autofillr/issues)
+- See [good first issues](https://github.com/EngineersMind/pdf-autofillr/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for beginner-friendly tasks
+- Review our [Code of Conduct](CODE_OF_CONDUCT.md) and [Security Policy](SECURITY.md)
 
 ---
 
